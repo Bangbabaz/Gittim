@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(
   defineProps<{
+    paneId: string
     options?: Record<string, unknown>
     cwd?: string
   }>(),
@@ -14,6 +15,12 @@ const props = withDefaults(
     cwd: ''
   }
 )
+
+const emit = defineEmits<{
+  (e: 'focus', paneId: string): void
+  (e: 'split', paneId: string, direction: 'row' | 'column'): void
+  (e: 'close', paneId: string): void
+}>()
 
 const terminalRef = ref<HTMLDivElement>()
 const contextMenuVisible = ref(false)
@@ -24,8 +31,6 @@ const terminal = new Terminal({
   fontSize: 14,
   fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
   cursorBlink: true,
-  // Treat unbroken sequences of non-whitespace as word boundaries when selecting
-  // and don't include trailing padding in selection.
   rightClickSelectsWord: false,
   allowProposedApi: true,
   theme: {
@@ -83,12 +88,9 @@ const getCleanSelection = (): string => {
     const xStart = y === startY ? sel.start.x - 1 : 0
     const xEnd = y === endY ? sel.end.x - 1 : undefined
 
-    // Is the current row mid-wrap (continues into next)?
     const next = buf.getLine(y + 1)
     const continuesToNext = !!(next && next.isWrapped)
 
-    // translateToString(trimRight=true) clamps endCol to the trimmed line length,
-    // which strips trailing padding spaces. Don't trim mid-wrap rows.
     const text = line.translateToString(!continuesToNext, xStart, xEnd)
     out.push(text)
     if (!continuesToNext && y < endY) out.push('\n')
@@ -111,17 +113,36 @@ const copySelection = async (): Promise<void> => {
 const pasteFromClipboard = async (): Promise<void> => {
   try {
     const text = await navigator.clipboard.readText()
-    if (text) window.api.ptyWrite(text)
+    if (text) window.api.ptyWrite(props.paneId, text)
   } catch {
     // clipboard read denied or empty
   }
 }
 
-// Intercept clipboard shortcuts BEFORE xterm processes them.
-// Return false to suppress xterm's default handling.
+// Intercept hotkeys BEFORE xterm processes them. Return false to suppress
+// xterm's default handling. Also call preventDefault() on shortcuts that the
+// browser/Electron might otherwise grab (Ctrl+D bookmark, etc).
 terminal.attachCustomKeyEventHandler((e): boolean => {
   if (e.type !== 'keydown') return true
 
+  // Ctrl+Shift+D → split right
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'D' || e.key === 'd')) {
+    e.preventDefault()
+    emit('split', props.paneId, 'row')
+    return false
+  }
+  // Ctrl+Shift+S → split down
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'S' || e.key === 's')) {
+    e.preventDefault()
+    emit('split', props.paneId, 'column')
+    return false
+  }
+  // Ctrl+Shift+W → close current pane
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'W' || e.key === 'w')) {
+    e.preventDefault()
+    emit('close', props.paneId)
+    return false
+  }
   // Ctrl+Shift+C → always copy
   if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
     copySelection()
@@ -150,7 +171,7 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
 
 // All other input → forward to PTY
 terminal.onData((data) => {
-  window.api.ptyWrite(data)
+  window.api.ptyWrite(props.paneId, data)
 })
 
 const onContextMenu = (e: MouseEvent): void => {
@@ -176,17 +197,31 @@ const closeContextMenu = (): void => {
   contextMenuVisible.value = false
 }
 
+const onTerminalFocus = (): void => {
+  emit('focus', props.paneId)
+}
+
 defineExpose({ terminal, fitAddon })
 
 let unsubscribeData: (() => void) | null = null
 let unsubscribeExit: (() => void) | null = null
+let resizeObserver: ResizeObserver | null = null
+let lastCols = 0
+let lastRows = 0
 
 const sendResize = (): void => {
-  fitAddon.fit()
+  try {
+    fitAddon.fit()
+  } catch {
+    // fit can throw if the element is detached / zero-sized — ignore
+    return
+  }
   const cols = terminal.cols
   const rows = terminal.rows
-  if (cols > 0 && rows > 0) {
-    window.api.ptyResize(cols, rows)
+  if (cols > 0 && rows > 0 && (cols !== lastCols || rows !== lastRows)) {
+    lastCols = cols
+    lastRows = rows
+    window.api.ptyResize(props.paneId, cols, rows)
   }
 }
 
@@ -194,32 +229,43 @@ onMounted(async () => {
   if (!terminalRef.value) return
 
   terminal.open(terminalRef.value)
-  fitAddon.fit()
+  try {
+    fitAddon.fit()
+  } catch {
+    // ignore — first layout may not be ready
+  }
+  lastCols = terminal.cols
+  lastRows = terminal.rows
   terminal.element?.addEventListener('contextmenu', onContextMenu)
+  terminal.textarea?.addEventListener('focus', onTerminalFocus)
 
-  unsubscribeData = window.api.onPtyData((chunk) => terminal.write(chunk))
-  unsubscribeExit = window.api.onPtyExit((code) => {
+  unsubscribeData = window.api.onPtyData(props.paneId, (chunk) => terminal.write(chunk))
+  unsubscribeExit = window.api.onPtyExit(props.paneId, (code) => {
     terminal.writeln(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m`)
   })
 
   await window.api.ptyStart({
+    paneId: props.paneId,
     cols: terminal.cols,
     rows: terminal.rows,
     cwd: props.cwd || undefined
   })
 
+  // Watch the container — splits/window resizes/drags all change its size.
+  resizeObserver = new ResizeObserver(() => sendResize())
+  resizeObserver.observe(terminalRef.value)
+
   terminal.focus()
 })
 
-const handleResize = (): void => sendResize()
-window.addEventListener('resize', handleResize)
 document.addEventListener('click', closeContextMenu)
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
   document.removeEventListener('click', closeContextMenu)
+  resizeObserver?.disconnect()
   unsubscribeData?.()
   unsubscribeExit?.()
+  window.api.ptyKill(props.paneId)
   terminal.dispose()
 })
 </script>
@@ -250,8 +296,8 @@ onUnmounted(() => {
 <style scoped>
 .terminal-wrapper {
   width: 100%;
-  height: 100vh;
-  padding: 8px;
+  height: 100%;
+  padding: 4px;
   background-color: #1b1b1f;
   box-sizing: border-box;
 }

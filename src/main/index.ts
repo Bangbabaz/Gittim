@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { startPty, writePty, resizePty, getCurrentDir } from './shell'
+import { startPty, writePty, resizePty, killPty, getCurrentDir } from './shell'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -60,17 +60,24 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'pty-start',
-    (event, opts: { cols?: number; rows?: number; cwd?: string }) => {
-      startPty(event.sender, opts ?? {})
+    (
+      event,
+      opts: { paneId: string; cols?: number; rows?: number; cwd?: string }
+    ) => {
+      startPty(event.sender, opts)
     }
   )
 
-  ipcMain.on('pty-write', (event, data: string) => {
-    writePty(event.sender.id, data)
+  ipcMain.on('pty-write', (_event, paneId: string, data: string) => {
+    writePty(paneId, data)
   })
 
-  ipcMain.on('pty-resize', (event, cols: number, rows: number) => {
-    resizePty(event.sender.id, cols, rows)
+  ipcMain.on('pty-resize', (_event, paneId: string, cols: number, rows: number) => {
+    resizePty(paneId, cols, rows)
+  })
+
+  ipcMain.on('pty-kill', (_event, paneId: string) => {
+    killPty(paneId)
   })
 
   createWindow()

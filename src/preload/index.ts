@@ -4,20 +4,31 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
-  ptyStart: (opts: { cols?: number; rows?: number; cwd?: string }) =>
+  ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
-  ptyWrite: (data: string) => ipcRenderer.send('pty-write', data),
-  ptyResize: (cols: number, rows: number) =>
-    ipcRenderer.send('pty-resize', cols, rows),
-  onPtyData: (cb: (data: string) => void) => {
-    const listener = (_event: IpcRendererEvent, data: string) => cb(data)
+  ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
+  ptyResize: (paneId: string, cols: number, rows: number) =>
+    ipcRenderer.send('pty-resize', paneId, cols, rows),
+  ptyKill: (paneId: string) => ipcRenderer.send('pty-kill', paneId),
+  onPtyData: (paneId: string, cb: (data: string) => void) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      payload: { paneId: string; data: string }
+    ): void => {
+      if (payload && payload.paneId === paneId) cb(payload.data)
+    }
     ipcRenderer.on('pty-data', listener)
     return () => {
       ipcRenderer.removeListener('pty-data', listener)
     }
   },
-  onPtyExit: (cb: (exitCode: number) => void) => {
-    const listener = (_event: IpcRendererEvent, exitCode: number) => cb(exitCode)
+  onPtyExit: (paneId: string, cb: (exitCode: number) => void) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      payload: { paneId: string; exitCode: number }
+    ): void => {
+      if (payload && payload.paneId === paneId) cb(payload.exitCode)
+    }
     ipcRenderer.on('pty-exit', listener)
     return () => {
       ipcRenderer.removeListener('pty-exit', listener)
