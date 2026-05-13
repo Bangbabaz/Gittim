@@ -121,7 +121,13 @@ const collect = (
     const usable = Math.max(0, rect.width - DIVIDER)
     const aW = Math.max(0, Math.floor(usable * node.ratio))
     const bW = Math.max(0, usable - aW)
-    collect(node.a, { left: rect.left, top: rect.top, width: aW, height: rect.height }, panes, dividers, [...path, 'a'])
+    collect(
+      node.a,
+      { left: rect.left, top: rect.top, width: aW, height: rect.height },
+      panes,
+      dividers,
+      [...path, 'a']
+    )
     dividers.push({
       rect: { left: rect.left + aW, top: rect.top, width: DIVIDER, height: rect.height },
       direction: 'row',
@@ -129,12 +135,24 @@ const collect = (
       ratio: node.ratio,
       totalSize: rect.width
     })
-    collect(node.b, { left: rect.left + aW + DIVIDER, top: rect.top, width: bW, height: rect.height }, panes, dividers, [...path, 'b'])
+    collect(
+      node.b,
+      { left: rect.left + aW + DIVIDER, top: rect.top, width: bW, height: rect.height },
+      panes,
+      dividers,
+      [...path, 'b']
+    )
   } else {
     const usable = Math.max(0, rect.height - DIVIDER)
     const aH = Math.max(0, Math.floor(usable * node.ratio))
     const bH = Math.max(0, usable - aH)
-    collect(node.a, { left: rect.left, top: rect.top, width: rect.width, height: aH }, panes, dividers, [...path, 'a'])
+    collect(
+      node.a,
+      { left: rect.left, top: rect.top, width: rect.width, height: aH },
+      panes,
+      dividers,
+      [...path, 'a']
+    )
     dividers.push({
       rect: { left: rect.left, top: rect.top + aH, width: rect.width, height: DIVIDER },
       direction: 'column',
@@ -142,18 +160,20 @@ const collect = (
       ratio: node.ratio,
       totalSize: rect.height
     })
-    collect(node.b, { left: rect.left, top: rect.top + aH + DIVIDER, width: rect.width, height: bH }, panes, dividers, [...path, 'b'])
+    collect(
+      node.b,
+      { left: rect.left, top: rect.top + aH + DIVIDER, width: rect.width, height: bH },
+      panes,
+      dividers,
+      [...path, 'b']
+    )
   }
 }
 
 const layoutResult = computed(() => {
   const panes: Array<{ id: string; rect: Rect }> = []
   const dividers: Array<DividerItem> = []
-  if (
-    layout.value &&
-    containerSize.value.width > 0 &&
-    containerSize.value.height > 0
-  ) {
+  if (layout.value && containerSize.value.width > 0 && containerSize.value.height > 0) {
     collect(
       layout.value,
       { left: 0, top: 0, width: containerSize.value.width, height: containerSize.value.height },

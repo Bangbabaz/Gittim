@@ -79,10 +79,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'pty-start',
-    (
-      event,
-      opts: { paneId: string; cols?: number; rows?: number; cwd?: string }
-    ) => {
+    (event, opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) => {
       startPty(event.sender, opts)
     }
   )
