@@ -2,8 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { GitBranch } from 'lucide-vue-next'
-import { ElMessage } from 'element-plus'
+import PaneToolbar from './PaneToolbar.vue'
 import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(
@@ -25,62 +24,10 @@ const emit = defineEmits<{
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
+const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
-const gitBranch = ref<string | null>(null)
-const branches = ref<string[]>([])
-const selectedBranch = ref<string | null>(null)
-const loadingBranches = ref(false)
-const isRepo = ref(false)
-
-const fetchGitInfo = async (): Promise<void> => {
-  if (!props.cwd) return
-  try {
-    const info = await window.api.getGitInfo(props.cwd)
-    gitBranch.value = info.branch
-    isRepo.value = info.isRepo
-    selectedBranch.value = info.branch
-  } catch {
-    gitBranch.value = null
-    isRepo.value = false
-    selectedBranch.value = null
-  }
-}
-
-const fetchBranches = async (): Promise<void> => {
-  if (!props.cwd || !isRepo.value) return
-  loadingBranches.value = true
-  try {
-    branches.value = await window.api.getGitBranches(props.cwd)
-  } catch {
-    branches.value = []
-  } finally {
-    loadingBranches.value = false
-  }
-}
-
-const onBranchChange = async (newBranch: string): Promise<void> => {
-  if (!props.cwd) return
-  loadingBranches.value = true
-  try {
-    const result = await window.api.gitCheckout(props.cwd, newBranch)
-    if (result.success) {
-      ElMessage.success(`Switched to branch "${newBranch}"`)
-      selectedBranch.value = newBranch
-      gitBranch.value = newBranch
-      await fetchBranches()
-    } else {
-      ElMessage.error(`Checkout failed: ${result.error || 'Unknown error'}`)
-      selectedBranch.value = gitBranch.value
-    }
-  } catch {
-    ElMessage.error('An unexpected error occurred while switching branches')
-    selectedBranch.value = gitBranch.value
-  } finally {
-    loadingBranches.value = false
-  }
-}
 
 const terminal = new Terminal({
   fontSize: 14,
@@ -254,8 +201,7 @@ const closeContextMenu = (): void => {
 
 const onTerminalFocus = (): void => {
   emit('focus', props.paneId)
-  fetchGitInfo()
-  fetchBranches()
+  toolbarRef.value?.refresh()
 }
 
 defineExpose({ terminal, fitAddon })
@@ -284,9 +230,6 @@ const sendResize = (): void => {
 
 onMounted(async () => {
   if (!terminalRef.value) return
-
-  fetchGitInfo()
-  await fetchBranches()
 
   terminal.open(terminalRef.value)
   try {
@@ -332,24 +275,7 @@ onUnmounted(() => {
 
 <template>
   <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
-    <div v-if="isRepo" class="pane-toolbar" @click.stop>
-      <GitBranch class="git-icon" :size="14" />
-      <el-select
-        v-model="selectedBranch"
-        class="branch-select"
-        size="small"
-        :loading="loadingBranches"
-        placeholder="(detached HEAD)"
-        @change="onBranchChange"
-      >
-        <el-option
-          v-for="b in branches"
-          :key="b"
-          :label="b"
-          :value="b"
-        />
-      </el-select>
-    </div>
+    <PaneToolbar ref="toolbarRef" :cwd="cwd" />
     <div ref="terminalRef" class="terminal-container"></div>
     <Teleport to="body">
       <div
@@ -358,13 +284,7 @@ onUnmounted(() => {
         :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
         @click.stop
       >
-        <div
-          v-if="terminal.hasSelection()"
-          class="context-menu-item"
-          @click="onCopy"
-        >
-          Copy
-        </div>
+        <div v-if="terminal.hasSelection()" class="context-menu-item" @click="onCopy">Copy</div>
         <div class="context-menu-item" @click="onPaste">Paste</div>
       </div>
     </Teleport>
@@ -380,50 +300,6 @@ onUnmounted(() => {
   padding: 0;
   background-color: #1b1b1f;
   box-sizing: border-box;
-}
-
-.pane-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  background: #2d2d30;
-  border-bottom: 1px solid #3e3e42;
-  flex-shrink: 0;
-  user-select: none;
-}
-
-.git-icon {
-  color: #e74856;
-  flex-shrink: 0;
-}
-
-.branch-select {
-  width: auto;
-  min-width: 72px;
-  max-width: 220px;
-  --el-select-input-font-size: 12px;
-}
-
-.branch-select :deep(.el-select__wrapper) {
-  padding: 0 4px;
-  min-height: 22px;
-}
-
-.branch-select :deep(.el-select__selected-item) {
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.branch-select :deep(.el-select__placeholder) {
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.branch-select :deep(.el-select-dropdown__item) {
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .terminal-container {
