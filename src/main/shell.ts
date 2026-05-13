@@ -6,10 +6,20 @@ const isWindows = process.platform === 'win32'
 interface Session {
   pty: IPty
   webContents: WebContents
+  // Cached at creation: reading webContents.id after the wc is destroyed throws.
+  wcId: number
+  paneId: string
   disposed: boolean
 }
 
-const sessions = new Map<number, Session>()
+// One session per pane. Multiple panes can live on a single webContents.
+const sessions = new Map<string, Session>()
+// webContents.id → set of paneIds that belong to it. Used to clean up every
+// pane when the renderer goes away.
+const sessionsByWebContents = new Map<number, Set<string>>()
+// webContents.id we've already wired a 'destroyed' handler on, so we don't
+// stack duplicate handlers when multiple panes spawn on the same renderer.
+const destroyHandlerInstalled = new Set<number>()
 
 function defaultShell(): string {
   if (isWindows) {
@@ -24,10 +34,13 @@ export function getCurrentDir(): string {
 
 export function startPty(
   webContents: WebContents,
-  opts: { cols?: number; rows?: number; cwd?: string } = {}
+  opts: { paneId: string; cols?: number; rows?: number; cwd?: string }
 ): void {
-  const id = webContents.id
-  killPty(id)
+  const { paneId } = opts
+  if (!paneId) throw new Error('startPty requires a paneId')
+
+  // If a stale session exists for this paneId (shouldn't happen, but defensive), kill it.
+  killPty(paneId)
 
   const cols = opts.cols ?? 80
   const rows = opts.rows ?? 24
@@ -42,34 +55,56 @@ export function startPty(
     useConpty: true
   })
 
-  const session: Session = { pty, webContents, disposed: false }
-  sessions.set(id, session)
+  const wcId = webContents.id
+  const session: Session = { pty, webContents, wcId, paneId, disposed: false }
+  sessions.set(paneId, session)
+
+  let set = sessionsByWebContents.get(wcId)
+  if (!set) {
+    set = new Set()
+    sessionsByWebContents.set(wcId, set)
+  }
+  set.add(paneId)
+
+  // Install destroy handler once per webContents — when the renderer dies,
+  // kill every pane that belongs to it.
+  if (!destroyHandlerInstalled.has(wcId)) {
+    destroyHandlerInstalled.add(wcId)
+    webContents.once('destroyed', () => {
+      const ids = sessionsByWebContents.get(wcId)
+      if (ids) {
+        for (const id of Array.from(ids)) killPty(id)
+        sessionsByWebContents.delete(wcId)
+      }
+      destroyHandlerInstalled.delete(wcId)
+    })
+  }
 
   pty.onData((data) => {
     if (!session.disposed && !webContents.isDestroyed()) {
-      webContents.send('pty-data', data)
+      webContents.send('pty-data', { paneId, data })
     }
   })
 
   pty.onExit(({ exitCode }) => {
     if (!session.disposed && !webContents.isDestroyed()) {
-      webContents.send('pty-exit', exitCode)
+      webContents.send('pty-exit', { paneId, exitCode })
     }
-    sessions.delete(id)
+    session.disposed = true
+    sessions.delete(paneId)
+    sessionsByWebContents.get(wcId)?.delete(paneId)
   })
-
-  webContents.once('destroyed', () => killPty(id))
 }
 
-export function writePty(webContentsId: number, data: string): void {
-  const session = sessions.get(webContentsId)
+export function writePty(paneId: string, data: string): void {
+  const session = sessions.get(paneId)
   if (session && !session.disposed) {
     session.pty.write(data)
   }
 }
 
-export function resizePty(webContentsId: number, cols: number, rows: number): void {
-  const session = sessions.get(webContentsId)
+export function resizePty(paneId: string, cols: number, rows: number): void {
+  const session = sessions.get(paneId)
   if (session && !session.disposed) {
     try {
       session.pty.resize(Math.max(1, cols), Math.max(1, rows))
@@ -79,8 +114,8 @@ export function resizePty(webContentsId: number, cols: number, rows: number): vo
   }
 }
 
-export function killPty(webContentsId: number): void {
-  const session = sessions.get(webContentsId)
+export function killPty(paneId: string): void {
+  const session = sessions.get(paneId)
   if (!session) return
   session.disposed = true
   try {
@@ -88,5 +123,6 @@ export function killPty(webContentsId: number): void {
   } catch {
     // ignore
   }
-  sessions.delete(webContentsId)
+  sessions.delete(paneId)
+  sessionsByWebContents.get(session.wcId)?.delete(paneId)
 }

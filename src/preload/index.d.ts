@@ -5,11 +5,17 @@ declare global {
     electron: ElectronAPI
     api: {
       getCwd: () => Promise<string>
-      ptyStart: (opts: { cols?: number; rows?: number; cwd?: string }) => Promise<void>
-      ptyWrite: (data: string) => void
-      ptyResize: (cols: number, rows: number) => void
-      onPtyData: (cb: (data: string) => void) => () => void
-      onPtyExit: (cb: (exitCode: number) => void) => () => void
+      ptyStart: (opts: {
+        paneId: string
+        cols?: number
+        rows?: number
+        cwd?: string
+      }) => Promise<void>
+      ptyWrite: (paneId: string, data: string) => void
+      ptyResize: (paneId: string, cols: number, rows: number) => void
+      ptyKill: (paneId: string) => void
+      onPtyData: (paneId: string, cb: (data: string) => void) => () => void
+      onPtyExit: (paneId: string, cb: (exitCode: number) => void) => () => void
     }
   }
 }
