@@ -6,3 +6,6 @@ out
 *.log*
 
 build
+src/renderer/auto-imports.d.ts
+src/renderer/components.d.ts
+.eslintrc-auto-import.json

@@ -148,3 +148,37 @@ export function getGitInfo(cwd: string): { isRepo: boolean; branch: string | nul
   }
   return { isRepo: false, branch: null }
 }
+
+export function getGitBranches(cwd: string): string[] {
+  try {
+    const output = execSync('git branch', {
+      cwd,
+      encoding: 'utf8',
+      timeout: 5000
+    })
+    return output
+      .split('\n')
+      .map((line) => line.replace(/^\*?\s+/, '').trim())
+      .filter((name) => name.length > 0 && !name.startsWith('('))
+  } catch {
+    return []
+  }
+}
+
+export function checkoutGitBranch(
+  cwd: string,
+  branchName: string
+): { success: boolean; error?: string } {
+  try {
+    execSync(`git checkout "${branchName}"`, {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000
+    })
+    return { success: true }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const clean = message.replace(/^Command failed:[^]*?\n/, '').trim()
+    return { success: false, error: clean || message }
+  }
+}

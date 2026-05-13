@@ -65,3 +65,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+html.dark {
+  --el-bg-color: #1b1b1f;
+  --el-bg-color-overlay: #2d2d30;
+  --el-border-color: #3e3e42;
+  --el-border-color-light: #3e3e42;
+  --el-text-color-primary: #cccccc;
+  --el-text-color-regular: #cccccc;
+  --el-fill-color-blank: #1b1b1f;
+  --el-fill-color-light: #2d2d30;
+  --el-fill-color-lighter: #3e3e42;
+  --el-message-bg-color: #2d2d30;
+  --el-message-border-color: #3e3e42;
+}
