@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { GitBranch } from 'lucide-vue-next'
 import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(
@@ -26,6 +27,17 @@ const terminalRef = ref<HTMLDivElement>()
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
+const gitBranch = ref<string | null>(null)
+
+const fetchGitInfo = async (): Promise<void> => {
+  if (!props.cwd) return
+  try {
+    const info = await window.api.getGitInfo(props.cwd)
+    gitBranch.value = info.branch
+  } catch {
+    gitBranch.value = null
+  }
+}
 
 const terminal = new Terminal({
   fontSize: 14,
@@ -199,6 +211,7 @@ const closeContextMenu = (): void => {
 
 const onTerminalFocus = (): void => {
   emit('focus', props.paneId)
+  fetchGitInfo()
 }
 
 defineExpose({ terminal, fitAddon })
@@ -227,6 +240,8 @@ const sendResize = (): void => {
 
 onMounted(async () => {
   if (!terminalRef.value) return
+
+  fetchGitInfo()
 
   terminal.open(terminalRef.value)
   try {
@@ -272,6 +287,10 @@ onUnmounted(() => {
 
 <template>
   <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
+    <div v-if="gitBranch" class="pane-toolbar">
+      <GitBranch class="git-icon" :size="14" />
+      <span class="git-branch">{{ gitBranch }}</span>
+    </div>
     <div ref="terminalRef" class="terminal-container"></div>
     <Teleport to="body">
       <div
@@ -295,16 +314,43 @@ onUnmounted(() => {
 
 <style scoped>
 .terminal-wrapper {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
-  padding: 4px;
+  padding: 0;
   background-color: #1b1b1f;
   box-sizing: border-box;
 }
 
+.pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  background: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  color: #cccccc;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.git-icon {
+  color: #e74856;
+  flex-shrink: 0;
+}
+
+.git-branch {
+  color: #cccccc;
+}
+
 .terminal-container {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
 }
 </style>
 

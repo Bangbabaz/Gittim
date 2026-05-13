@@ -5,6 +5,7 @@ declare global {
     electron: ElectronAPI
     api: {
       getCwd: () => Promise<string>
+      getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       ptyStart: (opts: {
         paneId: string
         cols?: number
