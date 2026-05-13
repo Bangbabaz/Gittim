@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { startPty, writePty, resizePty, killPty, getCurrentDir } from './shell'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -26,6 +27,10 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  mainWindow.on('closed', () => {
+    killPty(mainWindow.webContents.id)
+  })
+
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -49,8 +54,24 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
+  // IPC handlers
   ipcMain.on('ping', () => console.log('pong'))
+  ipcMain.handle('get-cwd', () => getCurrentDir())
+
+  ipcMain.handle(
+    'pty-start',
+    (event, opts: { cols?: number; rows?: number; cwd?: string }) => {
+      startPty(event.sender, opts ?? {})
+    }
+  )
+
+  ipcMain.on('pty-write', (event, data: string) => {
+    writePty(event.sender.id, data)
+  })
+
+  ipcMain.on('pty-resize', (event, cols: number, rows: number) => {
+    resizePty(event.sender.id, cols, rows)
+  })
 
   createWindow()
 
