@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { startPty, writePty, resizePty, killPty, getCurrentDir } from './shell'
+import { startPty, writePty, resizePty, getCurrentDir } from './shell'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -27,9 +27,9 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow.on('closed', () => {
-    killPty(mainWindow.webContents.id)
-  })
+  // PTY cleanup happens via webContents.once('destroyed') inside startPty —
+  // don't touch mainWindow on 'closed' (the BrowserWindow is already destroyed
+  // and accessing .webContents throws "Object has been destroyed").
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
