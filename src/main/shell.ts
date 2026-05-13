@@ -1,5 +1,6 @@
-import { spawn, IPty } from '@homebridge/node-pty-prebuilt-multiarch'
+import { spawn, IPty } from 'node-pty'
 import { WebContents } from 'electron'
+import { execSync } from 'child_process'
 
 const isWindows = process.platform === 'win32'
 
@@ -125,4 +126,25 @@ export function killPty(paneId: string): void {
   }
   sessions.delete(paneId)
   sessionsByWebContents.get(session.wcId)?.delete(paneId)
+}
+
+export function getGitInfo(cwd: string): { isRepo: boolean; branch: string | null } {
+  try {
+    const inside = execSync('git rev-parse --is-inside-work-tree', {
+      cwd,
+      encoding: 'utf8',
+      timeout: 3000
+    }).trim()
+    if (inside === 'true') {
+      const branch = execSync('git branch --show-current', {
+        cwd,
+        encoding: 'utf8',
+        timeout: 3000
+      }).trim()
+      return { isRepo: true, branch: branch || null }
+    }
+  } catch {
+    // not a git repo, or git not installed
+  }
+  return { isRepo: false, branch: null }
 }

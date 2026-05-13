@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { startPty, writePty, resizePty, killPty, getCurrentDir } from './shell'
+import { startPty, writePty, resizePty, killPty, getCurrentDir, getGitInfo } from './shell'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -57,6 +57,7 @@ app.whenReady().then(() => {
   // IPC handlers
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
+  ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
 
   ipcMain.handle(
     'pty-start',
