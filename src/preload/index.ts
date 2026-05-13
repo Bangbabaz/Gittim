@@ -6,6 +6,13 @@ const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
   getGitInfo: (cwd: string) =>
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
+  getGitBranches: (cwd: string) =>
+    ipcRenderer.invoke('get-git-branches', cwd) as Promise<string[]>,
+  gitCheckout: (cwd: string, branchName: string) =>
+    ipcRenderer.invoke('git-checkout', cwd, branchName) as Promise<{
+      success: boolean
+      error?: string
+    }>,
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),

@@ -1,7 +1,16 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { startPty, writePty, resizePty, killPty, getCurrentDir, getGitInfo } from './shell'
+import {
+  startPty,
+  writePty,
+  resizePty,
+  killPty,
+  getCurrentDir,
+  getGitInfo,
+  getGitBranches,
+  checkoutGitBranch
+} from './shell'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -58,6 +67,15 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
   ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
+  ipcMain.handle('get-git-branches', (_event, cwd: string): string[] => {
+    return getGitBranches(cwd)
+  })
+  ipcMain.handle(
+    'git-checkout',
+    (_event, cwd: string, branchName: string): { success: boolean; error?: string } => {
+      return checkoutGitBranch(cwd, branchName)
+    }
+  )
 
   ipcMain.handle(
     'pty-start',

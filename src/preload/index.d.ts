@@ -6,6 +6,11 @@ declare global {
     api: {
       getCwd: () => Promise<string>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
+      getGitBranches: (cwd: string) => Promise<string[]>
+      gitCheckout: (
+        cwd: string,
+        branchName: string
+      ) => Promise<{ success: boolean; error?: string }>
       ptyStart: (opts: {
         paneId: string
         cols?: number
