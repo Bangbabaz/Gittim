@@ -3,6 +3,7 @@ import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync } from 'fs'
+import { shellIntegration } from './shell-integration'
 
 const execFileP = promisify(execFile)
 
@@ -71,12 +72,16 @@ export function startPty(
   const rows = opts.rows ?? 24
   const cwd = opts.cwd || getCurrentDir()
 
-  const pty = spawn(defaultShell(), [], {
+  // Shell integration injects an OSC 7 cwd-notification hook so PaneToolbar
+  // can follow `cd` commands. Falls back to passthrough for unknown shells.
+  const { shell, args, env } = shellIntegration(defaultShell())
+
+  const pty = spawn(shell, args, {
     name: 'xterm-256color',
     cols,
     rows,
     cwd,
-    env: process.env as { [key: string]: string },
+    env: env as { [key: string]: string },
     ...(isWindows ? { useConpty: true } : {})
   })
 
