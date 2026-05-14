@@ -15,13 +15,17 @@ import {
 } from './shell'
 import icon from '../../resources/icon.png?asset'
 
+let mainWindow: BrowserWindow | null = null
+
 function createWindow(): void {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 900,
     height: 670,
     show: false,
+    title: 'Gittim',
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -29,11 +33,11 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  win.on('ready-to-show', () => {
+    win.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
@@ -45,10 +49,15 @@ function createWindow(): void {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  win.on('maximize', () => win.webContents.send('window-state-changed', true))
+  win.on('unmaximize', () => win.webContents.send('window-state-changed', false))
+
+  mainWindow = win
 }
 
 // This method will be called when Electron has finished
@@ -100,6 +109,14 @@ app.whenReady().then(() => {
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })
+
+  ipcMain.on('win-minimize', () => mainWindow?.minimize())
+  ipcMain.on('win-maximize', () => {
+    if (!mainWindow) return
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
+  })
+  ipcMain.on('win-close', () => mainWindow?.close())
+  ipcMain.handle('win-is-maximized', () => mainWindow?.isMaximized() ?? false)
 
   ipcMain.handle(
     'pty-start',
