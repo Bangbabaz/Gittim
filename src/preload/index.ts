@@ -1,6 +1,18 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+// Mirror of main's SavedLayout — preload is its own bundle and can't import
+// from main, so the shape is duplicated here. Keep in sync with main/settings.ts.
+type SavedLayout =
+  | { type: 'pane'; cwd: string }
+  | {
+      type: 'split'
+      direction: 'row' | 'column'
+      ratio: number
+      a: SavedLayout
+      b: SavedLayout
+    }
+
 // Custom APIs for renderer
 const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
@@ -9,7 +21,7 @@ const api = {
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
   getGitBranches: (cwd: string) =>
     ipcRenderer.invoke('get-git-branches', cwd) as Promise<
-      { name: string; type: 'local' | 'remote' }[]
+      { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
     >,
   getGitDiffStats: (cwd: string) =>
     ipcRenderer.invoke('git-diff-stats', cwd) as Promise<{ added: number; deleted: number }>,
@@ -40,8 +52,10 @@ const api = {
       windowBounds?: { x?: number; y?: number; width: number; height: number }
       windowMaximized?: boolean
       fontSize?: number
+      paneLayout?: SavedLayout
     }>,
-  settingsSet: (patch: { fontSize?: number }) => ipcRenderer.send('settings-set', patch),
+  settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout }) =>
+    ipcRenderer.send('settings-set', patch),
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),

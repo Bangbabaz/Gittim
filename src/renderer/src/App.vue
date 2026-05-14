@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import TerminalView from './components/Terminal.vue'
 
 type Pane = { type: 'pane'; id: string }
@@ -11,6 +11,18 @@ type Split = {
   b: LayoutNode
 }
 type LayoutNode = Pane | Split
+
+// Persisted form of LayoutNode. Pane IDs are session-scoped (regenerated each
+// launch), so the saved form stores cwd directly instead.
+type SavedLayout =
+  | { type: 'pane'; cwd: string }
+  | {
+      type: 'split'
+      direction: 'row' | 'column'
+      ratio: number
+      a: SavedLayout
+      b: SavedLayout
+    }
 
 type Rect = { left: number; top: number; width: number; height: number }
 
@@ -104,6 +116,39 @@ const removePane = (node: LayoutNode, targetId: string): LayoutNode | null => {
 
 const firstLeafId = (node: LayoutNode): string => {
   return node.type === 'pane' ? node.id : firstLeafId(node.a)
+}
+
+const serializeLayout = (node: LayoutNode): SavedLayout => {
+  if (node.type === 'pane') {
+    return { type: 'pane', cwd: paneCwd.value[node.id] || cwd.value || '' }
+  }
+  return {
+    type: 'split',
+    direction: node.direction,
+    ratio: node.ratio,
+    a: serializeLayout(node.a),
+    b: serializeLayout(node.b)
+  }
+}
+
+// Rebuild a LayoutNode tree with fresh pane IDs, populating `paneCwdAcc` so
+// each new pane spawns with its saved cwd. Returns the new root.
+const deserializeLayout = (
+  saved: SavedLayout,
+  paneCwdAcc: Record<string, string>
+): LayoutNode => {
+  if (saved.type === 'pane') {
+    const id = newPaneId()
+    if (saved.cwd) paneCwdAcc[id] = saved.cwd
+    return { type: 'pane', id }
+  }
+  return {
+    type: 'split',
+    direction: saved.direction,
+    ratio: saved.ratio,
+    a: deserializeLayout(saved.a, paneCwdAcc),
+    b: deserializeLayout(saved.b, paneCwdAcc)
+  }
 }
 
 /**
@@ -250,6 +295,14 @@ const setActive = (id: string): void => {
   activeId.value = id
 }
 
+// Terminal.vue emits whenever its shell's cwd changes (OSC 7 / OSC 9;9 /
+// PID-based focus query). Mirror into paneCwd so saved layouts capture the
+// shell's actual current directory, not the launch dir.
+const onCwdChange = (paneId: string, newCwd: string): void => {
+  if (paneCwd.value[paneId] === newCwd) return
+  paneCwd.value = { ...paneCwd.value, [paneId]: newCwd }
+}
+
 const onDividerDown = (e: MouseEvent, idx: number): void => {
   const d = layoutResult.value.dividers[idx]
   if (!d) return
@@ -286,6 +339,25 @@ const rectStyle = (rect: Rect): Record<string, string> => ({
 let resizeObserver: ResizeObserver | null = null
 let unsubscribeWinState: (() => void) | null = null
 
+// Debounced layout persistence. Layout/cwd changes are frequent during normal
+// use (every `cd` emits a cwdChange); 500ms coalesces bursts.
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+const flushSave = (): void => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  if (layout.value) {
+    window.api.settingsSet({ paneLayout: serializeLayout(layout.value) })
+  }
+}
+const scheduleSave = (): void => {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(flushSave, 500)
+}
+
+const flushSaveOnUnload = (): void => flushSave()
+
 onMounted(async () => {
   cwd.value = await window.api.getCwd()
   isMac.value = (await window.api.getPlatform()) === 'darwin'
@@ -294,9 +366,29 @@ onMounted(async () => {
     isMaximized.value = maximized
   })
 
-  const firstId = newPaneId()
-  layout.value = { type: 'pane', id: firstId }
-  activeId.value = firstId
+  // Restore previously saved layout if there is one. Each pane gets a fresh
+  // id; its saved cwd is seeded into paneCwd so the PTY spawns there.
+  // shell.ts validates the dir and falls back to ~ if it's been deleted.
+  const settings = await window.api.settingsGet()
+  if (settings.paneLayout) {
+    const restoredPaneCwd: Record<string, string> = {}
+    const restored = deserializeLayout(settings.paneLayout, restoredPaneCwd)
+    layout.value = restored
+    paneCwd.value = restoredPaneCwd
+    activeId.value = firstLeafId(restored)
+  } else {
+    const firstId = newPaneId()
+    layout.value = { type: 'pane', id: firstId }
+    activeId.value = firstId
+  }
+
+  // Persist on every layout/cwd change. The watch fires after the initial
+  // restore too, which is harmless (writes the same content back).
+  watch([layout, paneCwd], scheduleSave, { deep: true })
+
+  // Save synchronously on window close so the last edit isn't lost. The
+  // electron-side debounce in settings.ts gets flushed by app's before-quit.
+  window.addEventListener('beforeunload', flushSaveOnUnload)
 
   window.addEventListener('mousemove', onDividerMove)
   window.addEventListener('mouseup', onDividerUp)
@@ -314,10 +406,12 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  flushSave()
   unsubscribeWinState?.()
   resizeObserver?.disconnect()
   window.removeEventListener('mousemove', onDividerMove)
   window.removeEventListener('mouseup', onDividerUp)
+  window.removeEventListener('beforeunload', flushSaveOnUnload)
 })
 </script>
 
@@ -362,6 +456,7 @@ onUnmounted(() => {
           @split="onSplit"
           @close="onClose"
           @create-worktree="onCreateWorktree"
+          @cwd-change="onCwdChange"
         />
       </div>
       <div
