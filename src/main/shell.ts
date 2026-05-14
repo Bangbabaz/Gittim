@@ -2,7 +2,7 @@ import { spawn, IPty } from 'node-pty'
 import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readlinkSync } from 'fs'
+import { readlinkSync, statSync } from 'fs'
 import { shellIntegration } from './shell-integration'
 
 const execFileP = promisify(execFile)
@@ -58,6 +58,14 @@ export function getCurrentDir(): string {
   return app.getPath('home')
 }
 
+function isValidDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 export function startPty(
   webContents: WebContents,
   opts: { paneId: string; cols?: number; rows?: number; cwd?: string }
@@ -70,7 +78,10 @@ export function startPty(
 
   const cols = opts.cols ?? 80
   const rows = opts.rows ?? 24
-  const cwd = opts.cwd || getCurrentDir()
+  // Validate the requested cwd. A persisted layout can reference a folder
+  // that's since been deleted — silently fall back to the user's home dir
+  // rather than failing the spawn.
+  const cwd = opts.cwd && isValidDir(opts.cwd) ? opts.cwd : getCurrentDir()
 
   // Shell integration injects an OSC 7 cwd-notification hook so PaneToolbar
   // can follow `cd` commands. Falls back to passthrough for unknown shells.
@@ -213,39 +224,63 @@ export async function getGitInfo(cwd: string): Promise<{ isRepo: boolean; branch
   return { isRepo: false, branch: null }
 }
 
-export async function getGitBranches(
-  cwd: string
-): Promise<{ name: string; type: 'local' | 'remote' }[]> {
-  const branches: { name: string; type: 'local' | 'remote' }[] = []
+export interface BranchInfo {
+  name: string
+  /** Exists as a local branch. */
+  local: boolean
+  /** Exists on the remote (origin). A branch can be both local and remote. */
+  remote: boolean
+  /** True when `git branch` shows `+` — checked out in another linked worktree. */
+  worktree?: boolean
+}
+
+export async function getGitBranches(cwd: string): Promise<BranchInfo[]> {
+  const map = new Map<string, BranchInfo>()
+
   try {
     const { stdout: local } = await execFileP('git', ['branch'], { ...GIT_OPTS, cwd })
-    local
-      .split('\n')
-      .map((line) => line.replace(/^\*?\s+/, '').trim())
-      .filter((name) => name.length > 0 && !name.startsWith('('))
-      .forEach((name) => branches.push({ name, type: 'local' }))
+    // `git branch` lines look like:
+    //   `* master`            current branch
+    //   `+ feature/foo`       checked out in another worktree
+    //   `  develop`           neither
+    // The first column is `*`, `+`, or space; tag `+` as a worktree-linked branch.
+    for (const line of local.split('\n')) {
+      const m = line.match(/^([+*]?)\s*(.+)$/)
+      if (!m) continue
+      const name = m[2].trim()
+      if (!name || name.startsWith('(')) continue
+      map.set(name, { name, local: true, remote: false, worktree: m[1] === '+' })
+    }
   } catch {
     return []
   }
 
   try {
     const { stdout: remote } = await execFileP('git', ['branch', '-r'], { ...GIT_OPTS, cwd })
-    remote
-      .split('\n')
-      .map((line) => line.replace(/^\*?\s+/, '').trim())
-      .filter((name) => name.length > 0 && !name.includes('HEAD'))
-      .forEach((name) => {
-        const short = name.replace(/^origin\//, '')
-        if (!branches.some((b) => b.name === short)) {
-          branches.push({ name: short, type: 'remote' })
-        }
-      })
+    for (const line of remote.split('\n')) {
+      const raw = line.replace(/^\*?\s+/, '').trim()
+      // Skip empty lines and the `origin/HEAD -> origin/master` alias line.
+      if (!raw || raw.includes('HEAD')) continue
+      const short = raw.replace(/^origin\//, '')
+      const existing = map.get(short)
+      if (existing) {
+        // Local branch with the same name — annotate the existing row rather
+        // than producing a duplicate. This is how the user sees that a local
+        // branch is also tracked on the remote.
+        existing.remote = true
+      } else {
+        map.set(short, { name: short, local: false, remote: true })
+      }
+    }
   } catch {
     // no remote, or git not available
   }
 
+  const branches = Array.from(map.values())
+  // Local-containing branches first (most likely target for checkout), then
+  // remote-only. Alphabetical within each group.
   branches.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'local' ? -1 : 1
+    if (a.local !== b.local) return a.local ? -1 : 1
     return a.name.localeCompare(b.name)
   })
   return branches

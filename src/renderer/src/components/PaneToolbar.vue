@@ -13,9 +13,19 @@ const emit = defineEmits<{
 
 const isRepo = ref(false)
 const currentBranch = ref<string | null>(null)
-const branches = ref<{ name: string; type: 'local' | 'remote' }[]>([])
+const branches = ref<
+  { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
+>([])
 const switching = ref(false)
 const diffStats = ref({ added: 0, deleted: 0 })
+
+// Index of the first remote-only entry in `branches`. Used to paint a divider
+// above it in the dropdown. -1 if there are no locals OR no remote-only entries
+// (in either case there's nothing to separate, so no divider).
+const firstRemoteOnlyIdx = computed(() => {
+  if (!branches.value.some((b) => b.local)) return -1
+  return branches.value.findIndex((b) => !b.local)
+})
 
 // Generation counter: every refresh captures the current gen; a later refresh
 // or a checkout bumps the counter so the in-flight one knows to bail before
@@ -72,7 +82,9 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
   }
 
   const branch = branches.value.find((b) => b.name === newBranch)
-  const isRemote = branch?.type === 'remote'
+  // Only `--track origin/<name>` when the branch exists ONLY on the remote.
+  // If a local copy already exists, plain `git checkout <name>` is what we want.
+  const isRemote = !!branch && !branch.local && branch.remote
 
   const prev = currentBranch.value
   switching.value = true
@@ -185,12 +197,19 @@ async function handleCreateWorktree(): Promise<void> {
   }
   const sep = props.cwd.includes('\\') ? '\\' : '/'
   const fullPath = `${wtLocation.value.replace(/\\/g, sep)}${sep}${wtProjectName.value.trim()}`
+  // Remote-only base branches need the `origin/` prefix or `git worktree add`
+  // can't resolve the ref. Local branches are passed as-is.
+  const fromBranchInfo = branches.value.find((b) => b.name === wtFromBranch.value)
+  const fromBranchRef =
+    fromBranchInfo && !fromBranchInfo.local && fromBranchInfo.remote
+      ? `origin/${fromBranchInfo.name}`
+      : wtFromBranch.value || undefined
   wtSubmitting.value = true
   try {
     const result = await window.api.gitWorktreeAdd(props.cwd, {
       path: fullPath,
       newBranch: wtNewBranch.value ? wtNewBranchName.value.trim() || undefined : undefined,
-      fromBranch: wtFromBranch.value || undefined
+      fromBranch: fromBranchRef
     })
     if (result.success) {
       showWorktreeDialog.value = false
@@ -221,10 +240,20 @@ async function handleCreateWorktree(): Promise<void> {
       placeholder="(detached HEAD)"
       @change="onBranchChange"
     >
-      <el-option v-for="b in branches" :key="b.name" :label="b.name" :value="b.name">
+      <el-option
+        v-for="(b, idx) in branches"
+        :key="b.name"
+        :label="b.name"
+        :value="b.name"
+        :class="{ 'first-remote': idx === firstRemoteOnlyIdx }"
+      >
         <span class="br-opt">
-          <span>{{ b.name }}</span>
-          <span class="br-tag" :class="b.type">{{ b.type === 'local' ? '本地' : '远程' }}</span>
+          <span class="br-name">{{ b.name }}</span>
+          <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
+            >工作树</span
+          >
+          <span v-if="b.local" class="br-tag local">本地</span>
+          <span v-if="b.remote" class="br-tag remote">远程</span>
         </span>
       </el-option>
     </el-select>
@@ -245,12 +274,20 @@ async function handleCreateWorktree(): Promise<void> {
             size="small"
             filterable
           >
-            <el-option v-for="b in branches" :key="b.name" :label="b.name" :value="b.name">
+            <el-option
+              v-for="(b, idx) in branches"
+              :key="b.name"
+              :label="b.name"
+              :value="b.name"
+              :class="{ 'first-remote': idx === firstRemoteOnlyIdx }"
+            >
               <span class="br-opt">
-                <span>{{ b.name }}</span>
-                <span class="br-tag" :class="b.type">{{
-                  b.type === 'local' ? '本地' : '远程'
-                }}</span>
+                <span class="br-name">{{ b.name }}</span>
+                <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
+                  >工作树</span
+                >
+                <span v-if="b.local" class="br-tag local">本地</span>
+                <span v-if="b.remote" class="br-tag remote">远程</span>
               </span>
             </el-option>
           </el-select>
@@ -416,18 +453,46 @@ async function handleCreateWorktree(): Promise<void> {
   padding: 4px 0;
 }
 
+/* Widen the dropdown so long branch names + tags fit on one line without
+   wrapping or aggressive truncation. The trigger stays narrow. */
+.branch-select-dropdown.el-popper {
+  min-width: 280px !important;
+}
+
+.branch-select-dropdown .el-select-dropdown__list {
+  padding: 4px 0;
+}
+
 .branch-select-dropdown .el-select-dropdown__item {
   height: auto;
   line-height: 1.4;
-  padding: 4px 20px 4px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Divider between local-containing and remote-only branches. The class is
+   placed on the first remote-only option from PaneToolbar's firstRemoteOnlyIdx. */
+.branch-select-dropdown .el-select-dropdown__item.first-remote {
+  border-top: 1px solid #3e3e42;
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+/* Each option fills its row; name takes the slack, tags pin right. */
 .br-opt {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  width: 100%;
+}
+
+.br-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .br-tag {
@@ -435,6 +500,7 @@ async function handleCreateWorktree(): Promise<void> {
   padding: 0 4px;
   border-radius: 2px;
   line-height: 16px;
+  flex-shrink: 0;
 }
 
 .br-tag.local {
@@ -445,5 +511,10 @@ async function handleCreateWorktree(): Promise<void> {
 .br-tag.remote {
   color: #569cd6;
   background: #569cd622;
+}
+
+.br-tag.worktree {
+  color: #c19c00;
+  background: #c19c0022;
 }
 </style>

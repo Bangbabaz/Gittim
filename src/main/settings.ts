@@ -2,10 +2,26 @@ import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
+/**
+ * Saved layout tree. Mirrors the renderer's LayoutNode but stores cwd (not
+ * pane IDs, which are regenerated on every launch). Restored on startup by
+ * App.vue's deserialize() with fresh IDs.
+ */
+export type SavedLayout =
+  | { type: 'pane'; cwd: string }
+  | {
+      type: 'split'
+      direction: 'row' | 'column'
+      ratio: number
+      a: SavedLayout
+      b: SavedLayout
+    }
+
 export interface Settings {
   windowBounds?: { x?: number; y?: number; width: number; height: number }
   windowMaximized?: boolean
   fontSize?: number
+  paneLayout?: SavedLayout
 }
 
 const DEFAULTS: Settings = {

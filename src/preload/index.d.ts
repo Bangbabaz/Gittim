@@ -1,5 +1,15 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 
+type SavedLayout =
+  | { type: 'pane'; cwd: string }
+  | {
+      type: 'split'
+      direction: 'row' | 'column'
+      ratio: number
+      a: SavedLayout
+      b: SavedLayout
+    }
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -7,7 +17,11 @@ declare global {
       getCwd: () => Promise<string>
       getPlatform: () => Promise<NodeJS.Platform>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
-      getGitBranches: (cwd: string) => Promise<{ name: string; type: 'local' | 'remote' }[]>
+      getGitBranches: (
+        cwd: string
+      ) => Promise<
+        { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
+      >
       getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
@@ -29,8 +43,9 @@ declare global {
         windowBounds?: { x?: number; y?: number; width: number; height: number }
         windowMaximized?: boolean
         fontSize?: number
+        paneLayout?: SavedLayout
       }>
-      settingsSet: (patch: { fontSize?: number }) => void
+      settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout }) => void
       ptyStart: (opts: {
         paneId: string
         cols?: number

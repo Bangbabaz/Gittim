@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -25,6 +25,7 @@ const emit = defineEmits<{
   (e: 'split', paneId: string, direction: 'row' | 'column'): void
   (e: 'close', paneId: string): void
   (e: 'createWorktree', paneId: string, cwd: string): void
+  (e: 'cwdChange', paneId: string, cwd: string): void
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
@@ -89,6 +90,12 @@ terminal.loadAddon(searchAddon)
 terminal.loadAddon(webLinksAddon)
 terminal.loadAddon(unicode11Addon)
 terminal.unicode.activeVersion = '11'
+
+// Propagate cwd changes up so App.vue can persist them in paneCwd / settings.
+// Fires for every distinct value, including the initial sync from props.cwd.
+watch(currentCwd, (newCwd) => {
+  if (newCwd) emit('cwdChange', props.paneId, newCwd)
+})
 
 // OSC 7 — `\e]7;file://host/path\a`. Emitted by bash/zsh/pwsh/cmd thanks to
 // the shell-integration hook in main; we parse and update currentCwd.
