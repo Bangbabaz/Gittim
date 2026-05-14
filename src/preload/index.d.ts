@@ -7,6 +7,7 @@ declare global {
       getCwd: () => Promise<string>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       getGitBranches: (cwd: string) => Promise<{ name: string; type: 'local' | 'remote' }[]>
+      getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
         cwd: string,

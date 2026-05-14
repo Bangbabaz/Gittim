@@ -148,17 +148,20 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   }
   // Ctrl+Shift+C → always copy
   if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+    e.preventDefault()
     copySelection()
     return false
   }
   // Ctrl+Shift+V → paste
   if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+    e.preventDefault()
     pasteFromClipboard()
     return false
   }
   // Ctrl+C → copy if there's a selection; otherwise pass through (send \x03 to pty)
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
     if (terminal.hasSelection()) {
+      e.preventDefault()
       copySelection()
       return false
     }
@@ -166,6 +169,7 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   }
   // Ctrl+V → paste
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'V' || e.key === 'v')) {
+    e.preventDefault()
     pasteFromClipboard()
     return false
   }
