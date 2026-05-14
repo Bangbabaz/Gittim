@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'focus', paneId: string): void
   (e: 'split', paneId: string, direction: 'row' | 'column'): void
   (e: 'close', paneId: string): void
+  (e: 'createWorktree', paneId: string, cwd: string): void
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
@@ -275,7 +276,11 @@ onUnmounted(() => {
 
 <template>
   <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
-    <PaneToolbar ref="toolbarRef" :cwd="cwd" />
+    <PaneToolbar
+      ref="toolbarRef"
+      :cwd="cwd"
+      @worktree-created="(path) => emit('createWorktree', props.paneId, path)"
+    />
     <div ref="terminalRef" class="terminal-container"></div>
     <Teleport to="body">
       <div
