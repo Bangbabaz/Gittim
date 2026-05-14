@@ -90,13 +90,21 @@ terminal.loadAddon(webLinksAddon)
 terminal.loadAddon(unicode11Addon)
 terminal.unicode.activeVersion = '11'
 
-// OSC 7 — `\e]7;file://host/path\a`. Bash/zsh emit this when configured
-// (and many distros configure it by default). We parse and update currentCwd.
+// OSC 7 — `\e]7;file://host/path\a`. Emitted by bash/zsh/pwsh/cmd thanks to
+// the shell-integration hook in main; we parse and update currentCwd.
 terminal.parser.registerOscHandler(7, (data) => {
   const m = data.match(/^file:\/\/[^/]*(.+)$/)
   if (m) {
-    let path = decodeURIComponent(m[1])
-    // Windows comes through as "/C:/Users/..." — drop the leading slash.
+    let path = m[1]
+    // Best-effort percent-decode; cmd.exe emits raw paths with no encoding
+    // (e.g. `/C:\Users\foo`) which decodeURIComponent leaves alone, but a
+    // stray `%` inside a path would throw — fall back to the raw string.
+    try {
+      path = decodeURIComponent(path)
+    } catch {
+      // keep raw
+    }
+    // Windows comes through as "/C:/Users/..." or "/C:\Users\..." — drop the leading slash.
     if (/^\/[A-Za-z]:/.test(path)) path = path.slice(1)
     currentCwd.value = path
   }
