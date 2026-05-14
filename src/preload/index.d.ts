@@ -5,6 +5,7 @@ declare global {
     electron: ElectronAPI
     api: {
       getCwd: () => Promise<string>
+      getPlatform: () => Promise<NodeJS.Platform>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       getGitBranches: (cwd: string) => Promise<{ name: string; type: 'local' | 'remote' }[]>
       getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
@@ -24,6 +25,12 @@ declare global {
       winClose: () => void
       winIsMaximized: () => Promise<boolean>
       onWindowStateChanged: (cb: (maximized: boolean) => void) => () => void
+      settingsGet: () => Promise<{
+        windowBounds?: { x?: number; y?: number; width: number; height: number }
+        windowMaximized?: boolean
+        fontSize?: number
+      }>
+      settingsSet: (patch: { fontSize?: number }) => void
       ptyStart: (opts: {
         paneId: string
         cols?: number
@@ -33,6 +40,7 @@ declare global {
       ptyWrite: (paneId: string, data: string) => void
       ptyResize: (paneId: string, cols: number, rows: number) => void
       ptyKill: (paneId: string) => void
+      ptyGetCwd: (paneId: string) => Promise<string | null>
       onPtyData: (paneId: string, cb: (data: string) => void) => () => void
       onPtyExit: (paneId: string, cb: (exitCode: number) => void) => () => void
     }

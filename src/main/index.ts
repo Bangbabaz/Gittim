@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -7,6 +7,7 @@ import {
   resizePty,
   killPty,
   getCurrentDir,
+  getPtyCwd,
   getGitInfo,
   getGitBranches,
   checkoutGitBranch,
@@ -14,19 +15,40 @@ import {
   gitHasUncommittedChanges,
   getGitDiffStats
 } from './shell'
+import { readSettings, updateSettings, flushSettings } from './settings'
 import icon from '../../resources/icon.png?asset'
 
 let mainWindow: BrowserWindow | null = null
 
+function clampBoundsToDisplay(b: { x?: number; y?: number; width: number; height: number }): {
+  x?: number
+  y?: number
+  width: number
+  height: number
+} {
+  // If a saved position lands off-screen (display unplugged, resolution change),
+  // drop x/y so Electron centers the window on the primary display.
+  if (b.x === undefined || b.y === undefined) return b
+  const displays = screen.getAllDisplays()
+  const onScreen = displays.some((d) => {
+    const a = d.workArea
+    return b.x! >= a.x && b.y! >= a.y && b.x! < a.x + a.width && b.y! < a.y + a.height
+  })
+  return onScreen ? b : { width: b.width, height: b.height }
+}
+
 function createWindow(): void {
-  // Create the browser window.
+  const settings = readSettings()
+  const bounds = clampBoundsToDisplay(settings.windowBounds ?? { width: 1100, height: 720 })
+
   const win = new BrowserWindow({
-    width: 900,
-    height: 670,
+    ...bounds,
     show: false,
     title: 'Gittim',
     autoHideMenuBar: true,
-    titleBarStyle: 'hidden',
+    // macOS gets the system traffic-light buttons; win/linux gets our custom
+    // HTML buttons rendered in App.vue.
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -35,6 +57,7 @@ function createWindow(): void {
   })
 
   win.on('ready-to-show', () => {
+    if (settings.windowMaximized) win.maximize()
     win.show()
   })
 
@@ -48,29 +71,36 @@ function createWindow(): void {
   // and accessing .webContents throws "Object has been destroyed").
 
   // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  win.on('maximize', () => win.webContents.send('window-state-changed', true))
-  win.on('unmaximize', () => win.webContents.send('window-state-changed', false))
+  // Persist window state. Resize/move fire continuously during drag — settings
+  // module debounces, so this is safe.
+  const persistBounds = (): void => {
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return
+    const b = win.getBounds()
+    updateSettings({ windowBounds: b })
+  }
+  win.on('resize', persistBounds)
+  win.on('move', persistBounds)
+  win.on('maximize', () => {
+    updateSettings({ windowMaximized: true })
+    win.webContents.send('window-state-changed', true)
+  })
+  win.on('unmaximize', () => {
+    updateSettings({ windowMaximized: false })
+    win.webContents.send('window-state-changed', false)
+  })
 
   mainWindow = win
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.gittim.app')
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -78,52 +108,26 @@ app.whenReady().then(() => {
   // IPC handlers
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
+  ipcMain.handle('get-platform', () => process.platform)
   ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
-  ipcMain.handle(
-    'get-git-branches',
-    (_event, cwd: string): { name: string; type: 'local' | 'remote' }[] => {
-      return getGitBranches(cwd)
-    }
-  )
-  ipcMain.handle(
-    'git-diff-stats',
-    (_event, cwd: string): { added: number; deleted: number } => {
-      return getGitDiffStats(cwd)
-    }
-  )
+  ipcMain.handle('get-git-branches', (_event, cwd: string) => getGitBranches(cwd))
+  ipcMain.handle('git-diff-stats', (_event, cwd: string) => getGitDiffStats(cwd))
+  ipcMain.handle('git-has-changes', (_event, cwd: string) => gitHasUncommittedChanges(cwd))
 
-  ipcMain.handle('git-has-changes', (_event, cwd: string): boolean => {
-    return gitHasUncommittedChanges(cwd)
+  ipcMain.handle('git-checkout', (_event, cwd: string, branchName: string, isRemote?: boolean) => {
+    return checkoutGitBranch(cwd, branchName, isRemote)
   })
 
   ipcMain.handle(
-    'git-checkout',
-    (
-      _event,
-      cwd: string,
-      branchName: string,
-      isRemote?: boolean
-    ): { success: boolean; error?: string } => {
-      return checkoutGitBranch(cwd, branchName, isRemote)
-    }
-  )
-
-  ipcMain.handle(
     'git-worktree-add',
-    (
-      _event,
-      cwd: string,
-      opts: { path: string; newBranch?: string; fromBranch?: string }
-    ): { success: boolean; error?: string; warning?: string } => {
+    (_event, cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) => {
       return gitAddWorktree(cwd, opts)
     }
   )
 
   ipcMain.handle('select-directory', async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory']
-    })
-    return result.canceled ? null : result.filePaths[0] ?? null
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
   ipcMain.on('win-minimize', () => mainWindow?.minimize())
@@ -133,6 +137,12 @@ app.whenReady().then(() => {
   })
   ipcMain.on('win-close', () => mainWindow?.close())
   ipcMain.handle('win-is-maximized', () => mainWindow?.isMaximized() ?? false)
+
+  // Settings IPC
+  ipcMain.handle('settings-get', () => readSettings())
+  ipcMain.on('settings-set', (_event, patch: Record<string, unknown>) => {
+    updateSettings(patch)
+  })
 
   ipcMain.handle(
     'pty-start',
@@ -153,23 +163,22 @@ app.whenReady().then(() => {
     killPty(paneId)
   })
 
+  ipcMain.handle('pty-get-cwd', (_event, paneId: string) => getPtyCwd(paneId))
+
   createWindow()
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+app.on('before-quit', () => {
+  flushSettings()
+})
+
 app.on('window-all-closed', () => {
+  flushSettings()
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

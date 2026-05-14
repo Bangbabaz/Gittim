@@ -60,11 +60,11 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
   try {
     const hasChanges = await window.api.gitHasChanges(props.cwd)
     if (hasChanges) {
-      await ElMessageBox.confirm(
-        '当前有未提交的更改，切换分支后可能丢失。确定继续？',
-        '警告',
-        { confirmButtonText: '继续切换', cancelButtonText: '取消', type: 'warning' }
-      )
+      await ElMessageBox.confirm('当前有未提交的更改，切换分支后可能丢失。确定继续？', '警告', {
+        confirmButtonText: '继续切换',
+        cancelButtonText: '取消',
+        type: 'warning'
+      })
     }
   } catch {
     // user cancelled
@@ -104,6 +104,14 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
 onMounted(() => {
   refresh()
 })
+
+// Cwd is dynamic: Terminal.vue updates it from OSC 7 / OSC 9;9 and from a
+// PID-based query on focus. Re-fetch git state whenever it changes so the
+// branch indicator follows the shell's actual directory, not the launch dir.
+watch(
+  () => props.cwd,
+  () => refresh()
+)
 
 defineExpose({ refresh })
 
@@ -230,11 +238,19 @@ async function handleCreateWorktree(): Promise<void> {
       <div class="wt-form">
         <div class="wt-row">
           <label class="wt-label">从分支</label>
-          <el-select v-model="wtFromBranch" class="wt-field" popper-class="branch-select-dropdown" size="small" filterable>
+          <el-select
+            v-model="wtFromBranch"
+            class="wt-field"
+            popper-class="branch-select-dropdown"
+            size="small"
+            filterable
+          >
             <el-option v-for="b in branches" :key="b.name" :label="b.name" :value="b.name">
               <span class="br-opt">
                 <span>{{ b.name }}</span>
-                <span class="br-tag" :class="b.type">{{ b.type === 'local' ? '本地' : '远程' }}</span>
+                <span class="br-tag" :class="b.type">{{
+                  b.type === 'local' ? '本地' : '远程'
+                }}</span>
               </span>
             </el-option>
           </el-select>
@@ -242,14 +258,14 @@ async function handleCreateWorktree(): Promise<void> {
 
         <div class="wt-row">
           <label class="wt-label">新分支</label>
-          <div class="wt-field" style="display:flex;align-items:center;gap:8px">
+          <div class="wt-field" style="display: flex; align-items: center; gap: 8px">
             <el-checkbox v-model="wtNewBranch" />
             <el-input
               v-if="wtNewBranch"
               v-model="wtNewBranchName"
               size="small"
               placeholder="新分支名"
-              style="flex:1"
+              style="flex: 1"
             />
           </div>
         </div>
@@ -261,8 +277,8 @@ async function handleCreateWorktree(): Promise<void> {
 
         <div class="wt-row">
           <label class="wt-label">位置</label>
-          <div class="wt-field" style="display:flex;gap:8px">
-            <el-input v-model="wtLocation" size="small" style="flex:1" />
+          <div class="wt-field" style="display: flex; gap: 8px">
+            <el-input v-model="wtLocation" size="small" style="flex: 1" />
             <el-button size="small" @click="handleBrowseLocation">浏览</el-button>
           </div>
         </div>
@@ -270,7 +286,12 @@ async function handleCreateWorktree(): Promise<void> {
 
       <template #footer>
         <el-button size="small" @click="showWorktreeDialog = false">取消</el-button>
-        <el-button size="small" type="primary" :loading="wtSubmitting" @click="handleCreateWorktree">
+        <el-button
+          size="small"
+          type="primary"
+          :loading="wtSubmitting"
+          @click="handleCreateWorktree"
+        >
           创建工作树
         </el-button>
       </template>

@@ -26,6 +26,7 @@ const activeId = ref<string | null>(null)
 const containerRef = ref<HTMLDivElement>()
 const containerSize = ref({ width: 0, height: 0 })
 const isMaximized = ref(false)
+const isMac = ref(false)
 
 function winMinimize(): void {
   window.api.winMinimize()
@@ -226,6 +227,12 @@ const onClose = (paneId: string): void => {
     return
   }
   layout.value = next
+  // Free the cwd override so closed-pane IDs don't accumulate over time.
+  if (paneCwd.value[paneId]) {
+    const rest = { ...paneCwd.value }
+    delete rest[paneId]
+    paneCwd.value = rest
+  }
   if (activeId.value === paneId) {
     activeId.value = firstLeafId(next)
   }
@@ -281,6 +288,7 @@ let unsubscribeWinState: (() => void) | null = null
 
 onMounted(async () => {
   cwd.value = await window.api.getCwd()
+  isMac.value = (await window.api.getPlatform()) === 'darwin'
   isMaximized.value = await window.api.winIsMaximized()
   unsubscribeWinState = window.api.onWindowStateChanged((maximized) => {
     isMaximized.value = maximized
@@ -314,18 +322,27 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="title-bar">
+  <div class="title-bar" :class="{ mac: isMac }">
     <span class="title-bar-text">Gittim</span>
-    <div class="title-bar-controls">
+    <div v-if="!isMac" class="title-bar-controls">
       <button class="tb-btn tb-min" title="最小化" @click="winMinimize">
-        <svg width="10" height="10" viewBox="0 0 10 10"><rect y="4" width="10" height="1" fill="currentColor" /></svg>
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <rect y="4" width="10" height="1" fill="currentColor" />
+        </svg>
       </button>
       <button class="tb-btn tb-max" title="最大化" @click="winMaximize">
-        <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" /></svg>
-        <svg v-else width="10" height="10" viewBox="0 0 10 10"><rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" /><rect x="0" y="3" width="8" height="7" fill="#2d2d30" stroke="currentColor" /></svg>
+        <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
+          <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
+        </svg>
+        <svg v-else width="10" height="10" viewBox="0 0 10 10">
+          <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" />
+          <rect x="0" y="3" width="8" height="7" fill="#2d2d30" stroke="currentColor" />
+        </svg>
       </button>
       <button class="tb-btn tb-close" title="关闭" @click="winClose">
-        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2" /></svg>
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2" />
+        </svg>
       </button>
     </div>
   </div>
@@ -375,6 +392,13 @@ body {
   padding: 0 8px;
   -webkit-app-region: drag;
   user-select: none;
+}
+
+/* macOS hiddenInset places the traffic-light buttons in the top-left.
+   Pad the bar so our title text and any future left-aligned content clears them. */
+.title-bar.mac {
+  padding-left: 78px;
+  justify-content: center;
 }
 
 .title-bar-text {
