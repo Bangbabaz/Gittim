@@ -7,10 +7,16 @@ declare global {
       getCwd: () => Promise<string>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       getGitBranches: (cwd: string) => Promise<string[]>
+      gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
         cwd: string,
         branchName: string
       ) => Promise<{ success: boolean; error?: string }>
+      gitWorktreeAdd: (
+        cwd: string,
+        opts: { path: string; newBranch?: string; fromBranch?: string }
+      ) => Promise<{ success: boolean; error?: string }>
+      selectDirectory: () => Promise<string | null>
       ptyStart: (opts: {
         paneId: string
         cols?: number

@@ -20,6 +20,7 @@ const MIN_RATIO = 0.05
 const MAX_RATIO = 0.95
 
 const cwd = ref<string | null>(null)
+const paneCwd = ref<Record<string, string>>({})
 const layout = ref<LayoutNode | null>(null)
 const activeId = ref<string | null>(null)
 const containerRef = ref<HTMLDivElement>()
@@ -199,6 +200,9 @@ const onSplit = (paneId: string, direction: 'row' | 'column'): void => {
   }
   const newId = newPaneId()
   layout.value = insertSplit(layout.value, paneId, newId, direction)
+  if (paneCwd.value[paneId]) {
+    paneCwd.value = { ...paneCwd.value, [newId]: paneCwd.value[paneId] }
+  }
   activeId.value = newId
 }
 
@@ -214,6 +218,14 @@ const onClose = (paneId: string): void => {
   if (activeId.value === paneId) {
     activeId.value = firstLeafId(next)
   }
+}
+
+const onCreateWorktree = (paneId: string, worktreePath: string): void => {
+  if (!layout.value) return
+  const newId = newPaneId()
+  layout.value = insertSplit(layout.value, paneId, newId, 'row')
+  paneCwd.value = { ...paneCwd.value, [newId]: worktreePath }
+  activeId.value = newId
 }
 
 const setActive = (id: string): void => {
@@ -296,10 +308,11 @@ onUnmounted(() => {
       >
         <TerminalView
           :pane-id="pane.id"
-          :cwd="cwd"
+          :cwd="paneCwd[pane.id] ?? cwd"
           @focus="setActive"
           @split="onSplit"
           @close="onClose"
+          @create-worktree="onCreateWorktree"
         />
       </div>
       <div

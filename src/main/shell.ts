@@ -182,3 +182,34 @@ export function checkoutGitBranch(
     return { success: false, error: clean || message }
   }
 }
+
+export function gitHasUncommittedChanges(cwd: string): boolean {
+  try {
+    const output = execSync('git status --porcelain', {
+      cwd,
+      encoding: 'utf8',
+      timeout: 5000
+    })
+    return output.trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+export function gitAddWorktree(
+  cwd: string,
+  opts: { path: string; newBranch?: string; fromBranch?: string }
+): { success: boolean; error?: string } {
+  try {
+    let cmd = 'git worktree add'
+    if (opts.newBranch) cmd += ` -b "${opts.newBranch}"`
+    cmd += ` "${opts.path}"`
+    if (opts.fromBranch) cmd += ` "${opts.fromBranch}"`
+    execSync(cmd, { cwd, encoding: 'utf8', timeout: 15000 })
+    return { success: true }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const clean = message.replace(/^Command failed:[^]*?\n/, '').trim()
+    return { success: false, error: clean || message }
+  }
+}

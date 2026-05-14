@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -9,7 +9,9 @@ import {
   getCurrentDir,
   getGitInfo,
   getGitBranches,
-  checkoutGitBranch
+  checkoutGitBranch,
+  gitAddWorktree,
+  gitHasUncommittedChanges
 } from './shell'
 import icon from '../../resources/icon.png?asset'
 
@@ -70,12 +72,34 @@ app.whenReady().then(() => {
   ipcMain.handle('get-git-branches', (_event, cwd: string): string[] => {
     return getGitBranches(cwd)
   })
+  ipcMain.handle('git-has-changes', (_event, cwd: string): boolean => {
+    return gitHasUncommittedChanges(cwd)
+  })
+
   ipcMain.handle(
     'git-checkout',
     (_event, cwd: string, branchName: string): { success: boolean; error?: string } => {
       return checkoutGitBranch(cwd, branchName)
     }
   )
+
+  ipcMain.handle(
+    'git-worktree-add',
+    (
+      _event,
+      cwd: string,
+      opts: { path: string; newBranch?: string; fromBranch?: string }
+    ): { success: boolean; error?: string } => {
+      return gitAddWorktree(cwd, opts)
+    }
+  )
+
+  ipcMain.handle('select-directory', async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    })
+    return result.canceled ? null : result.filePaths[0] ?? null
+  })
 
   ipcMain.handle(
     'pty-start',

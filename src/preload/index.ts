@@ -7,11 +7,21 @@ const api = {
   getGitInfo: (cwd: string) =>
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
   getGitBranches: (cwd: string) => ipcRenderer.invoke('get-git-branches', cwd) as Promise<string[]>,
+  gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
   gitCheckout: (cwd: string, branchName: string) =>
     ipcRenderer.invoke('git-checkout', cwd, branchName) as Promise<{
       success: boolean
       error?: string
     }>,
+  gitWorktreeAdd: (
+    cwd: string,
+    opts: { path: string; newBranch?: string; fromBranch?: string }
+  ) =>
+    ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  selectDirectory: () => ipcRenderer.invoke('select-directory') as Promise<string | null>,
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
