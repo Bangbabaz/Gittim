@@ -13,7 +13,7 @@ const emit = defineEmits<{
 
 const isRepo = ref(false)
 const currentBranch = ref<string | null>(null)
-const branches = ref<string[]>([])
+const branches = ref<{ name: string; type: 'local' | 'remote' }[]>([])
 const switching = ref(false)
 
 // Generation counter: every refresh captures the current gen; a later refresh
@@ -66,13 +66,16 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
     return
   }
 
+  const branch = branches.value.find((b) => b.name === newBranch)
+  const isRemote = branch?.type === 'remote'
+
   const prev = currentBranch.value
   switching.value = true
   currentBranch.value = newBranch
   // Invalidate any in-flight refresh — its result is now stale.
   ++refreshGen
   try {
-    const result = await window.api.gitCheckout(props.cwd, newBranch)
+    const result = await window.api.gitCheckout(props.cwd, newBranch, isRemote)
     if (result.success) {
       ElMessage.success(`已切换到分支 "${newBranch}"`)
       branches.value = await window.api.getGitBranches(props.cwd)
@@ -157,7 +160,7 @@ async function handleCreateWorktree(): Promise<void> {
       ElMessage.error('请输入新分支名')
       return
     }
-    if (branches.value.includes(name)) {
+    if (branches.value.some((b) => b.name === name)) {
       ElMessage.error(`分支 "${name}" 已存在`)
       return
     }
@@ -173,6 +176,7 @@ async function handleCreateWorktree(): Promise<void> {
     })
     if (result.success) {
       showWorktreeDialog.value = false
+      if (result.warning) ElMessage.warning(result.warning)
       emit('worktreeCreated', fullPath)
     } else {
       ElMessage.error(result.error || '工作树创建失败')
@@ -199,7 +203,12 @@ async function handleCreateWorktree(): Promise<void> {
       placeholder="(detached HEAD)"
       @change="onBranchChange"
     >
-      <el-option v-for="b in branches" :key="b" :label="b" :value="b" />
+      <el-option v-for="b in branches" :key="b.name" :label="b.name" :value="b.name">
+        <span class="br-opt">
+          <span>{{ b.name }}</span>
+          <span class="br-tag" :class="b.type">{{ b.type === 'local' ? '本地' : '远程' }}</span>
+        </span>
+      </el-option>
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
 
@@ -208,7 +217,12 @@ async function handleCreateWorktree(): Promise<void> {
         <div class="wt-row">
           <label class="wt-label">从分支</label>
           <el-select v-model="wtFromBranch" class="wt-field" popper-class="branch-select-dropdown" size="small" filterable>
-            <el-option v-for="b in branches" :key="b" :label="b" :value="b" />
+            <el-option v-for="b in branches" :key="b.name" :label="b.name" :value="b.name">
+              <span class="br-opt">
+                <span>{{ b.name }}</span>
+                <span class="br-tag" :class="b.type">{{ b.type === 'local' ? '本地' : '远程' }}</span>
+              </span>
+            </el-option>
           </el-select>
         </div>
 
@@ -348,10 +362,33 @@ async function handleCreateWorktree(): Promise<void> {
 }
 
 .branch-select-dropdown .el-select-dropdown__item {
-  height: 28px;
-  line-height: 28px;
-  padding: 0 20px 0 10px;
+  height: auto;
+  line-height: 1.4;
+  padding: 4px 20px 4px 10px;
   font-size: 12px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.br-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.br-tag {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 16px;
+}
+
+.br-tag.local {
+  color: #6a9955;
+  background: #6a995522;
+}
+
+.br-tag.remote {
+  color: #569cd6;
+  background: #569cd622;
 }
 </style>

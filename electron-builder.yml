@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: electron-app
+appId: com.gittim.app
+productName: gittim
 directories:
   buildResources: build
 files:
@@ -13,7 +13,7 @@ asarUnpack:
   - resources/**
   - node_modules/node-pty/**
 win:
-  executableName: electron-app
+  executableName: gittim
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

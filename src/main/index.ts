@@ -78,17 +78,25 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
   ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
-  ipcMain.handle('get-git-branches', (_event, cwd: string): string[] => {
-    return getGitBranches(cwd)
-  })
+  ipcMain.handle(
+    'get-git-branches',
+    (_event, cwd: string): { name: string; type: 'local' | 'remote' }[] => {
+      return getGitBranches(cwd)
+    }
+  )
   ipcMain.handle('git-has-changes', (_event, cwd: string): boolean => {
     return gitHasUncommittedChanges(cwd)
   })
 
   ipcMain.handle(
     'git-checkout',
-    (_event, cwd: string, branchName: string): { success: boolean; error?: string } => {
-      return checkoutGitBranch(cwd, branchName)
+    (
+      _event,
+      cwd: string,
+      branchName: string,
+      isRemote?: boolean
+    ): { success: boolean; error?: string } => {
+      return checkoutGitBranch(cwd, branchName, isRemote)
     }
   )
 
@@ -98,7 +106,7 @@ app.whenReady().then(() => {
       _event,
       cwd: string,
       opts: { path: string; newBranch?: string; fromBranch?: string }
-    ): { success: boolean; error?: string } => {
+    ): { success: boolean; error?: string; warning?: string } => {
       return gitAddWorktree(cwd, opts)
     }
   )
