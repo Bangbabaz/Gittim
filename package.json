@@ -1,7 +1,7 @@
 {
   "name": "gittim",
   "version": "1.0.0",
-  "description": "An Electron application with Vue and TypeScript",
+  "description": "Git + tmux 风格的终端模拟器，支持分屏、分支切换与工作树管理",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",
