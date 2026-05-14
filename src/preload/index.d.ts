@@ -17,6 +17,11 @@ declare global {
         opts: { path: string; newBranch?: string; fromBranch?: string }
       ) => Promise<{ success: boolean; error?: string }>
       selectDirectory: () => Promise<string | null>
+      winMinimize: () => void
+      winMaximize: () => void
+      winClose: () => void
+      winIsMaximized: () => Promise<boolean>
+      onWindowStateChanged: (cb: (maximized: boolean) => void) => () => void
       ptyStart: (opts: {
         paneId: string
         cols?: number

@@ -22,6 +22,15 @@ const api = {
       error?: string
     }>,
   selectDirectory: () => ipcRenderer.invoke('select-directory') as Promise<string | null>,
+  winMinimize: () => ipcRenderer.send('win-minimize'),
+  winMaximize: () => ipcRenderer.send('win-maximize'),
+  winClose: () => ipcRenderer.send('win-close'),
+  winIsMaximized: () => ipcRenderer.invoke('win-is-maximized') as Promise<boolean>,
+  onWindowStateChanged: (cb: (maximized: boolean) => void) => {
+    const listener = (_event: IpcRendererEvent, maximized: boolean): void => cb(maximized)
+    ipcRenderer.on('window-state-changed', listener)
+    return () => ipcRenderer.removeListener('window-state-changed', listener)
+  },
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
