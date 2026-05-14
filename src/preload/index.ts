@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
+  getPlatform: () => ipcRenderer.invoke('get-platform') as Promise<NodeJS.Platform>,
   getGitInfo: (cwd: string) =>
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
   getGitBranches: (cwd: string) =>
@@ -18,10 +19,7 @@ const api = {
       success: boolean
       error?: string
     }>,
-  gitWorktreeAdd: (
-    cwd: string,
-    opts: { path: string; newBranch?: string; fromBranch?: string }
-  ) =>
+  gitWorktreeAdd: (cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) =>
     ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
       success: boolean
       error?: string
@@ -37,12 +35,21 @@ const api = {
     ipcRenderer.on('window-state-changed', listener)
     return () => ipcRenderer.removeListener('window-state-changed', listener)
   },
+  settingsGet: () =>
+    ipcRenderer.invoke('settings-get') as Promise<{
+      windowBounds?: { x?: number; y?: number; width: number; height: number }
+      windowMaximized?: boolean
+      fontSize?: number
+    }>,
+  settingsSet: (patch: { fontSize?: number }) => ipcRenderer.send('settings-set', patch),
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
   ptyResize: (paneId: string, cols: number, rows: number) =>
     ipcRenderer.send('pty-resize', paneId, cols, rows),
   ptyKill: (paneId: string) => ipcRenderer.send('pty-kill', paneId),
+  ptyGetCwd: (paneId: string) =>
+    ipcRenderer.invoke('pty-get-cwd', paneId) as Promise<string | null>,
   onPtyData: (paneId: string, cb: (data: string) => void) => {
     const listener = (
       _event: IpcRendererEvent,

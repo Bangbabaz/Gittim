@@ -1,6 +1,10 @@
 import { spawn, IPty } from 'node-pty'
-import { WebContents } from 'electron'
-import { execSync } from 'child_process'
+import { WebContents, app } from 'electron'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { readlinkSync } from 'fs'
+
+const execFileP = promisify(execFile)
 
 const isWindows = process.platform === 'win32'
 
@@ -22,6 +26,23 @@ const sessionsByWebContents = new Map<number, Set<string>>()
 // stack duplicate handlers when multiple panes spawn on the same renderer.
 const destroyHandlerInstalled = new Set<number>()
 
+// Common options for synchronous-style git invocations. encoding:'utf8' makes
+// stdout/stderr come back as strings instead of Buffers.
+const GIT_OPTS = { encoding: 'utf8' as const, timeout: 10_000, windowsHide: true }
+
+interface ExecFailure {
+  stdout?: string
+  stderr?: string
+  message: string
+}
+
+function cleanGitError(err: unknown): string {
+  const e = err as ExecFailure
+  // execFile rejects with an Error that has stderr/stdout attached
+  const msg = (e?.stderr || e?.stdout || e?.message || String(err)).toString()
+  return msg.replace(/^Command failed:[^\n]*\n?/, '').trim()
+}
+
 function defaultShell(): string {
   if (isWindows) {
     return process.env.COMSPEC || 'cmd.exe'
@@ -30,7 +51,10 @@ function defaultShell(): string {
 }
 
 export function getCurrentDir(): string {
-  return process.cwd()
+  // Default to the user's home directory. `process.cwd()` is whatever
+  // directory the Electron process was launched from — in a packaged build
+  // that's the install location, which is never what the user wants.
+  return app.getPath('home')
 }
 
 export function startPty(
@@ -45,7 +69,7 @@ export function startPty(
 
   const cols = opts.cols ?? 80
   const rows = opts.rows ?? 24
-  const cwd = opts.cwd || process.cwd()
+  const cwd = opts.cwd || getCurrentDir()
 
   const pty = spawn(defaultShell(), [], {
     name: 'xterm-256color',
@@ -128,20 +152,55 @@ export function killPty(paneId: string): void {
   sessionsByWebContents.get(session.wcId)?.delete(paneId)
 }
 
-export function getGitInfo(cwd: string): { isRepo: boolean; branch: string | null } {
+/**
+ * Best-effort lookup of the PTY shell's current working directory by PID.
+ * Used to keep the toolbar in sync when the user `cd`s in the shell
+ * (the toolbar's cwd prop is set at pane creation and stays stale otherwise).
+ *
+ * - Linux: read /proc/<pid>/cwd symlink (instant)
+ * - macOS: `lsof -a -d cwd -p <pid> -Fn` parses one line of output
+ * - Windows: no portable way without external tools — return null and let
+ *   the renderer fall back to OSC 7 / the initial cwd.
+ */
+export async function getPtyCwd(paneId: string): Promise<string | null> {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed) return null
+  const pid = session.pty.pid
+  if (!pid) return null
+
   try {
-    const inside = execSync('git rev-parse --is-inside-work-tree', {
-      cwd,
-      encoding: 'utf8',
-      timeout: 3000
-    }).trim()
-    if (inside === 'true') {
-      const branch = execSync('git branch --show-current', {
-        cwd,
+    if (process.platform === 'linux') {
+      return readlinkSync(`/proc/${pid}/cwd`)
+    }
+    if (process.platform === 'darwin') {
+      const { stdout } = await execFileP('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-Fn'], {
         encoding: 'utf8',
+        timeout: 2000
+      })
+      // -Fn output: lines like "p<pid>\nfcwd\nn/abs/path"
+      const match = stdout.match(/^n(.+)$/m)
+      return match ? match[1] : null
+    }
+  } catch {
+    // PID gone, permissions denied, lsof missing — silently fall back
+  }
+  return null
+}
+
+export async function getGitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }> {
+  try {
+    const { stdout: inside } = await execFileP('git', ['rev-parse', '--is-inside-work-tree'], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 3000
+    })
+    if (inside.trim() === 'true') {
+      const { stdout: branch } = await execFileP('git', ['branch', '--show-current'], {
+        ...GIT_OPTS,
+        cwd,
         timeout: 3000
-      }).trim()
-      return { isRepo: true, branch: branch || null }
+      })
+      return { isRepo: true, branch: branch.trim() || null }
     }
   } catch {
     // not a git repo, or git not installed
@@ -149,14 +208,12 @@ export function getGitInfo(cwd: string): { isRepo: boolean; branch: string | nul
   return { isRepo: false, branch: null }
 }
 
-export function getGitBranches(cwd: string): { name: string; type: 'local' | 'remote' }[] {
+export async function getGitBranches(
+  cwd: string
+): Promise<{ name: string; type: 'local' | 'remote' }[]> {
   const branches: { name: string; type: 'local' | 'remote' }[] = []
   try {
-    const local = execSync('git branch', {
-      cwd,
-      encoding: 'utf8',
-      timeout: 5000
-    })
+    const { stdout: local } = await execFileP('git', ['branch'], { ...GIT_OPTS, cwd })
     local
       .split('\n')
       .map((line) => line.replace(/^\*?\s+/, '').trim())
@@ -167,7 +224,7 @@ export function getGitBranches(cwd: string): { name: string; type: 'local' | 're
   }
 
   try {
-    const remote = execSync('git branch -r', { cwd, encoding: 'utf8', timeout: 5000 })
+    const { stdout: remote } = await execFileP('git', ['branch', '-r'], { ...GIT_OPTS, cwd })
     remote
       .split('\n')
       .map((line) => line.replace(/^\*?\s+/, '').trim())
@@ -189,65 +246,59 @@ export function getGitBranches(cwd: string): { name: string; type: 'local' | 're
   return branches
 }
 
-export function getGitDiffStats(cwd: string): { added: number; deleted: number } {
+export async function getGitDiffStats(cwd: string): Promise<{ added: number; deleted: number }> {
   try {
-    const output = execSync('git diff --shortstat', { cwd, encoding: 'utf8', timeout: 5000 }).trim()
-    const added = (output.match(/(\d+) insertion/) || [])[1]
-    const deleted = (output.match(/(\d+) deletion/) || [])[1]
+    const { stdout } = await execFileP('git', ['diff', '--shortstat'], { ...GIT_OPTS, cwd })
+    const added = (stdout.match(/(\d+) insertion/) || [])[1]
+    const deleted = (stdout.match(/(\d+) deletion/) || [])[1]
     return { added: added ? parseInt(added) : 0, deleted: deleted ? parseInt(deleted) : 0 }
   } catch {
     return { added: 0, deleted: 0 }
   }
 }
 
-export function checkoutGitBranch(
+export async function checkoutGitBranch(
   cwd: string,
   branchName: string,
   isRemote?: boolean
-): { success: boolean; error?: string } {
+): Promise<{ success: boolean; error?: string }> {
   try {
-    const cmd = isRemote
-      ? `git checkout --track "origin/${branchName}"`
-      : `git checkout "${branchName}"`
-    execSync(cmd, { cwd, encoding: 'utf8', timeout: 10000 })
+    const args = isRemote
+      ? ['checkout', '--track', `origin/${branchName}`]
+      : ['checkout', branchName]
+    await execFileP('git', args, { ...GIT_OPTS, cwd })
     return { success: true }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    const clean = message.replace(/^Command failed:[^]*?\n/, '').trim()
-    return { success: false, error: clean || message }
+    return { success: false, error: cleanGitError(err) }
   }
 }
 
-export function gitHasUncommittedChanges(cwd: string): boolean {
+export async function gitHasUncommittedChanges(cwd: string): Promise<boolean> {
   try {
-    const output = execSync('git status --porcelain', {
-      cwd,
-      encoding: 'utf8',
-      timeout: 5000
-    })
-    return output.trim().length > 0
+    const { stdout } = await execFileP('git', ['status', '--porcelain'], { ...GIT_OPTS, cwd })
+    return stdout.trim().length > 0
   } catch {
     return false
   }
 }
 
-export function gitAddWorktree(
+export async function gitAddWorktree(
   cwd: string,
   opts: { path: string; newBranch?: string; fromBranch?: string }
-): { success: boolean; error?: string; warning?: string } {
+): Promise<{ success: boolean; error?: string; warning?: string }> {
   try {
-    let cmd = 'git worktree add'
-    if (opts.newBranch) cmd += ` -b "${opts.newBranch}"`
-    cmd += ` "${opts.path}"`
-    if (opts.fromBranch) cmd += ` "${opts.fromBranch}"`
-    execSync(cmd, { cwd, encoding: 'utf8', timeout: 15000 })
+    const args = ['worktree', 'add']
+    if (opts.newBranch) args.push('-b', opts.newBranch)
+    args.push(opts.path)
+    if (opts.fromBranch) args.push(opts.fromBranch)
+    await execFileP('git', args, { ...GIT_OPTS, cwd, timeout: 15_000 })
 
     if (opts.newBranch) {
       try {
-        execSync(`git push -u origin "${opts.newBranch}"`, {
+        await execFileP('git', ['push', '-u', 'origin', opts.newBranch], {
+          ...GIT_OPTS,
           cwd: opts.path,
-          encoding: 'utf8',
-          timeout: 15000
+          timeout: 15_000
         })
       } catch {
         return {
@@ -259,8 +310,6 @@ export function gitAddWorktree(
 
     return { success: true }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    const clean = message.replace(/^Command failed:[^]*?\n/, '').trim()
-    return { success: false, error: clean || message }
+    return { success: false, error: cleanGitError(err) }
   }
 }
