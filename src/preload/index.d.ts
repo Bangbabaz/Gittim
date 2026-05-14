@@ -6,16 +6,17 @@ declare global {
     api: {
       getCwd: () => Promise<string>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
-      getGitBranches: (cwd: string) => Promise<string[]>
+      getGitBranches: (cwd: string) => Promise<{ name: string; type: 'local' | 'remote' }[]>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
         cwd: string,
-        branchName: string
+        branchName: string,
+        isRemote?: boolean
       ) => Promise<{ success: boolean; error?: string }>
       gitWorktreeAdd: (
         cwd: string,
         opts: { path: string; newBranch?: string; fromBranch?: string }
-      ) => Promise<{ success: boolean; error?: string }>
+      ) => Promise<{ success: boolean; error?: string; warning?: string }>
       selectDirectory: () => Promise<string | null>
       winMinimize: () => void
       winMaximize: () => void

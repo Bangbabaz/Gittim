@@ -53,7 +53,7 @@ export function startPty(
     rows,
     cwd,
     env: process.env as { [key: string]: string },
-    useConpty: true
+    ...(isWindows ? { useConpty: true } : {})
   })
 
   const wcId = webContents.id
@@ -149,32 +149,56 @@ export function getGitInfo(cwd: string): { isRepo: boolean; branch: string | nul
   return { isRepo: false, branch: null }
 }
 
-export function getGitBranches(cwd: string): string[] {
+export function getGitBranches(cwd: string): { name: string; type: 'local' | 'remote' }[] {
+  const branches: { name: string; type: 'local' | 'remote' }[] = []
   try {
-    const output = execSync('git branch', {
+    const local = execSync('git branch', {
       cwd,
       encoding: 'utf8',
       timeout: 5000
     })
-    return output
+    local
       .split('\n')
       .map((line) => line.replace(/^\*?\s+/, '').trim())
       .filter((name) => name.length > 0 && !name.startsWith('('))
+      .forEach((name) => branches.push({ name, type: 'local' }))
   } catch {
     return []
   }
+
+  try {
+    const remote = execSync('git branch -r', { cwd, encoding: 'utf8', timeout: 5000 })
+    remote
+      .split('\n')
+      .map((line) => line.replace(/^\*?\s+/, '').trim())
+      .filter((name) => name.length > 0 && !name.includes('HEAD'))
+      .forEach((name) => {
+        const short = name.replace(/^origin\//, '')
+        if (!branches.some((b) => b.name === short)) {
+          branches.push({ name: short, type: 'remote' })
+        }
+      })
+  } catch {
+    // no remote, or git not available
+  }
+
+  branches.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'local' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  return branches
 }
 
 export function checkoutGitBranch(
   cwd: string,
-  branchName: string
+  branchName: string,
+  isRemote?: boolean
 ): { success: boolean; error?: string } {
   try {
-    execSync(`git checkout "${branchName}"`, {
-      cwd,
-      encoding: 'utf8',
-      timeout: 10000
-    })
+    const cmd = isRemote
+      ? `git checkout --track "origin/${branchName}"`
+      : `git checkout "${branchName}"`
+    execSync(cmd, { cwd, encoding: 'utf8', timeout: 10000 })
     return { success: true }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -199,13 +223,29 @@ export function gitHasUncommittedChanges(cwd: string): boolean {
 export function gitAddWorktree(
   cwd: string,
   opts: { path: string; newBranch?: string; fromBranch?: string }
-): { success: boolean; error?: string } {
+): { success: boolean; error?: string; warning?: string } {
   try {
     let cmd = 'git worktree add'
     if (opts.newBranch) cmd += ` -b "${opts.newBranch}"`
     cmd += ` "${opts.path}"`
     if (opts.fromBranch) cmd += ` "${opts.fromBranch}"`
     execSync(cmd, { cwd, encoding: 'utf8', timeout: 15000 })
+
+    if (opts.newBranch) {
+      try {
+        execSync(`git push -u origin "${opts.newBranch}"`, {
+          cwd: opts.path,
+          encoding: 'utf8',
+          timeout: 15000
+        })
+      } catch {
+        return {
+          success: true,
+          warning: `分支 "${opts.newBranch}" 已创建，但推送失败，请手动执行 git push -u origin "${opts.newBranch}"`
+        }
+      }
+    }
+
     return { success: true }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

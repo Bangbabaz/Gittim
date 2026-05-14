@@ -6,10 +6,13 @@ const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
   getGitInfo: (cwd: string) =>
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
-  getGitBranches: (cwd: string) => ipcRenderer.invoke('get-git-branches', cwd) as Promise<string[]>,
+  getGitBranches: (cwd: string) =>
+    ipcRenderer.invoke('get-git-branches', cwd) as Promise<
+      { name: string; type: 'local' | 'remote' }[]
+    >,
   gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
-  gitCheckout: (cwd: string, branchName: string) =>
-    ipcRenderer.invoke('git-checkout', cwd, branchName) as Promise<{
+  gitCheckout: (cwd: string, branchName: string, isRemote?: boolean) =>
+    ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote) as Promise<{
       success: boolean
       error?: string
     }>,
@@ -20,6 +23,7 @@ const api = {
     ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
       success: boolean
       error?: string
+      warning?: string
     }>,
   selectDirectory: () => ipcRenderer.invoke('select-directory') as Promise<string | null>,
   winMinimize: () => ipcRenderer.send('win-minimize'),
