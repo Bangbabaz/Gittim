@@ -11,7 +11,8 @@ import {
   getGitBranches,
   checkoutGitBranch,
   gitAddWorktree,
-  gitHasUncommittedChanges
+  gitHasUncommittedChanges,
+  getGitDiffStats
 } from './shell'
 import icon from '../../resources/icon.png?asset'
 
@@ -84,6 +85,13 @@ app.whenReady().then(() => {
       return getGitBranches(cwd)
     }
   )
+  ipcMain.handle(
+    'git-diff-stats',
+    (_event, cwd: string): { added: number; deleted: number } => {
+      return getGitDiffStats(cwd)
+    }
+  )
+
   ipcMain.handle('git-has-changes', (_event, cwd: string): boolean => {
     return gitHasUncommittedChanges(cwd)
   })

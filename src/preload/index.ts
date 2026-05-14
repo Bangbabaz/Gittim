@@ -10,6 +10,8 @@ const api = {
     ipcRenderer.invoke('get-git-branches', cwd) as Promise<
       { name: string; type: 'local' | 'remote' }[]
     >,
+  getGitDiffStats: (cwd: string) =>
+    ipcRenderer.invoke('git-diff-stats', cwd) as Promise<{ added: number; deleted: number }>,
   gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
   gitCheckout: (cwd: string, branchName: string, isRemote?: boolean) =>
     ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote) as Promise<{

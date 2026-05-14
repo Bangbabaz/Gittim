@@ -189,6 +189,17 @@ export function getGitBranches(cwd: string): { name: string; type: 'local' | 're
   return branches
 }
 
+export function getGitDiffStats(cwd: string): { added: number; deleted: number } {
+  try {
+    const output = execSync('git diff --shortstat', { cwd, encoding: 'utf8', timeout: 5000 }).trim()
+    const added = (output.match(/(\d+) insertion/) || [])[1]
+    const deleted = (output.match(/(\d+) deletion/) || [])[1]
+    return { added: added ? parseInt(added) : 0, deleted: deleted ? parseInt(deleted) : 0 }
+  } catch {
+    return { added: 0, deleted: 0 }
+  }
+}
+
 export function checkoutGitBranch(
   cwd: string,
   branchName: string,

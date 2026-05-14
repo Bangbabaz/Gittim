@@ -15,6 +15,7 @@ const isRepo = ref(false)
 const currentBranch = ref<string | null>(null)
 const branches = ref<{ name: string; type: 'local' | 'remote' }[]>([])
 const switching = ref(false)
+const diffStats = ref({ added: 0, deleted: 0 })
 
 // Generation counter: every refresh captures the current gen; a later refresh
 // or a checkout bumps the counter so the in-flight one knows to bail before
@@ -33,11 +34,15 @@ const refresh = async (): Promise<void> => {
       branches.value = []
       return
     }
-    const list = await window.api.getGitBranches(props.cwd)
+    const [list, stats] = await Promise.all([
+      window.api.getGitBranches(props.cwd),
+      window.api.getGitDiffStats(props.cwd)
+    ])
     if (myGen !== refreshGen) return
     isRepo.value = true
     currentBranch.value = info.branch
     branches.value = list
+    diffStats.value = stats
   } catch {
     if (myGen !== refreshGen) return
     isRepo.value = false
@@ -78,7 +83,12 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
     const result = await window.api.gitCheckout(props.cwd, newBranch, isRemote)
     if (result.success) {
       ElMessage.success(`已切换到分支 "${newBranch}"`)
-      branches.value = await window.api.getGitBranches(props.cwd)
+      const [list, stats] = await Promise.all([
+        window.api.getGitBranches(props.cwd),
+        window.api.getGitDiffStats(props.cwd)
+      ])
+      branches.value = list
+      diffStats.value = stats
     } else {
       ElMessage.error(result.error || '切换失败')
       currentBranch.value = prev
@@ -211,6 +221,10 @@ async function handleCreateWorktree(): Promise<void> {
       </el-option>
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
+    <div v-if="diffStats.added || diffStats.deleted" class="diff-stats">
+      <span class="diff-added">+{{ diffStats.added }}</span>
+      <span class="diff-deleted">-{{ diffStats.deleted }}</span>
+    </div>
 
     <el-dialog v-model="showWorktreeDialog" title="新建工作树" width="440px" class="wt-dialog">
       <div class="wt-form">
@@ -312,6 +326,26 @@ async function handleCreateWorktree(): Promise<void> {
 .wt-field {
   flex: 1;
   min-width: 0;
+}
+
+.diff-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  font-size: 11px;
+  line-height: 1;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  flex-shrink: 0;
+}
+
+.diff-added {
+  color: #4ec9b0;
+}
+
+.diff-deleted {
+  color: #f14c4c;
 }
 </style>
 
