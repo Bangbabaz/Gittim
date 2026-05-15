@@ -201,6 +201,26 @@ export function startTask(opts: {
   return toMeta(t)
 }
 
+/** Create a task *definition* without running it (used by the manager dialog). */
+export function createTask(opts: { name?: string; command: string; cwd: string }): TaskMeta {
+  const t: Task = {
+    id: genId(),
+    name: opts.name?.trim() || opts.command,
+    command: opts.command,
+    cwd: opts.cwd,
+    status: 'idle',
+    exitCode: null,
+    startedAt: null,
+    pty: null,
+    output: [],
+    outputBytes: 0
+  }
+  tasks.set(t.id, t)
+  persistDefs()
+  broadcast('task-status', toMeta(t))
+  return toMeta(t)
+}
+
 export function stopTask(id: string): void {
   const t = tasks.get(id)
   if (!t || !t.pty) return

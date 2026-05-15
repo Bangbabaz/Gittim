@@ -44,6 +44,7 @@ const emit = defineEmits<{
   (e: 'fontSizeChange', size: number): void
   (e: 'openSettings'): void
   (e: 'openTasks'): void
+  (e: 'manageTasks'): void
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
@@ -508,6 +509,7 @@ onUnmounted(() => {
       :cwd="currentCwd"
       @worktree-created="(path) => emit('createWorktree', props.paneId, path)"
       @open-tasks="emit('openTasks')"
+      @manage-tasks="emit('manageTasks')"
     />
     <div ref="terminalRef" class="terminal-container"></div>
     <div v-if="showSearch" class="search-overlay" @click.stop>

@@ -2,14 +2,16 @@
 import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { SearchAddon } from '@xterm/addon-search'
+import { ElMessageBox } from 'element-plus'
 import {
   Play,
   Square,
   RotateCw,
   Pencil,
   Trash2,
-  Plus,
+  Search,
+  Settings2,
   X,
   Terminal as TerminalIcon
 } from 'lucide-vue-next'
@@ -27,23 +29,17 @@ type TaskMeta = {
 
 const props = defineProps<{
   modelValue: boolean
-  defaultCwd: string
   selectTaskId: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'editTask', id: string): void
+  (e: 'manageTasks'): void
 }>()
 
 const tasks = ref<TaskMeta[]>([])
 const selectedId = ref<string | null>(null)
-
-// New-task / edit form
-const formCommand = ref('')
-const formCwd = ref('')
-const formName = ref('')
-const editingId = ref<string | null>(null)
-const pkgScripts = ref<Record<string, string>>({})
 
 const selectedTask = computed(() => tasks.value.find((t) => t.id === selectedId.value) || null)
 
@@ -58,7 +54,13 @@ const statusText: Record<TaskMeta['status'], string> = {
 const logRef = ref<HTMLDivElement>()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
+let search: SearchAddon | null = null
 let logResizeObserver: ResizeObserver | null = null
+
+// Log search overlay
+const showLogSearch = ref(false)
+const logSearchTerm = ref('')
+const logSearchInput = ref<HTMLInputElement>()
 
 function ensureTerm(): void {
   if (term || !logRef.value) return
@@ -75,7 +77,9 @@ function ensureTerm(): void {
     }
   })
   fit = new FitAddon()
+  search = new SearchAddon()
   term.loadAddon(fit)
+  term.loadAddon(search)
   term.open(logRef.value)
   logResizeObserver = new ResizeObserver(() => {
     try {
@@ -183,70 +187,10 @@ watch(
   }
 )
 
-// Prefill the new-task cwd from the active pane whenever the drawer's
-// defaultCwd changes and we're not mid-edit.
-watch(
-  () => props.defaultCwd,
-  (c) => {
-    if (!editingId.value && !formCwd.value) formCwd.value = c
-  },
-  { immediate: true }
-)
-
-// Load package.json scripts for the form cwd (debounced-ish via watch).
-watch(
-  formCwd,
-  async (c) => {
-    pkgScripts.value = c ? await window.api.readPackageScripts(c) : {}
-  },
-  { immediate: true }
-)
-
-const pkgScriptNames = computed(() => Object.keys(pkgScripts.value))
-
-function applyScript(name: string): void {
-  formCommand.value = `npm run ${name}`
-  if (!formName.value) formName.value = name
-}
-
-function resetForm(): void {
-  editingId.value = null
-  formCommand.value = ''
-  formName.value = ''
-  formCwd.value = props.defaultCwd || ''
-}
-
-async function submitForm(): Promise<void> {
-  const command = formCommand.value.trim()
-  if (!command) {
-    ElMessage.error('请输入命令')
-    return
-  }
-  const cwd = formCwd.value.trim()
-  if (!cwd) {
-    ElMessage.error('请输入工作目录')
-    return
-  }
-  const name = formName.value.trim() || command
-
-  if (editingId.value) {
-    await window.api.taskUpdate(editingId.value, { name, command, cwd })
-    ElMessage.success('已保存')
-    resetForm()
-    await reload()
-    return
-  }
-  const meta = await window.api.taskStart({ name, command, cwd })
-  resetForm()
-  await reload()
-  selectTask(meta.id)
-}
-
+// Command CRUD lives in the manager dialog (App-owned). The drawer just
+// surfaces entry points and per-row run/stop controls.
 function editTask(t: TaskMeta): void {
-  editingId.value = t.id
-  formCommand.value = t.command
-  formName.value = t.name
-  formCwd.value = t.cwd
+  emit('editTask', t.id)
 }
 
 async function toggleTask(t: TaskMeta): Promise<void> {
@@ -274,7 +218,6 @@ async function removeTask(t: TaskMeta): Promise<void> {
     return
   }
   await window.api.taskRemove(t.id)
-  if (editingId.value === t.id) resetForm()
 }
 
 async function stopSelected(): Promise<void> {
@@ -283,6 +226,36 @@ async function stopSelected(): Promise<void> {
 
 function clearLog(): void {
   term?.reset()
+}
+
+// --- Log search -----------------------------------------------------------
+function openLogSearch(): void {
+  showLogSearch.value = true
+  nextTick(() => logSearchInput.value?.focus())
+}
+
+function closeLogSearch(): void {
+  showLogSearch.value = false
+  logSearchTerm.value = ''
+  search?.clearDecorations()
+}
+
+function findNext(): void {
+  if (logSearchTerm.value) search?.findNext(logSearchTerm.value)
+}
+
+function findPrev(): void {
+  if (logSearchTerm.value) search?.findPrevious(logSearchTerm.value)
+}
+
+function onLogSearchKey(e: KeyboardEvent): void {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    e.shiftKey ? findPrev() : findNext()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    closeLogSearch()
+  }
 }
 </script>
 
@@ -296,43 +269,26 @@ function clearLog(): void {
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <div class="tasks-layout">
-      <!-- Left: form + list -->
+      <!-- Left: task list -->
       <aside class="tasks-side">
         <div class="tasks-side-head">
           <span class="tasks-title">任务</span>
-          <button class="icon-btn" title="关闭" @click="emit('update:modelValue', false)">
-            <X :size="15" />
-          </button>
-        </div>
-
-        <div class="task-form">
-          <div class="tf-title">{{ editingId ? '编辑任务' : '新建任务' }}</div>
-          <input v-model="formCommand" class="tf-input" placeholder="命令，如 npm run dev" />
-          <input v-model="formCwd" class="tf-input" placeholder="工作目录" />
-          <input v-model="formName" class="tf-input" placeholder="名称（可选）" />
-          <div v-if="pkgScriptNames.length" class="tf-scripts">
-            <span class="tf-scripts-label">package.json：</span>
-            <button
-              v-for="s in pkgScriptNames"
-              :key="s"
-              class="tf-chip"
-              :title="pkgScripts[s]"
-              @click="applyScript(s)"
-            >
-              {{ s }}
+          <div class="tasks-side-ops">
+            <button class="icon-btn" title="管理命令" @click="emit('manageTasks')">
+              <Settings2 :size="15" />
             </button>
-          </div>
-          <div class="tf-actions">
-            <button class="tf-submit" @click="submitForm">
-              <Plus v-if="!editingId" :size="13" />
-              <span>{{ editingId ? '保存修改' : '创建并运行' }}</span>
+            <button class="icon-btn" title="关闭" @click="emit('update:modelValue', false)">
+              <X :size="15" />
             </button>
-            <button v-if="editingId" class="tf-cancel" @click="resetForm">取消</button>
           </div>
         </div>
 
         <div class="task-list">
-          <div v-if="!tasks.length" class="task-empty">暂无任务</div>
+          <div v-if="!tasks.length" class="task-empty">
+            还没有命令，点上方
+            <Settings2 :size="12" style="vertical-align: -2px" />
+            新建
+          </div>
           <div
             v-for="t in tasks"
             :key="t.id"
@@ -400,10 +356,31 @@ function clearLog(): void {
             >
               <Square :size="13" />
             </button>
+            <button class="op-btn" title="搜索 (Ctrl+F)" @click="openLogSearch">
+              <Search :size="13" />
+            </button>
             <button class="op-btn" title="清空显示" @click="clearLog">清空</button>
           </div>
         </div>
-        <div ref="logRef" class="log-body"></div>
+        <div class="log-wrap">
+          <div
+            v-if="showLogSearch"
+            class="log-search"
+            @keydown.ctrl.f.prevent="openLogSearch"
+          >
+            <input
+              ref="logSearchInput"
+              v-model="logSearchTerm"
+              class="log-search-input"
+              placeholder="搜索日志 (Enter 下一个 / Shift+Enter 上一个 / Esc 关闭)"
+              @keydown="onLogSearchKey"
+            />
+            <button class="log-search-btn" title="上一个" @click="findPrev">↑</button>
+            <button class="log-search-btn" title="下一个" @click="findNext">↓</button>
+            <button class="log-search-btn" title="关闭" @click="closeLogSearch">×</button>
+          </div>
+          <div ref="logRef" class="log-body"></div>
+        </div>
       </section>
     </div>
   </el-drawer>
@@ -437,6 +414,11 @@ function clearLog(): void {
   font-size: 13px;
   font-weight: 600;
   color: #d4d4d4;
+}
+
+.tasks-side-ops {
+  display: flex;
+  gap: 2px;
 }
 
 .icon-btn {
@@ -716,10 +698,66 @@ function clearLog(): void {
   gap: 2px;
 }
 
+.log-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .log-body {
   flex: 1;
   min-height: 0;
   padding: 6px 8px;
+}
+
+.log-search {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #2d2d30;
+  border: 1px solid #454545;
+  border-radius: 5px;
+  padding: 4px 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.log-search-input {
+  width: 280px;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 3px;
+  color: #d4d4d4;
+  font-size: 12px;
+  padding: 4px 7px;
+  outline: none;
+}
+
+.log-search-input:focus {
+  border-color: #094771;
+}
+
+.log-search-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.log-search-btn:hover {
+  background: #3e3e42;
 }
 </style>
 

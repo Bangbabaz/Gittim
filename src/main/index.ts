@@ -26,6 +26,7 @@ import {
   restartTask,
   removeTask,
   updateTask,
+  createTask,
   killAllTasks
 } from './tasks'
 import { readFileSync } from 'fs'
@@ -191,6 +192,12 @@ app.whenReady().then(() => {
     'task-start',
     (_event, opts: { id?: string; name?: string; command: string; cwd: string }) => {
       return startTask(opts)
+    }
+  )
+  ipcMain.handle(
+    'task-create',
+    (_event, opts: { name?: string; command: string; cwd: string }) => {
+      return createTask(opts)
     }
   )
   ipcMain.handle('task-stop', (_event, id: string) => stopTask(id))

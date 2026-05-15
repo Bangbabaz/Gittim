@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
+import TaskManagerDialog from './components/TaskManagerDialog.vue'
 
 type Pane = { type: 'pane'; id: string }
 type Split = {
@@ -53,9 +54,11 @@ const showSettings = ref(false)
 const settingsTab = ref<'general' | 'about'>('general')
 const electronVersion = ref('')
 
-// Background tasks drawer
+// Background tasks drawer + manager dialog
 const showTasks = ref(false)
 const taskSelectId = ref<string | null>(null)
+const showTaskMgr = ref(false)
+const taskMgrFocusId = ref<string | null>(null)
 const autoOpenTasksOnRun = ref(true)
 // cwd handed to the tasks drawer's "new task" form — the active pane's dir.
 const activeCwd = computed(() => {
@@ -367,6 +370,11 @@ const openTasksDrawer = (): void => {
   showTasks.value = true
 }
 
+const openTaskManager = (focusId: string | null = null): void => {
+  taskMgrFocusId.value = focusId
+  showTaskMgr.value = true
+}
+
 const onDividerDown = (e: MouseEvent, idx: number): void => {
   const d = layoutResult.value.dividers[idx]
   if (!d) return
@@ -612,7 +620,7 @@ onUnmounted(() => {
                 <el-switch
                   :model-value="autoOpenTasksOnRun"
                   size="small"
-                  @update:model-value="(v: boolean) => onToggleAutoOpenTasks(v)"
+                  @update:model-value="(v: string | number | boolean) => onToggleAutoOpenTasks(!!v)"
                 />
               </div>
               <p class="settings-item-desc">
@@ -662,8 +670,14 @@ onUnmounted(() => {
   </el-drawer>
   <TasksDrawer
     v-model="showTasks"
-    :default-cwd="activeCwd"
     :select-task-id="taskSelectId"
+    @manage-tasks="openTaskManager()"
+    @edit-task="(id: string) => openTaskManager(id)"
+  />
+  <TaskManagerDialog
+    v-model="showTaskMgr"
+    :focus-id="taskMgrFocusId"
+    :default-cwd="activeCwd"
   />
   <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
     <template v-if="cwd !== null && layout">
@@ -686,6 +700,7 @@ onUnmounted(() => {
           @font-size-change="onFontSizeChange"
           @open-settings="showSettings = true"
           @open-tasks="openTasksDrawer"
+          @manage-tasks="openTaskManager()"
         />
       </div>
       <div
