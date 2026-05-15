@@ -10,6 +10,16 @@ type SavedLayout =
       b: SavedLayout
     }
 
+interface TaskMeta {
+  id: string
+  name: string
+  command: string
+  cwd: string
+  status: 'idle' | 'running' | 'exited' | 'failed'
+  exitCode: number | null
+  startedAt: number | null
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -44,8 +54,13 @@ declare global {
         windowMaximized?: boolean
         fontSize?: number
         paneLayout?: SavedLayout
+        autoOpenTasksOnRun?: boolean
       }>
-      settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout | null }) => void
+      settingsSet: (patch: {
+        fontSize?: number
+        paneLayout?: SavedLayout | null
+        autoOpenTasksOnRun?: boolean
+      }) => void
       ptyStart: (opts: {
         paneId: string
         cols?: number
@@ -58,6 +73,27 @@ declare global {
       ptyGetCwd: (paneId: string) => Promise<string | null>
       onPtyData: (paneId: string, cb: (data: string) => void) => () => void
       onPtyExit: (paneId: string, cb: (exitCode: number) => void) => () => void
+      taskSubscribe: () => Promise<TaskMeta[]>
+      taskList: () => Promise<TaskMeta[]>
+      taskOutput: (id: string) => Promise<string>
+      taskStart: (opts: {
+        id?: string
+        name?: string
+        command?: string
+        cwd?: string
+      }) => Promise<TaskMeta>
+      taskStop: (id: string) => Promise<void>
+      taskRestart: (id: string) => Promise<TaskMeta | null>
+      taskRemove: (id: string) => Promise<void>
+      taskUpdate: (
+        id: string,
+        patch: { name?: string; command?: string; cwd?: string }
+      ) => Promise<TaskMeta | null>
+      readPackageScripts: (cwd: string) => Promise<Record<string, string>>
+      onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => () => void
+      onTaskStatus: (cb: (meta: TaskMeta) => void) => () => void
+      onTaskCleared: (cb: (payload: { id: string }) => void) => () => void
+      onTaskRemoved: (cb: (payload: { id: string }) => void) => () => void
     }
   }
 }

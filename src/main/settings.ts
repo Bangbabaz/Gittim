@@ -17,18 +17,33 @@ export type SavedLayout =
       b: SavedLayout
     }
 
+/**
+ * Persisted background-task definition. Lives here (not tasks.ts) so settings.ts
+ * has no import cycle with tasks.ts — tasks.ts imports this, not vice-versa.
+ */
+export interface TaskDef {
+  id: string
+  name: string
+  command: string
+  cwd: string
+}
+
 export interface Settings {
   windowBounds?: { x?: number; y?: number; width: number; height: number }
   windowMaximized?: boolean
   fontSize?: number
   /** null means "explicitly cleared" — used by the settings drawer's reset action. */
   paneLayout?: SavedLayout | null
+  tasks?: TaskDef[]
+  /** Auto-open the tasks drawer when a task starts. Default true. */
+  autoOpenTasksOnRun?: boolean
 }
 
 const DEFAULTS: Settings = {
   windowBounds: { width: 1100, height: 720 },
   windowMaximized: false,
-  fontSize: 14
+  fontSize: 14,
+  autoOpenTasksOnRun: true
 }
 
 let cache: Settings | null = null

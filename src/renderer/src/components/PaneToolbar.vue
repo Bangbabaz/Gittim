@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { GitBranch } from 'lucide-vue-next'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { GitBranch, Play, RotateCw, ListChecks } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
+
+type TaskMeta = {
+  id: string
+  name: string
+  command: string
+  cwd: string
+  status: 'idle' | 'running' | 'exited' | 'failed'
+  exitCode: number | null
+  startedAt: number | null
+}
 
 const props = defineProps<{
   cwd: string | undefined
@@ -9,6 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   worktreeCreated: [path: string]
+  openTasks: []
 }>()
 
 const isRepo = ref(false)
@@ -224,6 +235,96 @@ async function handleCreateWorktree(): Promise<void> {
     wtSubmitting.value = false
   }
 }
+
+// -- Background tasks: run / restart button --------------------------------
+
+const allTasks = ref<TaskMeta[]>([])
+let unsubTaskStatus: (() => void) | null = null
+let unsubTaskRemoved: (() => void) | null = null
+
+// The "primary task" the run button is bound to for this pane's cwd: prefer a
+// running one, otherwise the most recently started, otherwise the first defined.
+const primaryTask = computed<TaskMeta | null>(() => {
+  if (!props.cwd) return null
+  const here = allTasks.value.filter((t) => t.cwd === props.cwd)
+  if (!here.length) return null
+  const running = here.filter((t) => t.status === 'running')
+  const pool = running.length ? running : here
+  return [...pool].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0]
+})
+
+const upsertTask = (m: TaskMeta): void => {
+  const i = allTasks.value.findIndex((t) => t.id === m.id)
+  if (i >= 0) allTasks.value[i] = m
+  else allTasks.value.push(m)
+}
+
+onMounted(async () => {
+  allTasks.value = await window.api.taskList()
+  unsubTaskStatus = window.api.onTaskStatus(upsertTask)
+  unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
+    allTasks.value = allTasks.value.filter((t) => t.id !== id)
+  })
+})
+
+onUnmounted(() => {
+  unsubTaskStatus?.()
+  unsubTaskRemoved?.()
+})
+
+// Command launcher popover (shown when there's no primary task yet)
+const showRunPopover = ref(false)
+const runCommand = ref('')
+const pkgScripts = ref<Record<string, string>>({})
+const pkgScriptNames = computed(() => Object.keys(pkgScripts.value))
+
+watch(
+  () => [props.cwd, showRunPopover.value] as const,
+  async ([c, open]) => {
+    if (open && c) pkgScripts.value = await window.api.readPackageScripts(c)
+  }
+)
+
+const startCommand = async (command: string): Promise<void> => {
+  if (!command.trim() || !props.cwd) return
+  await window.api.taskStart({ command: command.trim(), cwd: props.cwd })
+  showRunPopover.value = false
+  runCommand.value = ''
+}
+
+// Run button click: no task → open launcher; has task → restart it.
+const onRunClick = async (): Promise<void> => {
+  const t = primaryTask.value
+  if (!t) {
+    showRunPopover.value = !showRunPopover.value
+    return
+  }
+  await window.api.taskRestart(t.id)
+}
+
+// Manual-trigger popover: dismiss on outside click / Escape.
+const onDocPointerDown = (e: MouseEvent): void => {
+  const el = e.target as HTMLElement
+  if (el.closest('.run-popover') || el.closest('.run-btn')) return
+  showRunPopover.value = false
+}
+const onDocKey = (e: KeyboardEvent): void => {
+  if (e.key === 'Escape') showRunPopover.value = false
+}
+watch(showRunPopover, (open) => {
+  if (open) {
+    document.addEventListener('mousedown', onDocPointerDown, true)
+    document.addEventListener('keydown', onDocKey, true)
+  } else {
+    document.removeEventListener('mousedown', onDocPointerDown, true)
+    document.removeEventListener('keydown', onDocKey, true)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocPointerDown, true)
+  document.removeEventListener('keydown', onDocKey, true)
+})
 </script>
 
 <template>
@@ -258,7 +359,54 @@ async function handleCreateWorktree(): Promise<void> {
       </el-option>
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
-    <button class="run-btn" title="运行">▶</button>
+
+    <el-popover
+      :visible="showRunPopover"
+      placement="bottom-start"
+      :width="280"
+      popper-class="run-popover"
+      trigger="manual"
+    >
+      <template #reference>
+        <button
+          class="run-btn"
+          :class="{ active: !!primaryTask }"
+          :title="primaryTask ? `重启：${primaryTask.name}` : '运行命令'"
+          @click="onRunClick"
+        >
+          <RotateCw v-if="primaryTask" :size="13" />
+          <Play v-else :size="13" />
+        </button>
+      </template>
+      <div class="run-pop">
+        <div class="run-pop-title">运行命令</div>
+        <div v-if="pkgScriptNames.length" class="run-pop-scripts">
+          <button
+            v-for="s in pkgScriptNames"
+            :key="s"
+            class="run-pop-chip"
+            :title="pkgScripts[s]"
+            @click="startCommand(`npm run ${s}`)"
+          >
+            {{ s }}
+          </button>
+        </div>
+        <div class="run-pop-row">
+          <input
+            v-model="runCommand"
+            class="run-pop-input"
+            placeholder="自定义命令"
+            @keydown.enter="startCommand(runCommand)"
+          />
+          <button class="run-pop-go" @click="startCommand(runCommand)">运行</button>
+        </div>
+      </div>
+    </el-popover>
+
+    <button class="run-btn" title="查看任务" @click="emit('openTasks')">
+      <ListChecks :size="13" />
+    </button>
+
     <div v-if="diffStats.added || diffStats.deleted" class="diff-stats">
       <span class="diff-added">+{{ diffStats.added }}</span>
       <span class="diff-deleted">-{{ diffStats.deleted }}</span>
@@ -386,6 +534,16 @@ async function handleCreateWorktree(): Promise<void> {
   background: #3e3e42;
 }
 
+/* Bound to a task → restart affordance, amber to read as "re-run". */
+.run-btn.active {
+  color: #d7a23b;
+}
+
+.run-btn.active:hover {
+  border-color: #d7a23b;
+  color: #d7a23b;
+}
+
 .wt-form {
   display: flex;
   flex-direction: column;
@@ -472,6 +630,83 @@ async function handleCreateWorktree(): Promise<void> {
 </style>
 
 <style>
+/* Run-command launcher popover (teleported to body by el-popover). */
+.run-popover.el-popover.el-popper {
+  background: #252526;
+  border: 1px solid #454545;
+  padding: 10px;
+}
+
+.run-popover .el-popper__arrow::before {
+  background: #252526 !important;
+  border-color: #454545 !important;
+}
+
+.run-pop-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #858585;
+  margin-bottom: 8px;
+}
+
+.run-pop-scripts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.run-pop-chip {
+  background: #0e639c33;
+  border: 1px solid #0e639c66;
+  color: #6cb6ff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.run-pop-chip:hover {
+  background: #0e639c55;
+}
+
+.run-pop-row {
+  display: flex;
+  gap: 6px;
+}
+
+.run-pop-input {
+  flex: 1;
+  min-width: 0;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+}
+
+.run-pop-input:focus {
+  border-color: #094771;
+}
+
+.run-pop-go {
+  background: #0e639c;
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.run-pop-go:hover {
+  background: #1177bb;
+}
+
 /* el-select's dropdown popper is teleported to body — scoped styles can't
    reach it, so override via popper-class globally. */
 .branch-select-dropdown .el-select-dropdown__list {

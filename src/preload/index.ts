@@ -13,6 +13,16 @@ type SavedLayout =
       b: SavedLayout
     }
 
+interface TaskMeta {
+  id: string
+  name: string
+  command: string
+  cwd: string
+  status: 'idle' | 'running' | 'exited' | 'failed'
+  exitCode: number | null
+  startedAt: number | null
+}
+
 // Custom APIs for renderer
 const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
@@ -53,9 +63,13 @@ const api = {
       windowMaximized?: boolean
       fontSize?: number
       paneLayout?: SavedLayout
+      autoOpenTasksOnRun?: boolean
     }>,
-  settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout | null }) =>
-    ipcRenderer.send('settings-set', patch),
+  settingsSet: (patch: {
+    fontSize?: number
+    paneLayout?: SavedLayout | null
+    autoOpenTasksOnRun?: boolean
+  }) => ipcRenderer.send('settings-set', patch),
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
@@ -87,6 +101,41 @@ const api = {
     return () => {
       ipcRenderer.removeListener('pty-exit', listener)
     }
+  },
+
+  // --- Background tasks ----------------------------------------------------
+  taskSubscribe: () => ipcRenderer.invoke('task-subscribe') as Promise<TaskMeta[]>,
+  taskList: () => ipcRenderer.invoke('task-list') as Promise<TaskMeta[]>,
+  taskOutput: (id: string) => ipcRenderer.invoke('task-output', id) as Promise<string>,
+  taskStart: (opts: { id?: string; name?: string; command?: string; cwd?: string }) =>
+    ipcRenderer.invoke('task-start', opts) as Promise<TaskMeta>,
+  taskStop: (id: string) => ipcRenderer.invoke('task-stop', id) as Promise<void>,
+  taskRestart: (id: string) =>
+    ipcRenderer.invoke('task-restart', id) as Promise<TaskMeta | null>,
+  taskRemove: (id: string) => ipcRenderer.invoke('task-remove', id) as Promise<void>,
+  taskUpdate: (id: string, patch: { name?: string; command?: string; cwd?: string }) =>
+    ipcRenderer.invoke('task-update', id, patch) as Promise<TaskMeta | null>,
+  readPackageScripts: (cwd: string) =>
+    ipcRenderer.invoke('read-package-scripts', cwd) as Promise<Record<string, string>>,
+  onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string; chunk: string }): void => cb(p)
+    ipcRenderer.on('task-data', listener)
+    return () => ipcRenderer.removeListener('task-data', listener)
+  },
+  onTaskStatus: (cb: (meta: TaskMeta) => void) => {
+    const listener = (_e: IpcRendererEvent, meta: TaskMeta): void => cb(meta)
+    ipcRenderer.on('task-status', listener)
+    return () => ipcRenderer.removeListener('task-status', listener)
+  },
+  onTaskCleared: (cb: (payload: { id: string }) => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+    ipcRenderer.on('task-cleared', listener)
+    return () => ipcRenderer.removeListener('task-cleared', listener)
+  },
+  onTaskRemoved: (cb: (payload: { id: string }) => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+    ipcRenderer.on('task-removed', listener)
+    return () => ipcRenderer.removeListener('task-removed', listener)
   }
 }
 

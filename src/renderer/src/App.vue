@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
+import TasksDrawer from './components/TasksDrawer.vue'
 
 type Pane = { type: 'pane'; id: string }
 type Split = {
@@ -51,6 +52,16 @@ const appFontSize = ref(DEFAULT_FONT_SIZE)
 const showSettings = ref(false)
 const settingsTab = ref<'general' | 'about'>('general')
 const electronVersion = ref('')
+
+// Background tasks drawer
+const showTasks = ref(false)
+const taskSelectId = ref<string | null>(null)
+const autoOpenTasksOnRun = ref(true)
+// cwd handed to the tasks drawer's "new task" form — the active pane's dir.
+const activeCwd = computed(() => {
+  const id = activeId.value
+  return (id && paneCwd.value[id]) || cwd.value || ''
+})
 
 function winMinimize(): void {
   window.api.winMinimize()
@@ -346,6 +357,16 @@ const onClearSavedLayout = async (): Promise<void> => {
   }
 }
 
+const onToggleAutoOpenTasks = (val: boolean): void => {
+  autoOpenTasksOnRun.value = val
+  window.api.settingsSet({ autoOpenTasksOnRun: val })
+}
+
+const openTasksDrawer = (): void => {
+  taskSelectId.value = null
+  showTasks.value = true
+}
+
 const onDividerDown = (e: MouseEvent, idx: number): void => {
   const d = layoutResult.value.dividers[idx]
   if (!d) return
@@ -381,6 +402,7 @@ const rectStyle = (rect: Rect): Record<string, string> => ({
 
 let resizeObserver: ResizeObserver | null = null
 let unsubscribeWinState: (() => void) | null = null
+let unsubscribeTaskStatus: (() => void) | null = null
 
 // Debounced layout persistence. Layout/cwd changes are frequent during normal
 // use (every `cd` emits a cwdChange); 500ms coalesces bursts.
@@ -422,6 +444,9 @@ onMounted(async () => {
   if (typeof settings.fontSize === 'number') {
     appFontSize.value = settings.fontSize
   }
+  if (typeof settings.autoOpenTasksOnRun === 'boolean') {
+    autoOpenTasksOnRun.value = settings.autoOpenTasksOnRun
+  }
   if (settings.paneLayout) {
     const restoredPaneCwd: Record<string, string> = {}
     const restored = deserializeLayout(settings.paneLayout, restoredPaneCwd)
@@ -437,6 +462,16 @@ onMounted(async () => {
   // Persist on every layout/cwd change. The watch fires after the initial
   // restore too, which is harmless (writes the same content back).
   watch([layout, paneCwd], scheduleSave, { deep: true })
+
+  // Auto-open the tasks drawer when a task starts running (if enabled).
+  // App owns this (not the toolbar) so it works regardless of which pane
+  // started the task and stays decoupled from the toolbar's event plumbing.
+  unsubscribeTaskStatus = window.api.onTaskStatus((meta) => {
+    if (meta.status === 'running' && autoOpenTasksOnRun.value) {
+      taskSelectId.value = meta.id
+      showTasks.value = true
+    }
+  })
 
   // Save synchronously on window close so the last edit isn't lost. The
   // electron-side debounce in settings.ts gets flushed by app's before-quit.
@@ -460,6 +495,7 @@ onMounted(async () => {
 onUnmounted(() => {
   flushSave()
   unsubscribeWinState?.()
+  unsubscribeTaskStatus?.()
   resizeObserver?.disconnect()
   window.removeEventListener('mousemove', onDividerMove)
   window.removeEventListener('mouseup', onDividerUp)
@@ -572,6 +608,19 @@ onUnmounted(() => {
             </header>
             <div class="settings-item">
               <div class="settings-item-row">
+                <label class="settings-item-label">运行任务时自动打开任务面板</label>
+                <el-switch
+                  :model-value="autoOpenTasksOnRun"
+                  size="small"
+                  @update:model-value="(v: boolean) => onToggleAutoOpenTasks(v)"
+                />
+              </div>
+              <p class="settings-item-desc">
+                关闭后，后台任务启动时不会自动弹出任务抽屉，需手动点工具栏的查看按钮。
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
                 <label class="settings-item-label">已保存的窗口布局</label>
                 <button class="danger-btn" @click="onClearSavedLayout">清除</button>
               </div>
@@ -611,6 +660,11 @@ onUnmounted(() => {
       </div>
     </div>
   </el-drawer>
+  <TasksDrawer
+    v-model="showTasks"
+    :default-cwd="activeCwd"
+    :select-task-id="taskSelectId"
+  />
   <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
     <template v-if="cwd !== null && layout">
       <div
@@ -631,6 +685,7 @@ onUnmounted(() => {
           @cwd-change="onCwdChange"
           @font-size-change="onFontSizeChange"
           @open-settings="showSettings = true"
+          @open-tasks="openTasksDrawer"
         />
       </div>
       <div
