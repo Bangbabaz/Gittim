@@ -25,9 +25,7 @@ const emit = defineEmits<{
 
 const isRepo = ref(false)
 const currentBranch = ref<string | null>(null)
-const branches = ref<
-  { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
->([])
+const branches = ref<{ name: string; local: boolean; remote: boolean; worktree?: boolean }[]>([])
 const switching = ref(false)
 const diffStats = ref({ added: 0, deleted: 0 })
 
@@ -342,7 +340,9 @@ const stopTask = async (id: string): Promise<void> => {
     >
       <button class="cmd-pick" :title="selectedTask?.command || '选择命令'">
         <span class="status-dot" :class="selectedTask?.status || 'none'" />
-        <span class="cmd-pick-name">{{ selectedTask ? selectedTask.name : '选择命令' }}</span>
+        <span class="cmd-pick-name">{{
+          selectedTask ? selectedTask.name || selectedTask.command : '选择命令'
+        }}</span>
         <ChevronDown :size="12" class="cmd-pick-caret" />
       </button>
       <template #dropdown>
@@ -354,8 +354,7 @@ const stopTask = async (id: string): Promise<void> => {
             :class="{ picked: t.id === selectedId }"
           >
             <span class="status-dot" :class="t.status" />
-            <span class="td-name">{{ t.name }}</span>
-            <span class="td-cmd">{{ t.command }}</span>
+            <span class="td-label">{{ t.name || t.command }}</span>
           </el-dropdown-item>
           <el-dropdown-item divided command="__manage__">管理命令…</el-dropdown-item>
         </el-dropdown-menu>
@@ -401,14 +400,13 @@ const stopTask = async (id: string): Promise<void> => {
         <el-dropdown-menu>
           <el-dropdown-item v-for="t in runningTasks" :key="t.id" :command="t.id">
             <span class="status-dot running" />
-            <span class="td-name">{{ t.name }}</span>
-            <span class="td-cmd">{{ t.command }}</span>
+            <span class="td-label">{{ t.name || t.command }}</span>
           </el-dropdown-item>
         </el-dropdown-menu>
       </template>
     </el-dropdown>
 
-    <button class="run-btn" title="查看任务" @click="emit('openTasks')">
+    <button class="run-btn view" title="查看任务" @click="emit('openTasks')">
       <ListChecks :size="13" />
     </button>
 
@@ -515,10 +513,11 @@ const stopTask = async (id: string): Promise<void> => {
   background: #3e3e42;
 }
 
+/* Action buttons: white icon on a semantic filled background, unified look. */
 .run-btn {
-  background: none;
-  border: 1px solid #555;
-  color: #4ec9b0;
+  background: #2e944a;
+  border: none;
+  color: #fff;
   width: 20px;
   height: 20px;
   border-radius: 3px;
@@ -534,28 +533,34 @@ const stopTask = async (id: string): Promise<void> => {
 }
 
 .run-btn:hover {
-  border-color: #4ec9b0;
-  color: #4ec9b0;
-  background: #3e3e42;
+  background: #37b058;
+  color: #fff;
 }
 
 /* Selected command is running → restart affordance, amber. */
 .run-btn.active {
-  color: #d7a23b;
+  background: #bd8b1b;
 }
 
 .run-btn.active:hover {
-  border-color: #d7a23b;
-  color: #d7a23b;
+  background: #d7a23b;
 }
 
 .run-btn.stop {
-  color: #f14c4c;
+  background: #c0392b;
 }
 
 .run-btn.stop:hover {
-  border-color: #f14c4c;
-  color: #f14c4c;
+  background: #da4233;
+}
+
+/* View tasks — neutral, not a semantic run/stop action. */
+.run-btn.view {
+  background: #3a3a42;
+}
+
+.run-btn.view:hover {
+  background: #4a4a52;
 }
 
 /* Command picker (el-dropdown custom trigger) */
@@ -756,20 +761,9 @@ const stopTask = async (id: string): Promise<void> => {
   background: #f14c4c;
 }
 
-.task-pick-dropdown .td-name {
-  flex-shrink: 0;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-pick-dropdown .td-cmd {
+.task-pick-dropdown .td-label {
   flex: 1;
   min-width: 0;
-  color: #858585;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

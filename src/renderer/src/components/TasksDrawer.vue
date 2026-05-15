@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, shallowRef, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -15,6 +15,7 @@ import {
   X,
   Terminal as TerminalIcon
 } from 'lucide-vue-next'
+import SearchOverlay from './SearchOverlay.vue'
 import '@xterm/xterm/css/xterm.css'
 
 type TaskMeta = {
@@ -54,13 +55,13 @@ const statusText: Record<TaskMeta['status'], string> = {
 const logRef = ref<HTMLDivElement>()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
-let search: SearchAddon | null = null
 let logResizeObserver: ResizeObserver | null = null
 
-// Log search overlay
+// Log search overlay. The box, query, count and highlight logic live in the
+// shared SearchOverlay; here we only own the visibility and the addon ref it
+// drives (shallow — it's a class instance, no deep reactivity wanted).
 const showLogSearch = ref(false)
-const logSearchTerm = ref('')
-const logSearchInput = ref<HTMLInputElement>()
+const searchAddon = shallowRef<SearchAddon | null>(null)
 
 function ensureTerm(): void {
   if (term || !logRef.value) return
@@ -70,6 +71,9 @@ function ensureTerm(): void {
     cursorBlink: false,
     disableStdin: true,
     convertEol: true,
+    // Required for SearchAddon match decorations (the highlight background)
+    // to render — same as the terminal panes.
+    allowProposedApi: true,
     theme: {
       background: '#1b1b1f',
       foreground: '#d4d4d4',
@@ -77,9 +81,10 @@ function ensureTerm(): void {
     }
   })
   fit = new FitAddon()
-  search = new SearchAddon()
+  const sa = new SearchAddon()
+  searchAddon.value = sa
   term.loadAddon(fit)
-  term.loadAddon(search)
+  term.loadAddon(sa)
   term.open(logRef.value)
   logResizeObserver = new ResizeObserver(() => {
     try {
@@ -220,42 +225,19 @@ async function removeTask(t: TaskMeta): Promise<void> {
   await window.api.taskRemove(t.id)
 }
 
-async function stopSelected(): Promise<void> {
-  if (selectedTask.value) await window.api.taskStop(selectedTask.value.id)
-}
-
 function clearLog(): void {
   term?.reset()
 }
 
 // --- Log search -----------------------------------------------------------
+// SearchOverlay owns query/count/highlight; it clears its decorations on
+// unmount, so close is just a visibility toggle.
 function openLogSearch(): void {
   showLogSearch.value = true
-  nextTick(() => logSearchInput.value?.focus())
 }
 
 function closeLogSearch(): void {
   showLogSearch.value = false
-  logSearchTerm.value = ''
-  search?.clearDecorations()
-}
-
-function findNext(): void {
-  if (logSearchTerm.value) search?.findNext(logSearchTerm.value)
-}
-
-function findPrev(): void {
-  if (logSearchTerm.value) search?.findPrevious(logSearchTerm.value)
-}
-
-function onLogSearchKey(e: KeyboardEvent): void {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    e.shiftKey ? findPrev() : findNext()
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    closeLogSearch()
-  }
 }
 </script>
 
@@ -268,129 +250,167 @@ function onLogSearchKey(e: KeyboardEvent): void {
     class="tasks-drawer"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
-    <div class="tasks-layout">
-      <!-- Left: task list -->
-      <aside class="tasks-side">
-        <div class="tasks-side-head">
-          <span class="tasks-title">任务</span>
-          <div class="tasks-side-ops">
-            <button class="icon-btn" title="管理命令" @click="emit('manageTasks')">
-              <Settings2 :size="15" />
-            </button>
-            <button class="icon-btn" title="关闭" @click="emit('update:modelValue', false)">
-              <X :size="15" />
-            </button>
-          </div>
+    <div class="tasks-shell">
+      <!-- Top header bar — kept visually consistent with the app title bar
+           (same 32px height + #1e1e1e bg). `no-drag` so the area that overlaps
+           the OS title-bar strip stays clickable. -->
+      <header class="tasks-header">
+        <span class="tasks-header-title">任务</span>
+        <div class="tasks-header-ops">
+          <button class="hdr-btn" title="管理命令" @click="emit('manageTasks')">
+            <Settings2 :size="15" />
+          </button>
+          <button class="hdr-btn" title="关闭" @click="emit('update:modelValue', false)">
+            <X :size="15" />
+          </button>
         </div>
+      </header>
 
-        <div class="task-list">
-          <div v-if="!tasks.length" class="task-empty">
-            还没有命令，点上方
-            <Settings2 :size="12" style="vertical-align: -2px" />
-            新建
-          </div>
-          <div
-            v-for="t in tasks"
-            :key="t.id"
-            class="task-row"
-            :class="{ active: t.id === selectedId }"
-            @click="selectTask(t.id)"
-          >
-            <span class="status-dot" :class="t.status" :title="statusText[t.status]" />
-            <div class="task-meta">
-              <div class="task-name">{{ t.name }}</div>
-              <div class="task-cmd">{{ t.command }}</div>
+      <div class="tasks-layout">
+        <!-- Left: task list -->
+        <aside class="tasks-side">
+          <div class="task-list">
+            <div v-if="!tasks.length" class="task-empty">
+              还没有命令，点上方
+              <Settings2 :size="12" style="vertical-align: -2px" />
+              新建
             </div>
-            <div class="task-ops" @click.stop>
-              <button
-                class="op-btn"
-                :title="t.status === 'running' ? '停止' : '运行'"
-                @click="toggleTask(t)"
-              >
-                <Square v-if="t.status === 'running'" :size="13" />
-                <Play v-else :size="13" />
-              </button>
-              <button class="op-btn" title="重启" @click="restartTask(t)">
-                <RotateCw :size="13" />
-              </button>
-              <button class="op-btn" title="编辑" @click="editTask(t)">
-                <Pencil :size="13" />
-              </button>
-              <button class="op-btn danger" title="删除" @click="removeTask(t)">
-                <Trash2 :size="13" />
-              </button>
+            <div
+              v-for="t in tasks"
+              :key="t.id"
+              class="task-row"
+              :class="{ active: t.id === selectedId }"
+              @click="selectTask(t.id)"
+            >
+              <span class="status-dot" :class="t.status" :title="statusText[t.status]" />
+              <div class="task-meta">
+                <div class="task-name">{{ t.name }}</div>
+                <div class="task-cmd">{{ t.command }}</div>
+              </div>
+              <div class="task-ops" @click.stop>
+                <button
+                  class="op-btn"
+                  :class="t.status === 'running' ? 'stop' : 'run'"
+                  :title="t.status === 'running' ? '停止' : '运行'"
+                  @click="toggleTask(t)"
+                >
+                  <Square v-if="t.status === 'running'" :size="13" />
+                  <Play v-else :size="13" />
+                </button>
+                <button
+                  v-if="t.status === 'running'"
+                  class="op-btn run"
+                  title="重新运行"
+                  @click="restartTask(t)"
+                >
+                  <RotateCw :size="13" />
+                </button>
+                <button class="op-btn edit" title="编辑" @click="editTask(t)">
+                  <Pencil :size="13" />
+                </button>
+                <button class="op-btn danger" title="删除" @click="removeTask(t)">
+                  <Trash2 :size="13" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
 
-      <!-- Right: log viewer -->
-      <section class="tasks-log">
-        <div class="log-head">
-          <TerminalIcon :size="14" class="log-head-icon" />
-          <span class="log-head-title">
-            {{ selectedTask ? selectedTask.name : '选择任务查看日志' }}
-          </span>
-          <span v-if="selectedTask" class="log-head-status" :class="selectedTask.status">
-            {{ statusText[selectedTask.status]
-            }}{{
-              selectedTask.status === 'failed' && selectedTask.exitCode !== null
-                ? ` (${selectedTask.exitCode})`
-                : ''
-            }}
-          </span>
-          <div class="log-head-ops">
-            <button
-              v-if="selectedTask"
-              class="op-btn"
-              title="重启"
-              @click="restartTask(selectedTask)"
-            >
-              <RotateCw :size="13" />
-            </button>
-            <button
-              v-if="selectedTask && selectedTask.status === 'running'"
-              class="op-btn"
-              title="停止"
-              @click="stopSelected"
-            >
-              <Square :size="13" />
-            </button>
-            <button class="op-btn" title="搜索 (Ctrl+F)" @click="openLogSearch">
-              <Search :size="13" />
-            </button>
-            <button class="op-btn" title="清空显示" @click="clearLog">清空</button>
+        <!-- Right: log viewer -->
+        <section class="tasks-log">
+          <div class="log-head">
+            <TerminalIcon :size="14" class="log-head-icon" />
+            <span class="log-head-title">
+              {{ selectedTask ? selectedTask.name : '选择任务查看日志' }}
+            </span>
+            <span v-if="selectedTask" class="log-head-status" :class="selectedTask.status">
+              {{ statusText[selectedTask.status]
+              }}{{
+                selectedTask.status === 'failed' && selectedTask.exitCode !== null
+                  ? ` (${selectedTask.exitCode})`
+                  : ''
+              }}
+            </span>
+            <div class="log-head-ops">
+              <button class="op-btn" title="搜索" @click="openLogSearch">
+                <Search :size="13" />
+              </button>
+              <button class="op-btn" title="清空显示" @click="clearLog">清空</button>
+            </div>
           </div>
-        </div>
-        <div class="log-wrap">
-          <div
-            v-if="showLogSearch"
-            class="log-search"
-            @keydown.ctrl.f.prevent="openLogSearch"
-          >
-            <input
-              ref="logSearchInput"
-              v-model="logSearchTerm"
-              class="log-search-input"
-              placeholder="搜索日志 (Enter 下一个 / Shift+Enter 上一个 / Esc 关闭)"
-              @keydown="onLogSearchKey"
-            />
-            <button class="log-search-btn" title="上一个" @click="findPrev">↑</button>
-            <button class="log-search-btn" title="下一个" @click="findNext">↓</button>
-            <button class="log-search-btn" title="关闭" @click="closeLogSearch">×</button>
+          <div class="log-wrap">
+            <div v-if="showLogSearch && searchAddon" class="log-search-pos">
+              <SearchOverlay :search-addon="searchAddon" @close="closeLogSearch" />
+            </div>
+            <div ref="logRef" class="log-body"></div>
           </div>
-          <div ref="logRef" class="log-body"></div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </el-drawer>
 </template>
 
 <style scoped>
-.tasks-layout {
+.tasks-shell {
   display: flex;
+  flex-direction: column;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* The drawer overlaps the OS title-bar strip; without no-drag the buttons
+     under that strip get hijacked by the window-drag region. */
+  -webkit-app-region: no-drag;
+}
+
+/* Header bar — same height/background as the app title bar so the two read
+   as one continuous chrome, and (like the title bar) draggable to move the
+   window. The shell is no-drag; this re-enables drag just for the header. */
+.tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 6px 0 14px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #3e3e42;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.tasks-header-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cccccc;
+}
+
+.tasks-header-ops {
+  display: flex;
+  gap: 2px;
+}
+
+.hdr-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  color: #9d9d9d;
+  cursor: pointer;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.hdr-btn:hover {
+  background: #3e3e42;
+  color: #fff;
+}
+
+.tasks-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .tasks-side {
@@ -400,43 +420,6 @@ function onLogSearchKey(e: KeyboardEvent): void {
   flex-direction: column;
   background: #252526;
   border-right: 1px solid #3e3e42;
-}
-
-.tasks-side-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid #3e3e42;
-}
-
-.tasks-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #d4d4d4;
-}
-
-.tasks-side-ops {
-  display: flex;
-  gap: 2px;
-}
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  border: none;
-  color: #9d9d9d;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.icon-btn:hover {
-  background: #3e3e42;
-  color: #fff;
 }
 
 .task-form {
@@ -612,7 +595,7 @@ function onLogSearchKey(e: KeyboardEvent): void {
 
 .task-ops {
   display: flex;
-  gap: 1px;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.1s;
 }
@@ -646,6 +629,37 @@ function onLogSearchKey(e: KeyboardEvent): void {
 .op-btn.danger:hover {
   background: #c42b1c44;
   color: #f14c4c;
+}
+
+/* Per-row command buttons: unified white icons on semantic filled
+   backgrounds (run=green, stop/delete=red, restart=amber, edit=neutral). */
+.task-ops .op-btn {
+  background: #3a3a42;
+  color: #fff;
+}
+
+.task-ops .op-btn:hover {
+  background: #4a4a52;
+  color: #fff;
+}
+
+.task-ops .op-btn.run {
+  background: #2e944a;
+}
+
+.task-ops .op-btn.run:hover {
+  background: #37b058;
+}
+
+.task-ops .op-btn.stop,
+.task-ops .op-btn.danger {
+  background: #c0392b;
+}
+
+.task-ops .op-btn.stop:hover,
+.task-ops .op-btn.danger:hover {
+  background: #da4233;
+  color: #fff;
 }
 
 .tasks-log {
@@ -712,52 +726,11 @@ function onLogSearchKey(e: KeyboardEvent): void {
   padding: 6px 8px;
 }
 
-.log-search {
+.log-search-pos {
   position: absolute;
   top: 8px;
   right: 14px;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: #2d2d30;
-  border: 1px solid #454545;
-  border-radius: 5px;
-  padding: 4px 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.log-search-input {
-  width: 280px;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 3px;
-  color: #d4d4d4;
-  font-size: 12px;
-  padding: 4px 7px;
-  outline: none;
-}
-
-.log-search-input:focus {
-  border-color: #094771;
-}
-
-.log-search-btn {
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: #ccc;
-  cursor: pointer;
-  border-radius: 3px;
-  font-size: 13px;
-}
-
-.log-search-btn:hover {
-  background: #3e3e42;
 }
 </style>
 
@@ -765,6 +738,9 @@ function onLogSearchKey(e: KeyboardEvent): void {
 .tasks-drawer .el-drawer__body {
   padding: 0;
   background: #1b1b1f;
+  /* Punch a no-drag hole over the OS title-bar strip the drawer overlaps,
+     otherwise clicks on controls near the top become window drags. */
+  -webkit-app-region: no-drag;
 }
 
 .tasks-drawer.el-drawer {

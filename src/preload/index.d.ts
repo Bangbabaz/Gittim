@@ -29,9 +29,7 @@ declare global {
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       getGitBranches: (
         cwd: string
-      ) => Promise<
-        { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
-      >
+      ) => Promise<{ name: string; local: boolean; remote: boolean; worktree?: boolean }[]>
       getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
@@ -82,11 +80,7 @@ declare global {
         command?: string
         cwd?: string
       }) => Promise<TaskMeta>
-      taskCreate: (opts: {
-        name?: string
-        command: string
-        cwd: string
-      }) => Promise<TaskMeta>
+      taskCreate: (opts: { name?: string; command: string; cwd: string }) => Promise<TaskMeta>
       taskStop: (id: string) => Promise<void>
       taskRestart: (id: string) => Promise<TaskMeta | null>
       taskRemove: (id: string) => Promise<void>
