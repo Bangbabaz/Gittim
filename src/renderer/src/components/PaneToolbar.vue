@@ -258,6 +258,7 @@ async function handleCreateWorktree(): Promise<void> {
       </el-option>
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
+    <button class="run-btn" title="运行">▶</button>
     <div v-if="diffStats.added || diffStats.deleted" class="diff-stats">
       <span class="diff-added">+{{ diffStats.added }}</span>
       <span class="diff-deleted">-{{ diffStats.deleted }}</span>
@@ -358,6 +359,30 @@ async function handleCreateWorktree(): Promise<void> {
 .wt-btn:hover {
   border-color: #888;
   color: #fff;
+  background: #3e3e42;
+}
+
+.run-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #4ec9b0;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.run-btn:hover {
+  border-color: #4ec9b0;
+  color: #4ec9b0;
   background: #3e3e42;
 }
 
