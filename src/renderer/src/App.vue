@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 
 type Pane = { type: 'pane'; id: string }
@@ -39,6 +41,16 @@ const containerRef = ref<HTMLDivElement>()
 const containerSize = ref({ width: 0, height: 0 })
 const isMaximized = ref(false)
 const isMac = ref(false)
+
+const DEFAULT_FONT_SIZE = 14
+const MIN_FONT_SIZE = 8
+const MAX_FONT_SIZE = 32
+// Global font size — single source of truth so the drawer and every open
+// pane stay in sync. Loaded from settings on mount, persisted on change.
+const appFontSize = ref(DEFAULT_FONT_SIZE)
+const showSettings = ref(false)
+const settingsTab = ref<'general' | 'about'>('general')
+const electronVersion = ref('')
 
 function winMinimize(): void {
   window.api.winMinimize()
@@ -303,6 +315,37 @@ const onCwdChange = (paneId: string, newCwd: string): void => {
   paneCwd.value = { ...paneCwd.value, [paneId]: newCwd }
 }
 
+// A terminal pane (or the settings drawer) changed font size. Update the
+// shared ref so every other terminal picks it up via prop, and persist.
+const onFontSizeChange = (size: number): void => {
+  const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
+  if (appFontSize.value === clamped) return
+  appFontSize.value = clamped
+  window.api.settingsSet({ fontSize: clamped })
+}
+
+const decreaseFontSize = (): void => onFontSizeChange(appFontSize.value - 1)
+const increaseFontSize = (): void => onFontSizeChange(appFontSize.value + 1)
+const resetFontSize = (): void => onFontSizeChange(DEFAULT_FONT_SIZE)
+
+const onClearSavedLayout = async (): Promise<void> => {
+  try {
+    await ElMessageBox.confirm(
+      '下次启动时将不再恢复已保存的面板和工作目录。当前打开的面板不受影响。',
+      '清除保存的布局？',
+      {
+        confirmButtonText: '清除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    window.api.settingsSet({ paneLayout: null })
+    ElMessage.success('已清除保存的布局')
+  } catch {
+    // user cancelled — nothing to do
+  }
+}
+
 const onDividerDown = (e: MouseEvent, idx: number): void => {
   const d = layoutResult.value.dividers[idx]
   if (!d) return
@@ -366,10 +409,19 @@ onMounted(async () => {
     isMaximized.value = maximized
   })
 
+  // electronAPI exposes process.versions on the renderer side via preload.
+  const versions = (
+    window.electron as unknown as { process?: { versions?: Record<string, string> } }
+  ).process?.versions
+  if (versions?.electron) electronVersion.value = versions.electron
+
   // Restore previously saved layout if there is one. Each pane gets a fresh
   // id; its saved cwd is seeded into paneCwd so the PTY spawns there.
   // shell.ts validates the dir and falls back to ~ if it's been deleted.
   const settings = await window.api.settingsGet()
+  if (typeof settings.fontSize === 'number') {
+    appFontSize.value = settings.fontSize
+  }
   if (settings.paneLayout) {
     const restoredPaneCwd: Record<string, string> = {}
     const restored = deserializeLayout(settings.paneLayout, restoredPaneCwd)
@@ -418,28 +470,147 @@ onUnmounted(() => {
 <template>
   <div class="title-bar" :class="{ mac: isMac }">
     <span class="title-bar-text">Gittim</span>
-    <div v-if="!isMac" class="title-bar-controls">
-      <button class="tb-btn tb-min" title="最小化" @click="winMinimize">
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect y="4" width="10" height="1" fill="currentColor" />
-        </svg>
+    <div class="title-bar-right">
+      <button class="tb-btn tb-settings" title="设置" @click="showSettings = true">
+        <SettingsIcon :size="14" />
       </button>
-      <button class="tb-btn tb-max" title="最大化" @click="winMaximize">
-        <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
-          <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
-        </svg>
-        <svg v-else width="10" height="10" viewBox="0 0 10 10">
-          <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" />
-          <rect x="0" y="3" width="8" height="7" fill="#2d2d30" stroke="currentColor" />
-        </svg>
-      </button>
-      <button class="tb-btn tb-close" title="关闭" @click="winClose">
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2" />
-        </svg>
-      </button>
+      <div v-if="!isMac" class="title-bar-controls">
+        <button class="tb-btn tb-min" title="最小化" @click="winMinimize">
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <rect y="4" width="10" height="1" fill="currentColor" />
+          </svg>
+        </button>
+        <button class="tb-btn tb-max" title="最大化" @click="winMaximize">
+          <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
+            <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" />
+          </svg>
+          <svg v-else width="10" height="10" viewBox="0 0 10 10">
+            <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" />
+            <rect x="0" y="3" width="8" height="7" fill="#2d2d30" stroke="currentColor" />
+          </svg>
+        </button>
+        <button class="tb-btn tb-close" title="关闭" @click="winClose">
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
+  <el-drawer
+    v-model="showSettings"
+    direction="rtl"
+    size="560px"
+    :with-header="false"
+    class="settings-drawer"
+  >
+    <div class="settings-layout">
+      <aside class="settings-sidebar">
+        <div class="settings-sidebar-title">设置</div>
+        <nav class="settings-nav">
+          <button
+            class="settings-nav-item"
+            :class="{ active: settingsTab === 'general' }"
+            @click="settingsTab = 'general'"
+          >
+            <Layout :size="14" class="settings-nav-icon" />
+            <span>通用</span>
+          </button>
+          <button
+            class="settings-nav-item"
+            :class="{ active: settingsTab === 'about' }"
+            @click="settingsTab = 'about'"
+          >
+            <Info :size="14" class="settings-nav-icon" />
+            <span>关于</span>
+          </button>
+        </nav>
+      </aside>
+
+      <div class="settings-panel">
+        <template v-if="settingsTab === 'general'">
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <Type :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">外观</h3>
+            </header>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">字号</label>
+                <div class="font-size-control">
+                  <button
+                    class="fs-btn"
+                    :disabled="appFontSize <= MIN_FONT_SIZE"
+                    @click="decreaseFontSize"
+                  >−</button>
+                  <span class="fs-value">{{ appFontSize }}</span>
+                  <button
+                    class="fs-btn"
+                    :disabled="appFontSize >= MAX_FONT_SIZE"
+                    @click="increaseFontSize"
+                  >+</button>
+                  <button
+                    v-if="appFontSize !== DEFAULT_FONT_SIZE"
+                    class="fs-reset"
+                    title="重置为默认"
+                    @click="resetFontSize"
+                  >
+                    <RotateCcw :size="12" />
+                  </button>
+                </div>
+              </div>
+              <p class="settings-item-desc">
+                终端字体大小，{{ MIN_FONT_SIZE }}–{{ MAX_FONT_SIZE }}。也可以用 Ctrl+= / Ctrl+- 调整。
+              </p>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <Layout :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">会话</h3>
+            </header>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">已保存的窗口布局</label>
+                <button class="danger-btn" @click="onClearSavedLayout">清除</button>
+              </div>
+              <p class="settings-item-desc">
+                清除后下次启动不再恢复之前的面板和工作目录，从主目录单面板开始。
+              </p>
+            </div>
+          </section>
+        </template>
+
+        <template v-else>
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <Info :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">关于</h3>
+            </header>
+            <div class="about-block">
+              <div class="about-logo">Gittim</div>
+              <div class="about-tagline">Git + tmux 风格的终端模拟器</div>
+            </div>
+            <dl class="about-list">
+              <div class="about-row">
+                <dt>版本</dt>
+                <dd>v1.0.0</dd>
+              </div>
+              <div class="about-row">
+                <dt>Electron</dt>
+                <dd>{{ electronVersion || '—' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>配置文件</dt>
+                <dd class="mono">~/.Gittim/settings.json</dd>
+              </div>
+            </dl>
+          </section>
+        </template>
+      </div>
+    </div>
+  </el-drawer>
   <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
     <template v-if="cwd !== null && layout">
       <div
@@ -452,11 +623,14 @@ onUnmounted(() => {
         <TerminalView
           :pane-id="pane.id"
           :cwd="paneCwd[pane.id] ?? cwd"
+          :font-size="appFontSize"
           @focus="setActive"
           @split="onSplit"
           @close="onClose"
           @create-worktree="onCreateWorktree"
           @cwd-change="onCwdChange"
+          @font-size-change="onFontSizeChange"
+          @open-settings="showSettings = true"
         />
       </div>
       <div
@@ -502,9 +676,26 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+.title-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
 .title-bar-controls {
   display: flex;
-  -webkit-app-region: no-drag;
+  margin-left: 4px;
+  padding-left: 4px;
+  border-left: 1px solid #3e3e42;
+}
+
+.tb-settings {
+  color: #9d9d9d;
+}
+
+.tb-settings:hover {
+  color: #fff;
 }
 
 .tb-btn {
@@ -565,5 +756,271 @@ body {
 
 .divider.column {
   cursor: row-resize;
+}
+
+/* --- Settings drawer ----------------------------------------------------- */
+
+.settings-drawer .el-drawer__body {
+  padding: 0;
+  background: #1b1b1f;
+}
+
+.settings-drawer.el-drawer {
+  background: #1b1b1f;
+}
+
+.settings-layout {
+  display: flex;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.settings-sidebar {
+  width: 168px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #252526;
+  border-right: 1px solid #3e3e42;
+  padding: 14px 0 14px 0;
+}
+
+.settings-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #858585;
+  padding: 0 18px 12px 18px;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 6px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: #cccccc;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.settings-nav-item:hover {
+  background: #2d2d30;
+}
+
+.settings-nav-item.active {
+  background: #094771;
+  color: #ffffff;
+}
+
+.settings-nav-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.settings-panel {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.settings-section-icon {
+  color: #858585;
+}
+
+.settings-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #858585;
+}
+
+.settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.settings-item-label {
+  font-size: 13px;
+  color: #d4d4d4;
+}
+
+.settings-item-desc {
+  margin: 0;
+  font-size: 11.5px;
+  color: #858585;
+  line-height: 1.55;
+}
+
+/* Font-size segmented control */
+.font-size-control {
+  display: flex;
+  align-items: center;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.fs-btn {
+  width: 24px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #d4d4d4;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+}
+
+.fs-btn:hover:not(:disabled) {
+  background: #3e3e42;
+}
+
+.fs-btn:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.fs-value {
+  min-width: 28px;
+  text-align: center;
+  font-size: 12px;
+  color: #d4d4d4;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-reset {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+  margin-left: 4px;
+}
+
+.fs-reset:hover {
+  background: #3e3e42;
+  color: #d4d4d4;
+}
+
+/* Destructive button (clear layout) */
+.danger-btn {
+  background: transparent;
+  border: 1px solid #c42b1c66;
+  color: #f14c4c;
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.danger-btn:hover {
+  background: #c42b1c22;
+  border-color: #c42b1c;
+}
+
+/* About tab */
+.about-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.about-logo {
+  font-size: 22px;
+  color: #d4d4d4;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.about-tagline {
+  color: #858585;
+  font-size: 12px;
+}
+
+.about-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  margin: 0;
+}
+
+.about-row dt {
+  color: #d4d4d4;
+  font-weight: normal;
+}
+
+.about-row dd {
+  margin: 0;
+  color: #858585;
+}
+
+.about-row .mono {
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px;
 }
 </style>

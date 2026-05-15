@@ -54,7 +54,7 @@ const api = {
       fontSize?: number
       paneLayout?: SavedLayout
     }>,
-  settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout }) =>
+  settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout | null }) =>
     ipcRenderer.send('settings-set', patch),
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,

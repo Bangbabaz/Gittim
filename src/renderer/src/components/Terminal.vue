@@ -5,18 +5,33 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import {
+  Copy,
+  ClipboardPaste,
+  TextSelect,
+  Search,
+  Eraser,
+  SplitSquareHorizontal,
+  SplitSquareVertical,
+  X,
+  Settings as SettingsIcon
+} from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
 import '@xterm/xterm/css/xterm.css'
+
+const DEFAULT_FONT_SIZE = 14
 
 const props = withDefaults(
   defineProps<{
     paneId: string
     options?: Record<string, unknown>
     cwd?: string
+    fontSize?: number
   }>(),
   {
     options: () => ({}),
-    cwd: ''
+    cwd: '',
+    fontSize: DEFAULT_FONT_SIZE
   }
 )
 
@@ -26,6 +41,8 @@ const emit = defineEmits<{
   (e: 'close', paneId: string): void
   (e: 'createWorktree', paneId: string, cwd: string): void
   (e: 'cwdChange', paneId: string, cwd: string): void
+  (e: 'fontSizeChange', size: number): void
+  (e: 'openSettings'): void
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
@@ -33,6 +50,9 @@ const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
+// Captured when the menu opens so "复制" can be enabled/disabled correctly
+// (the selection is cleared the moment the menu steals focus otherwise).
+const menuHasSelection = ref(false)
 
 // Tracks the shell's actual cwd. Initialized from the prop; updated by
 // OSC 7 / OSC 9;9 escape sequences emitted by the shell, and by a PID-based
@@ -45,14 +65,15 @@ const showSearch = ref(false)
 const searchTerm = ref('')
 const searchInputRef = ref<HTMLInputElement>()
 
-const DEFAULT_FONT_SIZE = 14
 const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 32
-const fontSize = ref(DEFAULT_FONT_SIZE)
+// Local mirror of the effective font size. Named distinctly from the
+// `fontSize` prop to avoid a props/state key collision (vue/no-dupe-keys).
+const currentFontSize = ref(DEFAULT_FONT_SIZE)
 
 const terminal = new Terminal({
   fontSize: DEFAULT_FONT_SIZE,
-  fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
+  fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
   cursorBlink: true,
   rightClickSelectsWord: false,
   allowProposedApi: true,
@@ -187,8 +208,8 @@ const pasteFromClipboard = async (): Promise<void> => {
 // Apply a new font size and reflow. Returns true if it actually changed.
 const applyFontSize = (size: number): boolean => {
   const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
-  if (clamped === fontSize.value) return false
-  fontSize.value = clamped
+  if (clamped === currentFontSize.value) return false
+  currentFontSize.value = clamped
   terminal.options.fontSize = clamped
   try {
     fitAddon.fit()
@@ -199,8 +220,15 @@ const applyFontSize = (size: number): boolean => {
 }
 
 const persistFontSize = (): void => {
-  window.api.settingsSet({ fontSize: fontSize.value })
+  emit('fontSizeChange', currentFontSize.value)
 }
+
+watch(
+  () => props.fontSize,
+  (n) => {
+    if (typeof n === 'number') applyFontSize(n)
+  }
+)
 
 const openSearch = (): void => {
   showSearch.value = true
@@ -278,13 +306,13 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   // QWERTY layouts; `+` arrives when shift IS held (also accept it).
   if (e.ctrlKey && !e.altKey && (e.key === '=' || e.key === '+')) {
     e.preventDefault()
-    if (applyFontSize(fontSize.value + 1)) persistFontSize()
+    if (applyFontSize(currentFontSize.value + 1)) persistFontSize()
     return false
   }
   // Ctrl+- → font size down
   if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === '-') {
     e.preventDefault()
-    if (applyFontSize(fontSize.value - 1)) persistFontSize()
+    if (applyFontSize(currentFontSize.value - 1)) persistFontSize()
     return false
   }
   // Ctrl+0 → reset font size
@@ -320,10 +348,18 @@ const onContextMenu = (e: MouseEvent): void => {
   e.preventDefault()
   contextMenuX.value = e.clientX
   contextMenuY.value = e.clientY
+  menuHasSelection.value = terminal.hasSelection()
   contextMenuVisible.value = true
 }
 
+const onBackdropContextMenu = (e: MouseEvent): void => {
+  e.preventDefault()
+  contextMenuX.value = e.clientX
+  contextMenuY.value = e.clientY
+}
+
 const onCopy = async (): Promise<void> => {
+  if (!menuHasSelection.value) return
   await copySelection()
   contextMenuVisible.value = false
   terminal.textarea?.focus()
@@ -333,6 +369,42 @@ const onPaste = async (): Promise<void> => {
   await pasteFromClipboard()
   contextMenuVisible.value = false
   terminal.textarea?.focus()
+}
+
+const onSelectAll = (): void => {
+  terminal.selectAll()
+  contextMenuVisible.value = false
+}
+
+const onClear = (): void => {
+  terminal.clear()
+  contextMenuVisible.value = false
+  terminal.focus()
+}
+
+const onFind = (): void => {
+  contextMenuVisible.value = false
+  openSearch()
+}
+
+const onSplitRight = (): void => {
+  contextMenuVisible.value = false
+  emit('split', props.paneId, 'row')
+}
+
+const onSplitDown = (): void => {
+  contextMenuVisible.value = false
+  emit('split', props.paneId, 'column')
+}
+
+const onClosePane = (): void => {
+  contextMenuVisible.value = false
+  emit('close', props.paneId)
+}
+
+const onOpenSettings = (): void => {
+  contextMenuVisible.value = false
+  emit('openSettings')
 }
 
 const closeContextMenu = (): void => {
@@ -379,16 +451,11 @@ const sendResize = (): void => {
 onMounted(async () => {
   if (!terminalRef.value) return
 
-  // Load saved font size before opening so the first render uses the right
-  // metrics — avoids a layout shift on initial mount.
-  try {
-    const settings = await window.api.settingsGet()
-    if (typeof settings.fontSize === 'number') {
-      fontSize.value = settings.fontSize
-      terminal.options.fontSize = settings.fontSize
-    }
-  } catch {
-    // settings module unavailable — keep default
+  // Apply font size from prop before opening so the first render uses the
+  // right metrics — avoids a layout shift on initial mount.
+  if (typeof props.fontSize === 'number') {
+    currentFontSize.value = props.fontSize
+    terminal.options.fontSize = props.fontSize
   }
 
   terminal.open(terminalRef.value)
@@ -421,10 +488,10 @@ onMounted(async () => {
   terminal.focus()
 })
 
-document.addEventListener('click', closeContextMenu)
+window.addEventListener('blur', closeContextMenu)
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeContextMenu)
+  window.removeEventListener('blur', closeContextMenu)
   resizeObserver?.disconnect()
   unsubscribeData?.()
   unsubscribeExit?.()
@@ -456,12 +523,71 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="contextMenuVisible"
-        class="context-menu"
-        :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
-        @click.stop
+        class="context-menu-backdrop"
+        @click="closeContextMenu"
+        @contextmenu="onBackdropContextMenu"
       >
-        <div v-if="terminal.hasSelection()" class="context-menu-item" @click="onCopy">Copy</div>
-        <div class="context-menu-item" @click="onPaste">Paste</div>
+        <div
+          class="context-menu"
+          :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
+          @click.stop
+        >
+          <div
+            class="cm-item"
+            :class="{ disabled: !menuHasSelection }"
+            @click="onCopy"
+          >
+            <Copy :size="14" class="cm-icon" />
+            <span class="cm-label">复制</span>
+            <span class="cm-shortcut">Ctrl+Shift+C</span>
+          </div>
+          <div class="cm-item" @click="onPaste">
+            <ClipboardPaste :size="14" class="cm-icon" />
+            <span class="cm-label">粘贴</span>
+            <span class="cm-shortcut">Ctrl+Shift+V</span>
+          </div>
+          <div class="cm-item" @click="onSelectAll">
+            <TextSelect :size="14" class="cm-icon" />
+            <span class="cm-label">全选</span>
+          </div>
+
+          <div class="cm-divider" />
+
+          <div class="cm-item" @click="onFind">
+            <Search :size="14" class="cm-icon" />
+            <span class="cm-label">查找</span>
+            <span class="cm-shortcut">Ctrl+F</span>
+          </div>
+          <div class="cm-item" @click="onClear">
+            <Eraser :size="14" class="cm-icon" />
+            <span class="cm-label">清屏</span>
+          </div>
+
+          <div class="cm-divider" />
+
+          <div class="cm-item" @click="onSplitRight">
+            <SplitSquareHorizontal :size="14" class="cm-icon" />
+            <span class="cm-label">向右拆分</span>
+            <span class="cm-shortcut">Ctrl+Shift+D</span>
+          </div>
+          <div class="cm-item" @click="onSplitDown">
+            <SplitSquareVertical :size="14" class="cm-icon" />
+            <span class="cm-label">向下拆分</span>
+            <span class="cm-shortcut">Ctrl+Shift+S</span>
+          </div>
+          <div class="cm-item" @click="onClosePane">
+            <X :size="14" class="cm-icon" />
+            <span class="cm-label">关闭面板</span>
+            <span class="cm-shortcut">Ctrl+Shift+W</span>
+          </div>
+
+          <div class="cm-divider" />
+
+          <div class="cm-item" @click="onOpenSettings">
+            <SettingsIcon :size="14" class="cm-icon" />
+            <span class="cm-label">设置…</span>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>
@@ -539,26 +665,71 @@ onUnmounted(() => {
 </style>
 
 <style>
-.context-menu {
+.context-menu-backdrop {
   position: fixed;
+  inset: 0;
   z-index: 9999;
-  background: #2d2d30;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  padding: 4px 0;
-  min-width: 120px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.context-menu-item {
-  padding: 6px 16px;
-  cursor: pointer;
-  color: #cccccc;
-  font-size: 13px;
+.context-menu {
+  position: fixed;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 220px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.context-menu-item:hover {
-  background: #094771;
+.cm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #cccccc;
+  font-size: 13px;
+  user-select: none;
+}
+
+.cm-item:hover {
+  background: #04395e;
+  color: #ffffff;
+}
+
+.cm-item.disabled {
+  color: #6b6b6b;
+  pointer-events: none;
+}
+
+.cm-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.cm-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.cm-shortcut {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #8a8a8a;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.cm-item:hover .cm-shortcut {
+  color: #c5d6e3;
+}
+
+.cm-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: #454545;
 }
 </style>

@@ -45,7 +45,7 @@ declare global {
         fontSize?: number
         paneLayout?: SavedLayout
       }>
-      settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout }) => void
+      settingsSet: (patch: { fontSize?: number; paneLayout?: SavedLayout | null }) => void
       ptyStart: (opts: {
         paneId: string
         cols?: number
