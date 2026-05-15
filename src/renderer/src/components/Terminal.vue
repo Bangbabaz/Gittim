@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -17,6 +17,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
+import SearchOverlay from './SearchOverlay.vue'
 import '@xterm/xterm/css/xterm.css'
 
 const DEFAULT_FONT_SIZE = 14
@@ -62,10 +63,8 @@ const menuHasSelection = ref(false)
 // so the toolbar follows `cd` commands inside the shell.
 const currentCwd = ref(props.cwd)
 
-// Search overlay state
+// Search overlay state (the box itself lives in the shared SearchOverlay).
 const showSearch = ref(false)
-const searchTerm = ref('')
-const searchInputRef = ref<HTMLInputElement>()
 
 const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 32
@@ -75,7 +74,8 @@ const currentFontSize = ref(DEFAULT_FONT_SIZE)
 
 const terminal = new Terminal({
   fontSize: DEFAULT_FONT_SIZE,
-  fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
+  fontFamily:
+    "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
   cursorBlink: true,
   rightClickSelectsWord: false,
   allowProposedApi: true,
@@ -234,32 +234,12 @@ watch(
 
 const openSearch = (): void => {
   showSearch.value = true
-  nextTick(() => searchInputRef.value?.focus())
 }
 
 const closeSearch = (): void => {
   showSearch.value = false
-  searchTerm.value = ''
   terminal.clearSelection()
   terminal.focus()
-}
-
-const findNext = (): void => {
-  if (searchTerm.value) searchAddon.findNext(searchTerm.value)
-}
-
-const findPrev = (): void => {
-  if (searchTerm.value) searchAddon.findPrevious(searchTerm.value)
-}
-
-const onSearchKey = (e: KeyboardEvent): void => {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    e.shiftKey ? findPrev() : findNext()
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    closeSearch()
-  }
 }
 
 // Intercept hotkeys BEFORE xterm processes them. Return false to suppress
@@ -512,17 +492,8 @@ onUnmounted(() => {
       @manage-tasks="emit('manageTasks')"
     />
     <div ref="terminalRef" class="terminal-container"></div>
-    <div v-if="showSearch" class="search-overlay" @click.stop>
-      <input
-        ref="searchInputRef"
-        v-model="searchTerm"
-        class="search-input"
-        placeholder="搜索 (Enter 下一个 / Shift+Enter 上一个 / Esc 关闭)"
-        @keydown="onSearchKey"
-      />
-      <button class="search-btn" title="上一个 (Shift+Enter)" @click="findPrev">↑</button>
-      <button class="search-btn" title="下一个 (Enter)" @click="findNext">↓</button>
-      <button class="search-btn" title="关闭 (Esc)" @click="closeSearch">×</button>
+    <div v-if="showSearch" class="search-pos">
+      <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
     </div>
     <Teleport to="body">
       <div
@@ -536,11 +507,7 @@ onUnmounted(() => {
           :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
           @click.stop
         >
-          <div
-            class="cm-item"
-            :class="{ disabled: !menuHasSelection }"
-            @click="onCopy"
-          >
+          <div class="cm-item" :class="{ disabled: !menuHasSelection }" @click="onCopy">
             <Copy :size="14" class="cm-icon" />
             <span class="cm-label">复制</span>
             <span class="cm-shortcut">Ctrl+Shift+C</span>
@@ -615,56 +582,11 @@ onUnmounted(() => {
   width: 100%;
 }
 
-.search-overlay {
+.search-pos {
   position: absolute;
   top: 32px;
   right: 12px;
   z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: #2d2d30;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  padding: 4px 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.search-input {
-  width: 240px;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 3px;
-  color: #d4d4d4;
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  padding: 3px 6px;
-  outline: none;
-}
-
-.search-input:focus {
-  border-color: #094771;
-}
-
-.search-btn {
-  background: none;
-  border: 1px solid transparent;
-  color: #ccc;
-  width: 22px;
-  height: 22px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.search-btn:hover {
-  background: #3e3e42;
-  border-color: #555;
 }
 </style>
 

@@ -42,8 +42,7 @@ const nextKey = (): string => `k${++keySeq}`
 
 const selected = computed(() => items.value.find((i) => i.key === selectedKey.value) || null)
 
-const itemLabel = (i: EditItem): string =>
-  i.name.trim() || i.command.trim() || 'new command'
+const itemLabel = (i: EditItem): string => i.name.trim() || i.command.trim() || 'new command'
 
 async function reload(): Promise<void> {
   const list: TaskMeta[] = await window.api.taskList()
@@ -56,9 +55,7 @@ async function reload(): Promise<void> {
     isNew: false,
     dirty: false
   }))
-  const focus = props.focusId
-    ? items.value.find((i) => i.id === props.focusId)
-    : undefined
+  const focus = props.focusId ? items.value.find((i) => i.id === props.focusId) : undefined
   selectedKey.value = focus?.key ?? items.value[0]?.key ?? null
 }
 
@@ -117,11 +114,11 @@ async function browseCwd(): Promise<void> {
 async function deleteItem(i: EditItem): Promise<void> {
   if (!i.isNew && i.id) {
     try {
-      await ElMessageBox.confirm(
-        `删除命令 "${itemLabel(i)}"？运行中的进程会被结束。`,
-        '删除命令',
-        { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
-      )
+      await ElMessageBox.confirm(`删除命令 "${itemLabel(i)}"？运行中的进程会被结束。`, '删除命令', {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      })
     } catch {
       return
     }
@@ -158,10 +155,6 @@ async function save(): Promise<void> {
   s.name = name
   s.dirty = false
   ElMessage.success('已保存')
-}
-
-function close(): void {
-  emit('update:modelValue', false)
 }
 </script>
 
@@ -251,17 +244,12 @@ function close(): void {
           </div>
           <div class="tm-actions">
             <span class="tm-hint">未保存的更改关闭后会丢弃</span>
-            <button class="tm-save" :disabled="!selected.command.trim()" @click="save">
-              保存
-            </button>
+            <button class="tm-save" :disabled="!selected.command.trim()" @click="save">保存</button>
           </div>
         </template>
         <div v-else class="tm-placeholder">选择左侧命令，或点 + 新建</div>
       </section>
     </div>
-    <template #footer>
-      <button class="tm-close" @click="close">关闭</button>
-    </template>
   </el-dialog>
 </template>
 
@@ -284,7 +272,7 @@ function close(): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 10px 4px;
+  padding: 0 8px 12px 8px;
 }
 
 .tm-list-title {
@@ -395,7 +383,7 @@ function close(): void {
 .tm-detail {
   flex: 1;
   min-width: 0;
-  padding: 0 4px 0 20px;
+  padding: 0 2px 0 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -523,20 +511,6 @@ function close(): void {
   color: #6b6b6b;
   font-size: 13px;
 }
-
-.tm-close {
-  background: transparent;
-  border: 1px solid #3e3e42;
-  color: #ccc;
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.tm-close:hover {
-  background: #3e3e42;
-}
 </style>
 
 <style>
@@ -554,15 +528,10 @@ function close(): void {
 .task-mgr-dialog .el-dialog__header {
   border-bottom: 1px solid #3e3e42;
   margin-right: 0;
-  padding-bottom: 14px;
+  padding: 18px 20px 14px;
 }
 
 .task-mgr-dialog .el-dialog__body {
-  padding: 16px 20px;
-}
-
-.task-mgr-dialog .el-dialog__footer {
-  border-top: 1px solid #3e3e42;
-  padding-top: 12px;
+  padding: 18px 20px 20px;
 }
 </style>

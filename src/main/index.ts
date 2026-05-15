@@ -194,12 +194,9 @@ app.whenReady().then(() => {
       return startTask(opts)
     }
   )
-  ipcMain.handle(
-    'task-create',
-    (_event, opts: { name?: string; command: string; cwd: string }) => {
-      return createTask(opts)
-    }
-  )
+  ipcMain.handle('task-create', (_event, opts: { name?: string; command: string; cwd: string }) => {
+    return createTask(opts)
+  })
   ipcMain.handle('task-stop', (_event, id: string) => stopTask(id))
   ipcMain.handle('task-restart', (_event, id: string) => restartTask(id))
   ipcMain.handle('task-remove', (_event, id: string) => removeTask(id))

@@ -112,8 +112,7 @@ const api = {
   taskCreate: (opts: { name?: string; command: string; cwd: string }) =>
     ipcRenderer.invoke('task-create', opts) as Promise<TaskMeta>,
   taskStop: (id: string) => ipcRenderer.invoke('task-stop', id) as Promise<void>,
-  taskRestart: (id: string) =>
-    ipcRenderer.invoke('task-restart', id) as Promise<TaskMeta | null>,
+  taskRestart: (id: string) => ipcRenderer.invoke('task-restart', id) as Promise<TaskMeta | null>,
   taskRemove: (id: string) => ipcRenderer.invoke('task-remove', id) as Promise<void>,
   taskUpdate: (id: string, patch: { name?: string; command?: string; cwd?: string }) =>
     ipcRenderer.invoke('task-update', id, patch) as Promise<TaskMeta | null>,

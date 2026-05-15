@@ -159,10 +159,7 @@ const serializeLayout = (node: LayoutNode): SavedLayout => {
 
 // Rebuild a LayoutNode tree with fresh pane IDs, populating `paneCwdAcc` so
 // each new pane spawns with its saved cwd. Returns the new root.
-const deserializeLayout = (
-  saved: SavedLayout,
-  paneCwdAcc: Record<string, string>
-): LayoutNode => {
+const deserializeLayout = (saved: SavedLayout, paneCwdAcc: Record<string, string>): LayoutNode => {
   if (saved.type === 'pane') {
     const id = newPaneId()
     if (saved.cwd) paneCwdAcc[id] = saved.cwd
@@ -586,13 +583,17 @@ onUnmounted(() => {
                     class="fs-btn"
                     :disabled="appFontSize <= MIN_FONT_SIZE"
                     @click="decreaseFontSize"
-                  >−</button>
+                  >
+                    −
+                  </button>
                   <span class="fs-value">{{ appFontSize }}</span>
                   <button
                     class="fs-btn"
                     :disabled="appFontSize >= MAX_FONT_SIZE"
                     @click="increaseFontSize"
-                  >+</button>
+                  >
+                    +
+                  </button>
                   <button
                     v-if="appFontSize !== DEFAULT_FONT_SIZE"
                     class="fs-reset"
@@ -604,7 +605,8 @@ onUnmounted(() => {
                 </div>
               </div>
               <p class="settings-item-desc">
-                终端字体大小，{{ MIN_FONT_SIZE }}–{{ MAX_FONT_SIZE }}。也可以用 Ctrl+= / Ctrl+- 调整。
+                终端字体大小，{{ MIN_FONT_SIZE }}–{{ MAX_FONT_SIZE }}。也可以用 Ctrl+= / Ctrl+-
+                调整。
               </p>
             </div>
           </section>
@@ -674,11 +676,7 @@ onUnmounted(() => {
     @manage-tasks="openTaskManager()"
     @edit-task="(id: string) => openTaskManager(id)"
   />
-  <TaskManagerDialog
-    v-model="showTaskMgr"
-    :focus-id="taskMgrFocusId"
-    :default-cwd="activeCwd"
-  />
+  <TaskManagerDialog v-model="showTaskMgr" :focus-id="taskMgrFocusId" :default-cwd="activeCwd" />
   <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
     <template v-if="cwd !== null && layout">
       <div
