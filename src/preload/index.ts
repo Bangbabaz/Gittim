@@ -109,6 +109,8 @@ const api = {
   taskOutput: (id: string) => ipcRenderer.invoke('task-output', id) as Promise<string>,
   taskStart: (opts: { id?: string; name?: string; command?: string; cwd?: string }) =>
     ipcRenderer.invoke('task-start', opts) as Promise<TaskMeta>,
+  taskCreate: (opts: { name?: string; command: string; cwd: string }) =>
+    ipcRenderer.invoke('task-create', opts) as Promise<TaskMeta>,
   taskStop: (id: string) => ipcRenderer.invoke('task-stop', id) as Promise<void>,
   taskRestart: (id: string) =>
     ipcRenderer.invoke('task-restart', id) as Promise<TaskMeta | null>,

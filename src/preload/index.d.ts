@@ -82,6 +82,11 @@ declare global {
         command?: string
         cwd?: string
       }) => Promise<TaskMeta>
+      taskCreate: (opts: {
+        name?: string
+        command: string
+        cwd: string
+      }) => Promise<TaskMeta>
       taskStop: (id: string) => Promise<void>
       taskRestart: (id: string) => Promise<TaskMeta | null>
       taskRemove: (id: string) => Promise<void>

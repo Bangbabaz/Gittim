@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { GitBranch, Play, RotateCw, ListChecks } from 'lucide-vue-next'
+import { GitBranch, Play, RotateCw, Square, ListChecks, ChevronDown } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 type TaskMeta = {
@@ -20,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   worktreeCreated: [path: string]
   openTasks: []
+  manageTasks: []
 }>()
 
 const isRepo = ref(false)
@@ -238,29 +239,37 @@ async function handleCreateWorktree(): Promise<void> {
 
 // -- Background tasks: run / restart button --------------------------------
 
+// Tasks are global; the toolbar shows every defined command in a dropdown,
+// runs the picked one, and surfaces a stop control for whatever's running.
 const allTasks = ref<TaskMeta[]>([])
+const selectedId = ref<string | null>(null)
 let unsubTaskStatus: (() => void) | null = null
 let unsubTaskRemoved: (() => void) | null = null
 
-// The "primary task" the run button is bound to for this pane's cwd: prefer a
-// running one, otherwise the most recently started, otherwise the first defined.
-const primaryTask = computed<TaskMeta | null>(() => {
-  if (!props.cwd) return null
-  const here = allTasks.value.filter((t) => t.cwd === props.cwd)
-  if (!here.length) return null
-  const running = here.filter((t) => t.status === 'running')
-  const pool = running.length ? running : here
-  return [...pool].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0]
-})
+const selectedTask = computed<TaskMeta | null>(
+  () => allTasks.value.find((t) => t.id === selectedId.value) || null
+)
+const runningTasks = computed(() => allTasks.value.filter((t) => t.status === 'running'))
 
 const upsertTask = (m: TaskMeta): void => {
   const i = allTasks.value.findIndex((t) => t.id === m.id)
   if (i >= 0) allTasks.value[i] = m
   else allTasks.value.push(m)
+  if (!selectedId.value) selectedId.value = m.id
 }
+
+// Keep the selection valid as tasks come and go.
+watch(allTasks, (list) => {
+  if (selectedId.value && !list.some((t) => t.id === selectedId.value)) {
+    selectedId.value = list[0]?.id ?? null
+  } else if (!selectedId.value && list.length) {
+    selectedId.value = list[0].id
+  }
+})
 
 onMounted(async () => {
   allTasks.value = await window.api.taskList()
+  selectedId.value = allTasks.value[0]?.id ?? null
   unsubTaskStatus = window.api.onTaskStatus(upsertTask)
   unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
     allTasks.value = allTasks.value.filter((t) => t.id !== id)
@@ -272,59 +281,23 @@ onUnmounted(() => {
   unsubTaskRemoved?.()
 })
 
-// Command launcher popover (shown when there's no primary task yet)
-const showRunPopover = ref(false)
-const runCommand = ref('')
-const pkgScripts = ref<Record<string, string>>({})
-const pkgScriptNames = computed(() => Object.keys(pkgScripts.value))
-
-watch(
-  () => [props.cwd, showRunPopover.value] as const,
-  async ([c, open]) => {
-    if (open && c) pkgScripts.value = await window.api.readPackageScripts(c)
-  }
-)
-
-const startCommand = async (command: string): Promise<void> => {
-  if (!command.trim() || !props.cwd) return
-  await window.api.taskStart({ command: command.trim(), cwd: props.cwd })
-  showRunPopover.value = false
-  runCommand.value = ''
-}
-
-// Run button click: no task → open launcher; has task → restart it.
-const onRunClick = async (): Promise<void> => {
-  const t = primaryTask.value
-  if (!t) {
-    showRunPopover.value = !showRunPopover.value
+const onPickCommand = (cmd: string): void => {
+  if (cmd === '__manage__') {
+    emit('manageTasks')
     return
   }
-  await window.api.taskRestart(t.id)
+  selectedId.value = cmd
 }
 
-// Manual-trigger popover: dismiss on outside click / Escape.
-const onDocPointerDown = (e: MouseEvent): void => {
-  const el = e.target as HTMLElement
-  if (el.closest('.run-popover') || el.closest('.run-btn')) return
-  showRunPopover.value = false
+// Run / re-run the command picked in the dropdown. taskStart handles both:
+// idle → spawn, running → kill + respawn (reset buffer).
+const runSelected = async (): Promise<void> => {
+  if (selectedTask.value) await window.api.taskStart({ id: selectedTask.value.id })
 }
-const onDocKey = (e: KeyboardEvent): void => {
-  if (e.key === 'Escape') showRunPopover.value = false
-}
-watch(showRunPopover, (open) => {
-  if (open) {
-    document.addEventListener('mousedown', onDocPointerDown, true)
-    document.addEventListener('keydown', onDocKey, true)
-  } else {
-    document.removeEventListener('mousedown', onDocPointerDown, true)
-    document.removeEventListener('keydown', onDocKey, true)
-  }
-})
 
-onUnmounted(() => {
-  document.removeEventListener('mousedown', onDocPointerDown, true)
-  document.removeEventListener('keydown', onDocKey, true)
-})
+const stopTask = async (id: string): Promise<void> => {
+  await window.api.taskStop(id)
+}
 </script>
 
 <template>
@@ -360,48 +333,80 @@ onUnmounted(() => {
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
 
-    <el-popover
-      :visible="showRunPopover"
+    <!-- Command picker -->
+    <el-dropdown
+      trigger="click"
       placement="bottom-start"
-      :width="280"
-      popper-class="run-popover"
-      trigger="manual"
+      popper-class="task-pick-dropdown"
+      @command="onPickCommand"
     >
-      <template #reference>
-        <button
-          class="run-btn"
-          :class="{ active: !!primaryTask }"
-          :title="primaryTask ? `重启：${primaryTask.name}` : '运行命令'"
-          @click="onRunClick"
-        >
-          <RotateCw v-if="primaryTask" :size="13" />
-          <Play v-else :size="13" />
-        </button>
-      </template>
-      <div class="run-pop">
-        <div class="run-pop-title">运行命令</div>
-        <div v-if="pkgScriptNames.length" class="run-pop-scripts">
-          <button
-            v-for="s in pkgScriptNames"
-            :key="s"
-            class="run-pop-chip"
-            :title="pkgScripts[s]"
-            @click="startCommand(`npm run ${s}`)"
+      <button class="cmd-pick" :title="selectedTask?.command || '选择命令'">
+        <span class="status-dot" :class="selectedTask?.status || 'none'" />
+        <span class="cmd-pick-name">{{ selectedTask ? selectedTask.name : '选择命令' }}</span>
+        <ChevronDown :size="12" class="cmd-pick-caret" />
+      </button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item
+            v-for="t in allTasks"
+            :key="t.id"
+            :command="t.id"
+            :class="{ picked: t.id === selectedId }"
           >
-            {{ s }}
-          </button>
-        </div>
-        <div class="run-pop-row">
-          <input
-            v-model="runCommand"
-            class="run-pop-input"
-            placeholder="自定义命令"
-            @keydown.enter="startCommand(runCommand)"
-          />
-          <button class="run-pop-go" @click="startCommand(runCommand)">运行</button>
-        </div>
-      </div>
-    </el-popover>
+            <span class="status-dot" :class="t.status" />
+            <span class="td-name">{{ t.name }}</span>
+            <span class="td-cmd">{{ t.command }}</span>
+          </el-dropdown-item>
+          <el-dropdown-item divided command="__manage__">管理命令…</el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+
+    <button
+      v-if="selectedTask"
+      class="run-btn"
+      :class="{ active: selectedTask.status === 'running' }"
+      :title="
+        selectedTask.status === 'running'
+          ? `重启：${selectedTask.name}`
+          : `运行：${selectedTask.name}`
+      "
+      @click="runSelected"
+    >
+      <RotateCw v-if="selectedTask.status === 'running'" :size="13" />
+      <Play v-else :size="13" />
+    </button>
+
+    <!-- Stop: only when something is running. One running → direct button;
+         many → dropdown to pick which (no caret). -->
+    <button
+      v-if="runningTasks.length === 1"
+      class="run-btn stop"
+      :title="`停止：${runningTasks[0].name}`"
+      @click="stopTask(runningTasks[0].id)"
+    >
+      <Square :size="12" />
+    </button>
+    <el-dropdown
+      v-else-if="runningTasks.length > 1"
+      trigger="click"
+      placement="bottom-start"
+      popper-class="task-pick-dropdown"
+      @command="stopTask"
+    >
+      <button class="run-btn stop" title="停止运行中的命令">
+        <Square :size="12" />
+      </button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item v-for="t in runningTasks" :key="t.id" :command="t.id">
+            <span class="status-dot running" />
+            <span class="td-name">{{ t.name }}</span>
+            <span class="td-cmd">{{ t.command }}</span>
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
 
     <button class="run-btn" title="查看任务" @click="emit('openTasks')">
       <ListChecks :size="13" />
@@ -534,7 +539,7 @@ onUnmounted(() => {
   background: #3e3e42;
 }
 
-/* Bound to a task → restart affordance, amber to read as "re-run". */
+/* Selected command is running → restart affordance, amber. */
 .run-btn.active {
   color: #d7a23b;
 }
@@ -542,6 +547,73 @@ onUnmounted(() => {
 .run-btn.active:hover {
   border-color: #d7a23b;
   color: #d7a23b;
+}
+
+.run-btn.stop {
+  color: #f14c4c;
+}
+
+.run-btn.stop:hover {
+  border-color: #f14c4c;
+  color: #f14c4c;
+}
+
+/* Command picker (el-dropdown custom trigger) */
+.cmd-pick {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  height: 20px;
+  padding: 0 6px;
+  background: none;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.cmd-pick:hover {
+  border-color: #888;
+  background: #3e3e42;
+}
+
+.cmd-pick-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-pick-caret {
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b6b6b;
+  flex-shrink: 0;
+}
+
+.status-dot.running {
+  background: #3fb950;
+  box-shadow: 0 0 4px #3fb95088;
+}
+
+.status-dot.failed {
+  background: #f14c4c;
+}
+
+.status-dot.none {
+  background: transparent;
+  border: 1px solid #6b6b6b;
 }
 
 .wt-form {
@@ -630,81 +702,77 @@ onUnmounted(() => {
 </style>
 
 <style>
-/* Run-command launcher popover (teleported to body by el-popover). */
-.run-popover.el-popover.el-popper {
+/* Task command dropdown (teleported to body by el-dropdown). */
+.task-pick-dropdown .el-dropdown-menu {
   background: #252526;
   border: 1px solid #454545;
-  padding: 10px;
+  padding: 4px;
+  max-width: 360px;
 }
 
-.run-popover .el-popper__arrow::before {
-  background: #252526 !important;
-  border-color: #454545 !important;
-}
-
-.run-pop-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #858585;
-  margin-bottom: 8px;
-}
-
-.run-pop-scripts {
+.task-pick-dropdown .el-dropdown-menu__item {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
+  align-items: center;
+  gap: 8px;
+  color: #cccccc;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  line-height: 1.4;
 }
 
-.run-pop-chip {
-  background: #0e639c33;
-  border: 1px solid #0e639c66;
-  color: #6cb6ff;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  cursor: pointer;
+.task-pick-dropdown .el-dropdown-menu__item:not(.is-disabled):hover {
+  background: #04395e;
+  color: #fff;
 }
 
-.run-pop-chip:hover {
-  background: #0e639c55;
+.task-pick-dropdown .el-dropdown-menu__item.picked {
+  color: #fff;
 }
 
-.run-pop-row {
-  display: flex;
-  gap: 6px;
+.task-pick-dropdown .el-dropdown-menu__item--divided {
+  border-top: 1px solid #454545;
+  margin-top: 4px;
 }
 
-.run-pop-input {
+.task-pick-dropdown .el-dropdown-menu__item--divided::before {
+  display: none;
+}
+
+.task-pick-dropdown .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b6b6b;
+  flex-shrink: 0;
+}
+
+.task-pick-dropdown .status-dot.running {
+  background: #3fb950;
+  box-shadow: 0 0 4px #3fb95088;
+}
+
+.task-pick-dropdown .status-dot.failed {
+  background: #f14c4c;
+}
+
+.task-pick-dropdown .td-name {
+  flex-shrink: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-pick-dropdown .td-cmd {
   flex: 1;
   min-width: 0;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  color: #d4d4d4;
-  font-size: 12px;
-  padding: 5px 8px;
-  outline: none;
-}
-
-.run-pop-input:focus {
-  border-color: #094771;
-}
-
-.run-pop-go {
-  background: #0e639c;
-  border: none;
-  color: #fff;
-  font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.run-pop-go:hover {
-  background: #1177bb;
+  color: #858585;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* el-select's dropdown popper is teleported to body — scoped styles can't
