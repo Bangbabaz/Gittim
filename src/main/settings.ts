@@ -21,7 +21,8 @@ export interface Settings {
   windowBounds?: { x?: number; y?: number; width: number; height: number }
   windowMaximized?: boolean
   fontSize?: number
-  paneLayout?: SavedLayout
+  /** null means "explicitly cleared" — used by the settings drawer's reset action. */
+  paneLayout?: SavedLayout | null
 }
 
 const DEFAULTS: Settings = {

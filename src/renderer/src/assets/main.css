@@ -1,5 +1,12 @@
 @import './base.css';
 
+@font-face {
+  font-family: 'SF Mono';
+  src: url('./font/SFMono-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+}
+
 body {
   margin: 0;
   padding: 0;
