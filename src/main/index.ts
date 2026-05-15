@@ -16,6 +16,20 @@ import {
   getGitDiffStats
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
+import {
+  registerTaskSubscriber,
+  loadPersistedTasks,
+  listTasks,
+  getTaskOutput,
+  startTask,
+  stopTask,
+  restartTask,
+  removeTask,
+  updateTask,
+  killAllTasks
+} from './tasks'
+import { readFileSync } from 'fs'
+import { join as joinPath } from 'path'
 import icon from '../../resources/icon.png?asset'
 
 let mainWindow: BrowserWindow | null = null
@@ -165,6 +179,41 @@ app.whenReady().then(() => {
 
   ipcMain.handle('pty-get-cwd', (_event, paneId: string) => getPtyCwd(paneId))
 
+  // Background tasks
+  loadPersistedTasks()
+  ipcMain.handle('task-subscribe', (event) => {
+    registerTaskSubscriber(event.sender)
+    return listTasks()
+  })
+  ipcMain.handle('task-list', () => listTasks())
+  ipcMain.handle('task-output', (_event, id: string) => getTaskOutput(id))
+  ipcMain.handle(
+    'task-start',
+    (_event, opts: { id?: string; name?: string; command: string; cwd: string }) => {
+      return startTask(opts)
+    }
+  )
+  ipcMain.handle('task-stop', (_event, id: string) => stopTask(id))
+  ipcMain.handle('task-restart', (_event, id: string) => restartTask(id))
+  ipcMain.handle('task-remove', (_event, id: string) => removeTask(id))
+  ipcMain.handle(
+    'task-update',
+    (_event, id: string, patch: { name?: string; command?: string; cwd?: string }) => {
+      return updateTask(id, patch)
+    }
+  )
+
+  // Read `scripts` from a directory's package.json for one-click task chips.
+  ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
+    try {
+      const raw = readFileSync(joinPath(cwd, 'package.json'), 'utf8')
+      const pkg = JSON.parse(raw)
+      return pkg && typeof pkg.scripts === 'object' ? pkg.scripts : {}
+    } catch {
+      return {}
+    }
+  })
+
   createWindow()
 
   app.on('activate', function () {
@@ -173,10 +222,12 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  killAllTasks()
   flushSettings()
 })
 
 app.on('window-all-closed', () => {
+  killAllTasks()
   flushSettings()
   if (process.platform !== 'darwin') {
     app.quit()
