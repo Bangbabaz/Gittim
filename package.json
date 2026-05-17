@@ -1,6 +1,6 @@
 {
   "name": "gittim",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Git + tmux 风格的终端模拟器，支持分屏、分支切换与工作树管理",
   "main": "./out/main/index.js",
   "author": "example.com",
@@ -27,6 +27,7 @@
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
+    "diff2html": "^3.4.56",
     "electron-updater": "^6.3.9",
     "element-plus": "^2.14.0",
     "lucide-vue-next": "^1.0.0",

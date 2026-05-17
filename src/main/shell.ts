@@ -2,7 +2,7 @@ import { spawn, IPty } from 'node-pty'
 import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readlinkSync, statSync } from 'fs'
+import { readlinkSync, statSync, readFileSync } from 'fs'
 import { shellIntegration } from './shell-integration'
 
 const execFileP = promisify(execFile)
@@ -155,17 +155,94 @@ export function resizePty(paneId: string, cols: number, rows: number): void {
   }
 }
 
+/**
+ * Kill a process and every descendant it spawned. `pty.kill()` alone only
+ * signals the shell; long-running children (dev servers, watchers) get
+ * reparented and linger. node-pty starts the shell as a session/group leader
+ * on POSIX, so signalling the negative PID hits the whole group; on Windows
+ * `taskkill /T` walks the process tree.
+ */
+function killProcessTree(pid: number): void {
+  if (!pid) return
+  if (isWindows) {
+    // Fire-and-forget; /T = tree, /F = force. Errors (already gone) ignored.
+    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => {})
+    return
+  }
+  try {
+    // Negative pid → the whole process group (node-pty calls setsid).
+    process.kill(-pid, 'SIGTERM')
+    setTimeout(() => {
+      try {
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        // group already gone
+      }
+    }, 2000)
+  } catch {
+    // group already gone, or pid invalid
+  }
+}
+
 export function killPty(paneId: string): void {
   const session = sessions.get(paneId)
   if (!session) return
   session.disposed = true
+  const pid = session.pty.pid
   try {
     session.pty.kill()
   } catch {
     // ignore
   }
+  // Also tear down any descendants the shell spawned (servers, watchers, …).
+  if (pid) killProcessTree(pid)
   sessions.delete(paneId)
   sessionsByWebContents.get(session.wcId)?.delete(paneId)
+}
+
+/**
+ * Best-effort check: does the pane's shell have any child process running
+ * (i.e. is a command currently executing in it)? Used to warn before closing
+ * a pane that's mid-task. node-pty's pid is the shell itself, so any child
+ * means something is running.
+ *
+ * - Linux: /proc/<pid>/task/<pid>/children (space-separated child PIDs)
+ * - macOS: `pgrep -P <pid>` (exit 0 ⇒ has children)
+ * - Windows: CIM query for processes whose ParentProcessId is the shell
+ */
+export async function ptyHasRunningProcess(paneId: string): Promise<boolean> {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed) return false
+  const pid = session.pty.pid
+  if (!pid) return false
+
+  try {
+    if (process.platform === 'linux') {
+      const raw = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8')
+      return raw.trim().length > 0
+    }
+    if (process.platform === 'darwin') {
+      await execFileP('pgrep', ['-P', String(pid)], { timeout: 2000 })
+      return true // pgrep exits 0 only when a match exists
+    }
+    if (isWindows) {
+      const { stdout } = await execFileP(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | Measure-Object).Count`
+        ],
+        { timeout: 5000, windowsHide: true }
+      )
+      return parseInt(stdout.trim(), 10) > 0
+    }
+  } catch {
+    // pgrep exits 1 (no children), /proc race, powershell missing, timeout —
+    // treat as "nothing running" so we never block close on a flaky probe.
+  }
+  return false
 }
 
 /**
@@ -228,14 +305,49 @@ export interface BranchInfo {
   name: string
   /** Exists as a local branch. */
   local: boolean
-  /** Exists on the remote (origin). A branch can be both local and remote. */
+  /** Exists on at least one remote. A branch can be both local and remote. */
   remote: boolean
+  /**
+   * The remote this branch lives on (e.g. `origin`, `upstream`). When several
+   * remotes carry the same branch name, `origin` is preferred, else the first
+   * seen. Undefined for purely local branches.
+   */
+  remoteName?: string
   /** True when `git branch` shows `+` — checked out in another linked worktree. */
   worktree?: boolean
 }
 
+/**
+ * Pick a sensible default remote: `origin` if it exists, otherwise the first
+ * configured remote, otherwise '' (no remotes at all).
+ */
+export async function getDefaultRemote(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFileP('git', ['remote'], { ...GIT_OPTS, cwd })
+    const remotes = stdout
+      .split('\n')
+      .map((r) => r.trim())
+      .filter(Boolean)
+    if (remotes.includes('origin')) return 'origin'
+    return remotes[0] ?? ''
+  } catch {
+    return ''
+  }
+}
+
 export async function getGitBranches(cwd: string): Promise<BranchInfo[]> {
   const map = new Map<string, BranchInfo>()
+  const remoteNames = new Set<string>()
+  try {
+    const { stdout } = await execFileP('git', ['remote'], { ...GIT_OPTS, cwd })
+    for (const r of stdout
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean))
+      remoteNames.add(r)
+  } catch {
+    // no remotes configured
+  }
 
   try {
     const { stdout: local } = await execFileP('git', ['branch'], { ...GIT_OPTS, cwd })
@@ -259,17 +371,32 @@ export async function getGitBranches(cwd: string): Promise<BranchInfo[]> {
     const { stdout: remote } = await execFileP('git', ['branch', '-r'], { ...GIT_OPTS, cwd })
     for (const line of remote.split('\n')) {
       const raw = line.replace(/^\*?\s+/, '').trim()
-      // Skip empty lines and the `origin/HEAD -> origin/master` alias line.
-      if (!raw || raw.includes('HEAD')) continue
-      const short = raw.replace(/^origin\//, '')
+      // Skip empty lines and any `<remote>/HEAD -> <remote>/master` alias line.
+      if (!raw || raw.includes('HEAD ->') || raw.includes(' -> ')) continue
+      // Split into `<remote>/<branch>`. The remote is the first path segment
+      // that matches a configured remote name; the rest (which may itself
+      // contain slashes, e.g. `feature/x`) is the branch.
+      let remoteName = ''
+      let short = raw
+      const slash = raw.indexOf('/')
+      if (slash > 0) {
+        const candidate = raw.slice(0, slash)
+        if (remoteNames.size === 0 || remoteNames.has(candidate)) {
+          remoteName = candidate
+          short = raw.slice(slash + 1)
+        }
+      }
+      if (!short) continue
       const existing = map.get(short)
       if (existing) {
         // Local branch with the same name — annotate the existing row rather
-        // than producing a duplicate. This is how the user sees that a local
-        // branch is also tracked on the remote.
+        // than producing a duplicate. Prefer `origin` as the recorded remote.
         existing.remote = true
+        if (!existing.remoteName || remoteName === 'origin') existing.remoteName = remoteName
       } else {
-        map.set(short, { name: short, local: false, remote: true })
+        // First remote to carry this name. A later `origin/<name>` line will
+        // fall into the branch above and upgrade remoteName to `origin`.
+        map.set(short, { name: short, local: false, remote: true, remoteName })
       }
     }
   } catch {
@@ -300,12 +427,17 @@ export async function getGitDiffStats(cwd: string): Promise<{ added: number; del
 export async function checkoutGitBranch(
   cwd: string,
   branchName: string,
-  isRemote?: boolean
+  isRemote?: boolean,
+  remoteName?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const args = isRemote
-      ? ['checkout', '--track', `origin/${branchName}`]
-      : ['checkout', branchName]
+    let args: string[]
+    if (isRemote) {
+      const remote = remoteName || (await getDefaultRemote(cwd)) || 'origin'
+      args = ['checkout', '--track', `${remote}/${branchName}`]
+    } else {
+      args = ['checkout', branchName]
+    }
     await execFileP('git', args, { ...GIT_OPTS, cwd })
     return { success: true }
   } catch (err) {
@@ -322,6 +454,122 @@ export async function gitHasUncommittedChanges(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * Stash tracked + staged changes (no `-u`: untracked files are left alone so
+ * we don't sweep up build artifacts). Used by the "stash & switch" flow.
+ */
+export async function gitStash(cwd: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execFileP('git', ['stash', 'push', '-m', 'Gittim: 切换分支前自动暂存'], {
+      ...GIT_OPTS,
+      cwd
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+export interface WorktreeInfo {
+  path: string
+  branch: string | null
+  head: string | null
+  /** This is the main working tree (the repo root), not a linked worktree. */
+  isMain: boolean
+  /** Detached HEAD (no branch). */
+  detached: boolean
+  /** `git worktree lock`-ed — removal needs --force. */
+  locked: boolean
+}
+
+/**
+ * Parse `git worktree list --porcelain`. The first record is always the main
+ * working tree. Records are blank-line separated; keys: worktree/HEAD/branch/
+ * bare/detached/locked.
+ */
+export async function getGitWorktrees(cwd: string): Promise<WorktreeInfo[]> {
+  try {
+    const { stdout } = await execFileP('git', ['worktree', 'list', '--porcelain'], {
+      ...GIT_OPTS,
+      cwd
+    })
+    const out: WorktreeInfo[] = []
+    let cur: Partial<WorktreeInfo> & { _seen?: boolean } = {}
+    const flush = (): void => {
+      if (cur.path) {
+        out.push({
+          path: cur.path,
+          branch: cur.branch ?? null,
+          head: cur.head ?? null,
+          isMain: out.length === 0,
+          detached: !!cur.detached,
+          locked: !!cur.locked
+        })
+      }
+      cur = {}
+    }
+    for (const line of stdout.split('\n')) {
+      const l = line.trimEnd()
+      if (l === '') {
+        flush()
+        continue
+      }
+      if (l.startsWith('worktree ')) cur.path = l.slice('worktree '.length)
+      else if (l.startsWith('HEAD ')) cur.head = l.slice('HEAD '.length)
+      else if (l.startsWith('branch '))
+        cur.branch = l.slice('branch '.length).replace(/^refs\/heads\//, '')
+      else if (l === 'detached') cur.detached = true
+      else if (l.startsWith('locked')) cur.locked = true
+    }
+    flush()
+    return out
+  } catch {
+    return []
+  }
+}
+
+export async function gitRemoveWorktree(
+  cwd: string,
+  worktreePath: string,
+  force?: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const args = ['worktree', 'remove']
+    if (force) args.push('--force')
+    args.push(worktreePath)
+    await execFileP('git', args, { ...GIT_OPTS, cwd, timeout: 15_000 })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Full working-tree diff vs HEAD (staged + unstaged) for the read-only viewer.
+ * Falls back to `git diff` when there's no commit yet (unborn HEAD). Capped at
+ * 10 MB so a huge diff can't blow up the IPC payload / renderer.
+ */
+export async function getGitDiff(cwd: string): Promise<{ diff: string; truncated: boolean }> {
+  const opts = { ...GIT_OPTS, cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15_000 }
+  try {
+    const { stdout } = await execFileP('git', ['diff', 'HEAD'], opts)
+    return { diff: stdout, truncated: false }
+  } catch (err) {
+    const e = err as { code?: string; stdout?: string }
+    // maxBuffer exceeded still yields partial stdout — show what we have.
+    if (e?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && e.stdout) {
+      return { diff: e.stdout, truncated: true }
+    }
+    // Unborn branch (no HEAD yet): fall back to the plain working-tree diff.
+    try {
+      const { stdout } = await execFileP('git', ['diff'], opts)
+      return { diff: stdout, truncated: false }
+    } catch {
+      return { diff: '', truncated: false }
+    }
+  }
+}
+
 export async function gitAddWorktree(
   cwd: string,
   opts: { path: string; newBranch?: string; fromBranch?: string }
@@ -334,8 +582,15 @@ export async function gitAddWorktree(
     await execFileP('git', args, { ...GIT_OPTS, cwd, timeout: 15_000 })
 
     if (opts.newBranch) {
+      const remote = await getDefaultRemote(cwd)
+      if (!remote) {
+        return {
+          success: true,
+          warning: `分支 "${opts.newBranch}" 已创建（仓库未配置远程，已跳过推送）`
+        }
+      }
       try {
-        await execFileP('git', ['push', '-u', 'origin', opts.newBranch], {
+        await execFileP('git', ['push', '-u', remote, opts.newBranch], {
           ...GIT_OPTS,
           cwd: opts.path,
           timeout: 15_000
@@ -343,7 +598,7 @@ export async function gitAddWorktree(
       } catch {
         return {
           success: true,
-          warning: `分支 "${opts.newBranch}" 已创建，但推送失败，请手动执行 git push -u origin "${opts.newBranch}"`
+          warning: `分支 "${opts.newBranch}" 已创建，但推送失败，请手动执行 git push -u ${remote} "${opts.newBranch}"`
         }
       }
     }

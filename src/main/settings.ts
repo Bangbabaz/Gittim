@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs'
 import { join } from 'path'
 
 /**
@@ -32,6 +32,8 @@ export interface Settings {
   windowBounds?: { x?: number; y?: number; width: number; height: number }
   windowMaximized?: boolean
   fontSize?: number
+  /** Terminal scrollback buffer size in lines. */
+  scrollback?: number
   /** null means "explicitly cleared" — used by the settings drawer's reset action. */
   paneLayout?: SavedLayout | null
   tasks?: TaskDef[]
@@ -43,6 +45,7 @@ const DEFAULTS: Settings = {
   windowBounds: { width: 1100, height: 720 },
   windowMaximized: false,
   fontSize: 14,
+  scrollback: 10000,
   autoOpenTasksOnRun: true
 }
 
@@ -78,7 +81,11 @@ function flush(): void {
   if (!cache) return
   try {
     mkdirSync(settingsDir(), { recursive: true })
-    writeFileSync(settingsPath(), JSON.stringify(cache, null, 2))
+    // Atomic write: a crash mid-write would otherwise leave a truncated
+    // settings.json and lose the saved layout + every task definition.
+    const tmp = settingsPath() + '.tmp'
+    writeFileSync(tmp, JSON.stringify(cache, null, 2))
+    renameSync(tmp, settingsPath())
   } catch {
     // disk full / permissions — settings will simply not persist
   }

@@ -50,9 +50,18 @@ const MAX_FONT_SIZE = 32
 // Global font size — single source of truth so the drawer and every open
 // pane stay in sync. Loaded from settings on mount, persisted on change.
 const appFontSize = ref(DEFAULT_FONT_SIZE)
+
+const DEFAULT_SCROLLBACK = 10000
+const MIN_SCROLLBACK = 1000
+const MAX_SCROLLBACK = 200000
+// Global terminal scrollback (lines). Same single-source-of-truth pattern as
+// font size: every pane reads it via prop, changes persist to settings.
+const appScrollback = ref(DEFAULT_SCROLLBACK)
+
 const showSettings = ref(false)
 const settingsTab = ref<'general' | 'about'>('general')
 const electronVersion = ref('')
+const appVersion = ref('')
 
 // Background tasks drawer + manager dialog
 const showTasks = ref(false)
@@ -339,6 +348,14 @@ const decreaseFontSize = (): void => onFontSizeChange(appFontSize.value - 1)
 const increaseFontSize = (): void => onFontSizeChange(appFontSize.value + 1)
 const resetFontSize = (): void => onFontSizeChange(DEFAULT_FONT_SIZE)
 
+const onScrollbackChange = (size: number | undefined): void => {
+  const n = typeof size === 'number' && !Number.isNaN(size) ? size : DEFAULT_SCROLLBACK
+  const clamped = Math.max(MIN_SCROLLBACK, Math.min(MAX_SCROLLBACK, Math.round(n)))
+  if (appScrollback.value === clamped) return
+  appScrollback.value = clamped
+  window.api.settingsSet({ scrollback: clamped })
+}
+
 const onClearSavedLayout = async (): Promise<void> => {
   try {
     await ElMessageBox.confirm(
@@ -432,6 +449,7 @@ onMounted(async () => {
   cwd.value = await window.api.getCwd()
   isMac.value = (await window.api.getPlatform()) === 'darwin'
   isMaximized.value = await window.api.winIsMaximized()
+  appVersion.value = await window.api.getAppVersion()
   unsubscribeWinState = window.api.onWindowStateChanged((maximized) => {
     isMaximized.value = maximized
   })
@@ -448,6 +466,9 @@ onMounted(async () => {
   const settings = await window.api.settingsGet()
   if (typeof settings.fontSize === 'number') {
     appFontSize.value = settings.fontSize
+  }
+  if (typeof settings.scrollback === 'number') {
+    appScrollback.value = settings.scrollback
   }
   if (typeof settings.autoOpenTasksOnRun === 'boolean') {
     autoOpenTasksOnRun.value = settings.autoOpenTasksOnRun
@@ -609,6 +630,25 @@ onUnmounted(() => {
                 调整。
               </p>
             </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">回滚行数</label>
+                <el-input-number
+                  :model-value="appScrollback"
+                  :min="MIN_SCROLLBACK"
+                  :max="MAX_SCROLLBACK"
+                  :step="1000"
+                  size="small"
+                  controls-position="right"
+                  @change="(v: number | undefined) => onScrollbackChange(v)"
+                />
+              </div>
+              <p class="settings-item-desc">
+                终端保留的历史输出行数（{{ MIN_SCROLLBACK }}–{{
+                  MAX_SCROLLBACK
+                }}）。调大可向上翻看更多构建/日志输出，过大略增内存占用。
+              </p>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -654,7 +694,7 @@ onUnmounted(() => {
             <dl class="about-list">
               <div class="about-row">
                 <dt>版本</dt>
-                <dd>v1.0.0</dd>
+                <dd>{{ appVersion ? `v${appVersion}` : '—' }}</dd>
               </div>
               <div class="about-row">
                 <dt>Electron</dt>
@@ -690,6 +730,7 @@ onUnmounted(() => {
           :pane-id="pane.id"
           :cwd="paneCwd[pane.id] ?? cwd"
           :font-size="appFontSize"
+          :scrollback="appScrollback"
           @focus="setActive"
           @split="onSplit"
           @close="onClose"

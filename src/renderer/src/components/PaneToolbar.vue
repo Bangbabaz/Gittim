@@ -1,7 +1,27 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { GitBranch, Play, RotateCw, Square, ListChecks, ChevronDown } from 'lucide-vue-next'
+import {
+  GitBranch,
+  Play,
+  RotateCw,
+  Square,
+  ListChecks,
+  ChevronDown,
+  FolderGit2,
+  FileDiff,
+  Trash2
+} from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import DiffViewer from './DiffViewer.vue'
+
+type WorktreeInfo = {
+  path: string
+  branch: string | null
+  head: string | null
+  isMain: boolean
+  detached: boolean
+  locked: boolean
+}
 
 type TaskMeta = {
   id: string
@@ -25,7 +45,9 @@ const emit = defineEmits<{
 
 const isRepo = ref(false)
 const currentBranch = ref<string | null>(null)
-const branches = ref<{ name: string; local: boolean; remote: boolean; worktree?: boolean }[]>([])
+const branches = ref<
+  { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
+>([])
 const switching = ref(false)
 const diffStats = ref({ added: 0, deleted: 0 })
 
@@ -71,40 +93,51 @@ const refresh = async (): Promise<void> => {
   }
 }
 
+type SwitchTarget = { branch: string; isRemote: boolean; remoteName?: string }
+const showSwitchConfirm = ref(false)
+const pendingSwitch = ref<SwitchTarget | null>(null)
+
 // `:model-value` is one-way bound, so currentBranch is the single source of
 // truth. The dropdown's picked option doesn't stick until we set it here.
 const onBranchChange = async (newBranch: string): Promise<void> => {
   if (!props.cwd || switching.value) return
   if (newBranch === currentBranch.value) return
 
-  try {
-    const hasChanges = await window.api.gitHasChanges(props.cwd)
-    if (hasChanges) {
-      await ElMessageBox.confirm('当前有未提交的更改，切换分支后可能丢失。确定继续？', '警告', {
-        confirmButtonText: '继续切换',
-        cancelButtonText: '取消',
-        type: 'warning'
-      })
-    }
-  } catch {
-    // user cancelled
-    return
+  const branch = branches.value.find((b) => b.name === newBranch)
+  // Only `--track <remote>/<name>` when the branch exists ONLY on a remote.
+  // If a local copy already exists, plain `git checkout <name>` is what we want.
+  const target: SwitchTarget = {
+    branch: newBranch,
+    isRemote: !!branch && !branch.local && branch.remote,
+    remoteName: branch?.remoteName
   }
 
-  const branch = branches.value.find((b) => b.name === newBranch)
-  // Only `--track origin/<name>` when the branch exists ONLY on the remote.
-  // If a local copy already exists, plain `git checkout <name>` is what we want.
-  const isRemote = !!branch && !branch.local && branch.remote
+  let hasChanges = false
+  try {
+    hasChanges = await window.api.gitHasChanges(props.cwd)
+  } catch {
+    hasChanges = false
+  }
+  if (hasChanges) {
+    // Let the user choose: stash & switch, switch anyway, or cancel.
+    pendingSwitch.value = target
+    showSwitchConfirm.value = true
+    return
+  }
+  await doCheckout(target)
+}
 
+const doCheckout = async (t: SwitchTarget): Promise<void> => {
+  if (!props.cwd) return
   const prev = currentBranch.value
   switching.value = true
-  currentBranch.value = newBranch
+  currentBranch.value = t.branch
   // Invalidate any in-flight refresh — its result is now stale.
   ++refreshGen
   try {
-    const result = await window.api.gitCheckout(props.cwd, newBranch, isRemote)
+    const result = await window.api.gitCheckout(props.cwd, t.branch, t.isRemote, t.remoteName)
     if (result.success) {
-      ElMessage.success(`已切换到分支 "${newBranch}"`)
+      ElMessage.success(`已切换到分支 "${t.branch}"`)
       const [list, stats] = await Promise.all([
         window.api.getGitBranches(props.cwd),
         window.api.getGitDiffStats(props.cwd)
@@ -121,6 +154,32 @@ const onBranchChange = async (newBranch: string): Promise<void> => {
   } finally {
     switching.value = false
   }
+}
+
+const cancelSwitch = (): void => {
+  showSwitchConfirm.value = false
+  pendingSwitch.value = null
+}
+
+const switchDiscard = async (): Promise<void> => {
+  const t = pendingSwitch.value
+  showSwitchConfirm.value = false
+  pendingSwitch.value = null
+  if (t) await doCheckout(t)
+}
+
+const switchWithStash = async (): Promise<void> => {
+  const t = pendingSwitch.value
+  if (!t || !props.cwd) return
+  showSwitchConfirm.value = false
+  pendingSwitch.value = null
+  const r = await window.api.gitStash(props.cwd)
+  if (!r.success) {
+    ElMessage.error(r.error || '暂存失败')
+    return
+  }
+  ElMessage.success('已暂存当前更改（git stash）')
+  await doCheckout(t)
 }
 
 onMounted(() => {
@@ -207,12 +266,12 @@ async function handleCreateWorktree(): Promise<void> {
   }
   const sep = props.cwd.includes('\\') ? '\\' : '/'
   const fullPath = `${wtLocation.value.replace(/\\/g, sep)}${sep}${wtProjectName.value.trim()}`
-  // Remote-only base branches need the `origin/` prefix or `git worktree add`
-  // can't resolve the ref. Local branches are passed as-is.
+  // Remote-only base branches need the `<remote>/<name>` prefix or
+  // `git worktree add` can't resolve the ref. Local branches are passed as-is.
   const fromBranchInfo = branches.value.find((b) => b.name === wtFromBranch.value)
   const fromBranchRef =
     fromBranchInfo && !fromBranchInfo.local && fromBranchInfo.remote
-      ? `origin/${fromBranchInfo.name}`
+      ? `${fromBranchInfo.remoteName || 'origin'}/${fromBranchInfo.name}`
       : wtFromBranch.value || undefined
   wtSubmitting.value = true
   try {
@@ -232,6 +291,99 @@ async function handleCreateWorktree(): Promise<void> {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   } finally {
     wtSubmitting.value = false
+  }
+}
+
+// -- Worktree management (list / remove) -----------------------------------
+
+const showWtManage = ref(false)
+const wtList = ref<WorktreeInfo[]>([])
+const wtLoading = ref(false)
+const wtRemoving = ref<string | null>(null)
+
+async function loadWorktrees(): Promise<void> {
+  if (!props.cwd) return
+  wtLoading.value = true
+  try {
+    wtList.value = await window.api.gitWorktrees(props.cwd)
+  } finally {
+    wtLoading.value = false
+  }
+}
+
+function openWtManage(): void {
+  showWtManage.value = true
+  loadWorktrees()
+}
+
+async function removeWorktree(w: WorktreeInfo): Promise<void> {
+  if (!props.cwd || w.isMain) return
+  try {
+    await ElMessageBox.confirm(`删除工作树？\n${w.path}`, '删除工作树', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  wtRemoving.value = w.path
+  try {
+    let r = await window.api.gitWorktreeRemove(props.cwd, w.path, false)
+    // git refuses dirty/locked worktrees without --force — offer it. The IPC
+    // call above sits between the two message boxes, so they're never opened
+    // back-to-back (which would glitch Element Plus's singleton MessageBox).
+    if (!r.success) {
+      try {
+        await ElMessageBox.confirm(
+          `删除失败：${r.error || '该工作树可能有未提交更改或已锁定'}\n是否强制删除？`,
+          '强制删除工作树',
+          { confirmButtonText: '强制删除', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return // user declined force
+      }
+      r = await window.api.gitWorktreeRemove(props.cwd, w.path, true)
+    }
+    if (r.success) {
+      ElMessage.success('已删除工作树')
+      await loadWorktrees()
+      refresh() // branch list "工作树" tags may have changed
+    } else {
+      ElMessage.error(r.error || '删除失败')
+    }
+  } finally {
+    wtRemoving.value = null
+  }
+}
+
+// -- Read-only diff viewer (diff2html) -------------------------------------
+
+const showDiff = ref(false)
+const diffLoading = ref(false)
+const diffText = ref('')
+const diffEmpty = ref(false)
+const diffTruncated = ref(false)
+
+async function openDiff(): Promise<void> {
+  if (!props.cwd) return
+  showDiff.value = true
+  diffLoading.value = true
+  diffText.value = ''
+  diffEmpty.value = false
+  diffTruncated.value = false
+  try {
+    const { diff, truncated } = await window.api.gitDiff(props.cwd)
+    diffTruncated.value = truncated
+    if (!diff.trim()) {
+      diffEmpty.value = true
+      return
+    }
+    diffText.value = diff
+  } catch {
+    diffEmpty.value = true
+  } finally {
+    diffLoading.value = false
   }
 }
 
@@ -330,6 +482,12 @@ const stopTask = async (id: string): Promise<void> => {
       </el-option>
     </el-select>
     <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
+    <button class="wt-btn icon" title="管理工作树" @click="openWtManage">
+      <FolderGit2 :size="13" />
+    </button>
+    <button class="wt-btn icon" title="查看改动 (diff)" @click="openDiff">
+      <FileDiff :size="13" />
+    </button>
 
     <!-- Command picker -->
     <el-dropdown
@@ -410,10 +568,15 @@ const stopTask = async (id: string): Promise<void> => {
       <ListChecks :size="13" />
     </button>
 
-    <div v-if="diffStats.added || diffStats.deleted" class="diff-stats">
+    <button
+      v-if="diffStats.added || diffStats.deleted"
+      class="diff-stats"
+      title="查看改动 (diff)"
+      @click="openDiff"
+    >
       <span class="diff-added">+{{ diffStats.added }}</span>
       <span class="diff-deleted">-{{ diffStats.deleted }}</span>
-    </div>
+    </button>
 
     <el-dialog v-model="showWorktreeDialog" title="新建工作树" width="440px" class="wt-dialog">
       <div class="wt-form">
@@ -483,6 +646,76 @@ const stopTask = async (id: string): Promise<void> => {
         >
           创建工作树
         </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Branch switch with uncommitted changes: 3-way choice -->
+    <el-dialog
+      v-model="showSwitchConfirm"
+      title="当前有未提交的更改"
+      width="420px"
+      class="wt-dialog"
+      @closed="cancelSwitch"
+    >
+      <div class="switch-msg">
+        切换到分支 <b>{{ pendingSwitch?.branch }}</b> 前，工作区有未提交的更改。<br />
+        可以先 <code>git stash</code> 暂存再切换，或直接切换（Git 会阻止会冲突的切换）。
+      </div>
+      <template #footer>
+        <el-button size="small" @click="cancelSwitch">取消</el-button>
+        <el-button size="small" @click="switchDiscard">直接切换</el-button>
+        <el-button size="small" type="primary" @click="switchWithStash">暂存并切换</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Worktree management -->
+    <el-dialog v-model="showWtManage" title="管理工作树" width="640px" class="wt-dialog">
+      <div v-if="wtLoading" class="wt-manage-empty">加载中…</div>
+      <div v-else-if="!wtList.length" class="wt-manage-empty">没有工作树</div>
+      <div v-else class="wt-manage-list">
+        <div v-for="w in wtList" :key="w.path" class="wt-manage-row">
+          <div class="wt-manage-info">
+            <div class="wt-manage-path" :title="w.path">{{ w.path }}</div>
+            <div class="wt-manage-meta">
+              <span v-if="w.isMain" class="br-tag local">主</span>
+              <span v-if="w.locked" class="br-tag worktree">已锁定</span>
+              <span v-if="w.detached" class="br-tag remote">分离 HEAD</span>
+              <span v-else-if="w.branch" class="wt-manage-branch">{{ w.branch }}</span>
+            </div>
+          </div>
+          <button
+            v-if="!w.isMain"
+            class="wt-del-btn"
+            :disabled="wtRemoving === w.path"
+            title="删除此工作树"
+            @click="removeWorktree(w)"
+          >
+            <Trash2 :size="14" />
+          </button>
+          <span v-else class="wt-main-hint">不可删除</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button size="small" @click="showWtManage = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Read-only diff viewer -->
+    <el-dialog
+      v-model="showDiff"
+      title="改动（相对 HEAD）"
+      width="92%"
+      top="4vh"
+      class="diff-dialog"
+    >
+      <div v-if="diffLoading" class="diff-state">加载中…</div>
+      <div v-else-if="diffEmpty" class="diff-state">没有改动</div>
+      <template v-else>
+        <div v-if="diffTruncated" class="diff-trunc">改动过大，仅显示前 10 MB</div>
+        <DiffViewer :diff="diffText" />
+      </template>
+      <template #footer>
+        <el-button size="small" @click="showDiff = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -646,16 +879,30 @@ const stopTask = async (id: string): Promise<void> => {
   min-width: 0;
 }
 
+.wt-btn.icon {
+  font-size: 0;
+}
+
 .diff-stats {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 100%;
+  height: 20px;
+  padding: 0 6px;
   font-size: 11px;
   line-height: 1;
   font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
   flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.diff-stats:hover {
+  border-color: #555;
+  background: #3e3e42;
 }
 
 .diff-added {
@@ -664,6 +911,120 @@ const stopTask = async (id: string): Promise<void> => {
 
 .diff-deleted {
   color: #f14c4c;
+}
+
+/* Branch-switch confirm */
+.switch-msg {
+  font-size: 13px;
+  color: #d4d4d4;
+  line-height: 1.7;
+}
+
+.switch-msg code {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  background: #1e1e1e;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Worktree management list */
+.wt-manage-empty {
+  color: #6b6b6b;
+  font-size: 13px;
+  padding: 24px 4px;
+  text-align: center;
+}
+
+.wt-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.wt-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 5px;
+}
+
+.wt-manage-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.wt-manage-path {
+  font-size: 12px;
+  color: #d4d4d4;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wt-manage-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.wt-manage-branch {
+  font-size: 11px;
+  color: #858585;
+}
+
+.wt-del-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #c42b1c66;
+  color: #f14c4c;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wt-del-btn:hover:not(:disabled) {
+  background: #c42b1c22;
+  border-color: #c42b1c;
+}
+
+.wt-del-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wt-main-hint {
+  font-size: 11px;
+  color: #6b6b6b;
+  flex-shrink: 0;
+}
+
+/* Diff viewer */
+.diff-state {
+  color: #6b6b6b;
+  font-size: 13px;
+  padding: 40px 4px;
+  text-align: center;
+}
+
+.diff-trunc {
+  font-size: 12px;
+  color: #d7a23b;
+  background: #d7a23b1a;
+  padding: 6px 10px;
+  margin: 8px 12px 0;
+  border-radius: 4px;
 }
 </style>
 
@@ -838,5 +1199,13 @@ const stopTask = async (id: string): Promise<void> => {
 .br-tag.worktree {
   color: #c19c00;
   background: #c19c0022;
+}
+
+/* Diff viewer dialog — el-dialog body is teleported to <body>, so scope it
+   via the dialog class globally. DiffViewer manages its own internal scroll
+   (sidebar + main), so the dialog body itself must not scroll. */
+.diff-dialog .el-dialog__body {
+  padding: 0;
+  overflow: hidden;
 }
 </style>

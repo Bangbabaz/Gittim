@@ -8,12 +8,17 @@ import {
   killPty,
   getCurrentDir,
   getPtyCwd,
+  ptyHasRunningProcess,
   getGitInfo,
   getGitBranches,
   checkoutGitBranch,
   gitAddWorktree,
   gitHasUncommittedChanges,
-  getGitDiffStats
+  getGitDiffStats,
+  gitStash,
+  getGitWorktrees,
+  gitRemoveWorktree,
+  getGitDiff
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
 import {
@@ -124,14 +129,28 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
   ipcMain.handle('get-platform', () => process.platform)
+  ipcMain.handle('get-app-version', () => app.getVersion())
   ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
   ipcMain.handle('get-git-branches', (_event, cwd: string) => getGitBranches(cwd))
   ipcMain.handle('git-diff-stats', (_event, cwd: string) => getGitDiffStats(cwd))
   ipcMain.handle('git-has-changes', (_event, cwd: string) => gitHasUncommittedChanges(cwd))
 
-  ipcMain.handle('git-checkout', (_event, cwd: string, branchName: string, isRemote?: boolean) => {
-    return checkoutGitBranch(cwd, branchName, isRemote)
-  })
+  ipcMain.handle(
+    'git-checkout',
+    (_event, cwd: string, branchName: string, isRemote?: boolean, remoteName?: string) => {
+      return checkoutGitBranch(cwd, branchName, isRemote, remoteName)
+    }
+  )
+
+  ipcMain.handle('git-stash', (_event, cwd: string) => gitStash(cwd))
+  ipcMain.handle('git-worktrees', (_event, cwd: string) => getGitWorktrees(cwd))
+  ipcMain.handle(
+    'git-worktree-remove',
+    (_event, cwd: string, worktreePath: string, force?: boolean) => {
+      return gitRemoveWorktree(cwd, worktreePath, force)
+    }
+  )
+  ipcMain.handle('git-diff', (_event, cwd: string) => getGitDiff(cwd))
 
   ipcMain.handle(
     'git-worktree-add',
@@ -179,6 +198,10 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('pty-get-cwd', (_event, paneId: string) => getPtyCwd(paneId))
+
+  ipcMain.handle('pty-has-running-process', (_event, paneId: string) =>
+    ptyHasRunningProcess(paneId)
+  )
 
   // Background tasks
   loadPersistedTasks()

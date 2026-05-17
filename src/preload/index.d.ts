@@ -26,17 +26,38 @@ declare global {
     api: {
       getCwd: () => Promise<string>
       getPlatform: () => Promise<NodeJS.Platform>
+      getAppVersion: () => Promise<string>
       getGitInfo: (cwd: string) => Promise<{ isRepo: boolean; branch: string | null }>
       getGitBranches: (
         cwd: string
-      ) => Promise<{ name: string; local: boolean; remote: boolean; worktree?: boolean }[]>
+      ) => Promise<
+        { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
+      >
       getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
         cwd: string,
         branchName: string,
-        isRemote?: boolean
+        isRemote?: boolean,
+        remoteName?: string
       ) => Promise<{ success: boolean; error?: string }>
+      gitStash: (cwd: string) => Promise<{ success: boolean; error?: string }>
+      gitWorktrees: (cwd: string) => Promise<
+        {
+          path: string
+          branch: string | null
+          head: string | null
+          isMain: boolean
+          detached: boolean
+          locked: boolean
+        }[]
+      >
+      gitWorktreeRemove: (
+        cwd: string,
+        worktreePath: string,
+        force?: boolean
+      ) => Promise<{ success: boolean; error?: string }>
+      gitDiff: (cwd: string) => Promise<{ diff: string; truncated: boolean }>
       gitWorktreeAdd: (
         cwd: string,
         opts: { path: string; newBranch?: string; fromBranch?: string }
@@ -51,11 +72,13 @@ declare global {
         windowBounds?: { x?: number; y?: number; width: number; height: number }
         windowMaximized?: boolean
         fontSize?: number
+        scrollback?: number
         paneLayout?: SavedLayout
         autoOpenTasksOnRun?: boolean
       }>
       settingsSet: (patch: {
         fontSize?: number
+        scrollback?: number
         paneLayout?: SavedLayout | null
         autoOpenTasksOnRun?: boolean
       }) => void
@@ -69,6 +92,7 @@ declare global {
       ptyResize: (paneId: string, cols: number, rows: number) => void
       ptyKill: (paneId: string) => void
       ptyGetCwd: (paneId: string) => Promise<string | null>
+      ptyHasRunningProcess: (paneId: string) => Promise<boolean>
       onPtyData: (paneId: string, cb: (data: string) => void) => () => void
       onPtyExit: (paneId: string, cb: (exitCode: number) => void) => () => void
       taskSubscribe: () => Promise<TaskMeta[]>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -21,6 +22,7 @@ import SearchOverlay from './SearchOverlay.vue'
 import '@xterm/xterm/css/xterm.css'
 
 const DEFAULT_FONT_SIZE = 14
+const DEFAULT_SCROLLBACK = 10000
 
 const props = withDefaults(
   defineProps<{
@@ -28,11 +30,13 @@ const props = withDefaults(
     options?: Record<string, unknown>
     cwd?: string
     fontSize?: number
+    scrollback?: number
   }>(),
   {
     options: () => ({}),
     cwd: '',
-    fontSize: DEFAULT_FONT_SIZE
+    fontSize: DEFAULT_FONT_SIZE,
+    scrollback: DEFAULT_SCROLLBACK
   }
 )
 
@@ -74,6 +78,7 @@ const currentFontSize = ref(DEFAULT_FONT_SIZE)
 
 const terminal = new Terminal({
   fontSize: DEFAULT_FONT_SIZE,
+  scrollback: typeof props.scrollback === 'number' ? props.scrollback : DEFAULT_SCROLLBACK,
   fontFamily:
     "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
   cursorBlink: true,
@@ -232,6 +237,15 @@ watch(
   }
 )
 
+// Live-apply scrollback changes from the settings drawer. xterm reflows its
+// buffer in place; no remount needed.
+watch(
+  () => props.scrollback,
+  (n) => {
+    if (typeof n === 'number' && n > 0) terminal.options.scrollback = n
+  }
+)
+
 const openSearch = (): void => {
   showSearch.value = true
 }
@@ -263,7 +277,7 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   // Ctrl+Shift+W → close current pane
   if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'W' || e.key === 'w')) {
     e.preventDefault()
-    emit('close', props.paneId)
+    requestClose()
     return false
   }
   // Ctrl+Shift+C → always copy
@@ -379,9 +393,33 @@ const onSplitDown = (): void => {
   emit('split', props.paneId, 'column')
 }
 
+// Closing a pane kills its shell and every child (dev servers, editors).
+// If something is actively running, confirm first so a stray Ctrl+Shift+W
+// doesn't nuke a long task.
+const requestClose = async (): Promise<void> => {
+  let running = false
+  try {
+    running = await window.api.ptyHasRunningProcess(props.paneId)
+  } catch {
+    running = false
+  }
+  if (running) {
+    try {
+      await ElMessageBox.confirm(
+        '该面板中有正在运行的进程，关闭会一并结束它们。确定关闭？',
+        '关闭面板',
+        { confirmButtonText: '关闭', cancelButtonText: '取消', type: 'warning' }
+      )
+    } catch {
+      return // cancelled
+    }
+  }
+  emit('close', props.paneId)
+}
+
 const onClosePane = (): void => {
   contextMenuVisible.value = false
-  emit('close', props.paneId)
+  requestClose()
 }
 
 const onOpenSettings = (): void => {

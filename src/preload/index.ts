@@ -27,20 +27,41 @@ interface TaskMeta {
 const api = {
   getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
   getPlatform: () => ipcRenderer.invoke('get-platform') as Promise<NodeJS.Platform>,
+  getAppVersion: () => ipcRenderer.invoke('get-app-version') as Promise<string>,
   getGitInfo: (cwd: string) =>
     ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
   getGitBranches: (cwd: string) =>
     ipcRenderer.invoke('get-git-branches', cwd) as Promise<
-      { name: string; local: boolean; remote: boolean; worktree?: boolean }[]
+      { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
     >,
   getGitDiffStats: (cwd: string) =>
     ipcRenderer.invoke('git-diff-stats', cwd) as Promise<{ added: number; deleted: number }>,
   gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
-  gitCheckout: (cwd: string, branchName: string, isRemote?: boolean) =>
-    ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote) as Promise<{
+  gitCheckout: (cwd: string, branchName: string, isRemote?: boolean, remoteName?: string) =>
+    ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote, remoteName) as Promise<{
       success: boolean
       error?: string
     }>,
+  gitStash: (cwd: string) =>
+    ipcRenderer.invoke('git-stash', cwd) as Promise<{ success: boolean; error?: string }>,
+  gitWorktrees: (cwd: string) =>
+    ipcRenderer.invoke('git-worktrees', cwd) as Promise<
+      {
+        path: string
+        branch: string | null
+        head: string | null
+        isMain: boolean
+        detached: boolean
+        locked: boolean
+      }[]
+    >,
+  gitWorktreeRemove: (cwd: string, worktreePath: string, force?: boolean) =>
+    ipcRenderer.invoke('git-worktree-remove', cwd, worktreePath, force) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  gitDiff: (cwd: string) =>
+    ipcRenderer.invoke('git-diff', cwd) as Promise<{ diff: string; truncated: boolean }>,
   gitWorktreeAdd: (cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) =>
     ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
       success: boolean
@@ -62,11 +83,13 @@ const api = {
       windowBounds?: { x?: number; y?: number; width: number; height: number }
       windowMaximized?: boolean
       fontSize?: number
+      scrollback?: number
       paneLayout?: SavedLayout
       autoOpenTasksOnRun?: boolean
     }>,
   settingsSet: (patch: {
     fontSize?: number
+    scrollback?: number
     paneLayout?: SavedLayout | null
     autoOpenTasksOnRun?: boolean
   }) => ipcRenderer.send('settings-set', patch),
@@ -78,6 +101,8 @@ const api = {
   ptyKill: (paneId: string) => ipcRenderer.send('pty-kill', paneId),
   ptyGetCwd: (paneId: string) =>
     ipcRenderer.invoke('pty-get-cwd', paneId) as Promise<string | null>,
+  ptyHasRunningProcess: (paneId: string) =>
+    ipcRenderer.invoke('pty-has-running-process', paneId) as Promise<boolean>,
   onPtyData: (paneId: string, cb: (data: string) => void) => {
     const listener = (
       _event: IpcRendererEvent,

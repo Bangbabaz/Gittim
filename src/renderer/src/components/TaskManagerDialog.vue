@@ -528,10 +528,10 @@ async function save(): Promise<void> {
 .task-mgr-dialog .el-dialog__header {
   border-bottom: 1px solid #3e3e42;
   margin-right: 0;
-  padding: 18px 20px 14px;
+  padding: 13px 16px 11px;
 }
 
 .task-mgr-dialog .el-dialog__body {
-  padding: 18px 20px 20px;
+  padding: 14px 16px 16px;
 }
 </style>
