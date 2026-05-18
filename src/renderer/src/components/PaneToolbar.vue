@@ -597,11 +597,7 @@ const stopTask = async (id: string): Promise<void> => {
       placement="bottom"
       :show-after="300"
     >
-      <button
-        class="run-btn"
-        :class="{ active: selectedTask.status === 'running' }"
-        @click="runSelected"
-      >
+      <button class="run-btn" @click="runSelected">
         <RotateCw v-if="selectedTask.status === 'running'" :size="13" />
         <Play v-else :size="13" />
       </button>
@@ -849,15 +845,6 @@ const stopTask = async (id: string): Promise<void> => {
 .run-btn:hover {
   background: #37b058;
   color: #fff;
-}
-
-/* Selected command is running → restart affordance, amber. */
-.run-btn.active {
-  background: #bd8b1b;
-}
-
-.run-btn.active:hover {
-  background: #d7a23b;
 }
 
 .run-btn.stop {

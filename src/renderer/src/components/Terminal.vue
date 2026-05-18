@@ -154,45 +154,10 @@ terminal.parser.registerOscHandler(9, (data) => {
   return true
 })
 
-/**
- * xterm.getSelection() returns rendered text with two problems for "copy":
- *   1. Cells past the last printed char in each row are padded with spaces and
- *      end up in the selection as trailing whitespace.
- *   2. Soft-wrapped lines (one logical line wrapped across multiple visual
- *      rows) get a "\n" inserted between rows when really they're one line.
- *
- * Note on coordinates: getSelectionPosition() returns 1-based positions with
- * end exclusive (in 1-based numbering). buf.getLine(y) and
- * line.translateToString(trim, startCol, endCol) take 0-based positions.
- */
-const getCleanSelection = (): string => {
-  const sel = terminal.getSelectionPosition()
-  if (!sel) return ''
-
-  const buf = terminal.buffer.active
-  const startY = sel.start.y - 1
-  const endY = sel.end.y - 1
-  const out: string[] = []
-
-  for (let y = startY; y <= endY; y++) {
-    const line = buf.getLine(y)
-    if (!line) continue
-
-    const xStart = y === startY ? sel.start.x - 1 : 0
-    const xEnd = y === endY ? sel.end.x - 1 : undefined
-
-    const next = buf.getLine(y + 1)
-    const continuesToNext = !!(next && next.isWrapped)
-
-    const text = line.translateToString(!continuesToNext, xStart, xEnd)
-    out.push(text)
-    if (!continuesToNext && y < endY) out.push('\n')
-  }
-  return out.join('')
-}
-
 const copySelection = async (): Promise<void> => {
-  const text = getCleanSelection()
+  // xterm's own getSelection() yields the user-visible text with trailing
+  // padding trimmed and soft-wrapped rows joined — matches the OS terminal.
+  const text = terminal.getSelection()
   if (text) {
     try {
       await navigator.clipboard.writeText(text)
@@ -278,18 +243,6 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'W' || e.key === 'w')) {
     e.preventDefault()
     requestClose()
-    return false
-  }
-  // Ctrl+Shift+C → always copy
-  if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
-    e.preventDefault()
-    copySelection()
-    return false
-  }
-  // Ctrl+Shift+V → paste
-  if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
-    e.preventDefault()
-    pasteFromClipboard()
     return false
   }
   // Ctrl+F → open search overlay
@@ -548,12 +501,12 @@ onUnmounted(() => {
           <div class="cm-item" :class="{ disabled: !menuHasSelection }" @click="onCopy">
             <Copy :size="14" class="cm-icon" />
             <span class="cm-label">复制</span>
-            <span class="cm-shortcut">Ctrl+Shift+C</span>
+            <span class="cm-shortcut">Ctrl+C</span>
           </div>
           <div class="cm-item" @click="onPaste">
             <ClipboardPaste :size="14" class="cm-icon" />
             <span class="cm-label">粘贴</span>
-            <span class="cm-shortcut">Ctrl+Shift+V</span>
+            <span class="cm-shortcut">Ctrl+V</span>
           </div>
           <div class="cm-item" @click="onSelectAll">
             <TextSelect :size="14" class="cm-icon" />
