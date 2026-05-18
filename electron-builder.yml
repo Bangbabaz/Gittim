@@ -12,6 +12,7 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**
+afterPack: build/afterPack.js
 win:
   executableName: gittim
 nsis:
