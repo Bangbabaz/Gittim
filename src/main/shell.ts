@@ -413,14 +413,27 @@ export async function getGitBranches(cwd: string): Promise<BranchInfo[]> {
   return branches
 }
 
+// Stats must match the diff viewer (getGitDiff), which diffs vs HEAD —
+// staged + unstaged. Plain `git diff --shortstat` only counts unstaged
+// changes, so the badge undercounted once anything was `git add`ed. Same
+// unborn-HEAD fallback as getGitDiff.
+function parseShortstat(stdout: string): { added: number; deleted: number } {
+  const added = (stdout.match(/(\d+) insertion/) || [])[1]
+  const deleted = (stdout.match(/(\d+) deletion/) || [])[1]
+  return { added: added ? parseInt(added) : 0, deleted: deleted ? parseInt(deleted) : 0 }
+}
+
 export async function getGitDiffStats(cwd: string): Promise<{ added: number; deleted: number }> {
   try {
-    const { stdout } = await execFileP('git', ['diff', '--shortstat'], { ...GIT_OPTS, cwd })
-    const added = (stdout.match(/(\d+) insertion/) || [])[1]
-    const deleted = (stdout.match(/(\d+) deletion/) || [])[1]
-    return { added: added ? parseInt(added) : 0, deleted: deleted ? parseInt(deleted) : 0 }
+    const { stdout } = await execFileP('git', ['diff', 'HEAD', '--shortstat'], { ...GIT_OPTS, cwd })
+    return parseShortstat(stdout)
   } catch {
-    return { added: 0, deleted: 0 }
+    try {
+      const { stdout } = await execFileP('git', ['diff', '--shortstat'], { ...GIT_OPTS, cwd })
+      return parseShortstat(stdout)
+    } catch {
+      return { added: 0, deleted: 0 }
+    }
   }
 }
 

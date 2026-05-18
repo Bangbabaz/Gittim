@@ -8,7 +8,6 @@ import {
   ListChecks,
   ChevronDown,
   FolderGit2,
-  FileDiff,
   Trash2
 } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -481,13 +480,14 @@ const stopTask = async (id: string): Promise<void> => {
         </span>
       </el-option>
     </el-select>
-    <button class="wt-btn" title="新建工作树" @click="openWorktreeDialog">+</button>
-    <button class="wt-btn icon" title="管理工作树" @click="openWtManage">
-      <FolderGit2 :size="13" />
-    </button>
-    <button class="wt-btn icon" title="查看改动 (diff)" @click="openDiff">
-      <FileDiff :size="13" />
-    </button>
+    <el-tooltip content="新建工作树" placement="bottom" :show-after="300">
+      <button class="wt-btn" @click="openWorktreeDialog">+</button>
+    </el-tooltip>
+    <el-tooltip content="管理工作树" placement="bottom" :show-after="300">
+      <button class="wt-btn icon" @click="openWtManage">
+        <FolderGit2 :size="13" />
+      </button>
+    </el-tooltip>
 
     <!-- Command picker -->
     <el-dropdown
@@ -519,31 +519,38 @@ const stopTask = async (id: string): Promise<void> => {
       </template>
     </el-dropdown>
 
-    <button
+    <el-tooltip
       v-if="selectedTask"
-      class="run-btn"
-      :class="{ active: selectedTask.status === 'running' }"
-      :title="
+      :content="
         selectedTask.status === 'running'
           ? `重启：${selectedTask.name}`
           : `运行：${selectedTask.name}`
       "
-      @click="runSelected"
+      placement="bottom"
+      :show-after="300"
     >
-      <RotateCw v-if="selectedTask.status === 'running'" :size="13" />
-      <Play v-else :size="13" />
-    </button>
+      <button
+        class="run-btn"
+        :class="{ active: selectedTask.status === 'running' }"
+        @click="runSelected"
+      >
+        <RotateCw v-if="selectedTask.status === 'running'" :size="13" />
+        <Play v-else :size="13" />
+      </button>
+    </el-tooltip>
 
     <!-- Stop: only when something is running. One running → direct button;
          many → dropdown to pick which (no caret). -->
-    <button
+    <el-tooltip
       v-if="runningTasks.length === 1"
-      class="run-btn stop"
-      :title="`停止：${runningTasks[0].name}`"
-      @click="stopTask(runningTasks[0].id)"
+      :content="`停止：${runningTasks[0].name}`"
+      placement="bottom"
+      :show-after="300"
     >
-      <Square :size="12" />
-    </button>
+      <button class="run-btn stop" @click="stopTask(runningTasks[0].id)">
+        <Square :size="12" />
+      </button>
+    </el-tooltip>
     <el-dropdown
       v-else-if="runningTasks.length > 1"
       trigger="click"
@@ -564,19 +571,23 @@ const stopTask = async (id: string): Promise<void> => {
       </template>
     </el-dropdown>
 
-    <button class="run-btn view" title="查看任务" @click="emit('openTasks')">
-      <ListChecks :size="13" />
-    </button>
+    <el-tooltip content="查看任务" placement="bottom" :show-after="300">
+      <button class="run-btn view" @click="emit('openTasks')">
+        <ListChecks :size="13" />
+      </button>
+    </el-tooltip>
 
-    <button
+    <el-tooltip
       v-if="diffStats.added || diffStats.deleted"
-      class="diff-stats"
-      title="查看改动 (diff)"
-      @click="openDiff"
+      content="查看改动 (diff)"
+      placement="bottom"
+      :show-after="300"
     >
-      <span class="diff-added">+{{ diffStats.added }}</span>
-      <span class="diff-deleted">-{{ diffStats.deleted }}</span>
-    </button>
+      <button class="diff-stats" @click="openDiff">
+        <span class="diff-added">+{{ diffStats.added }}</span>
+        <span class="diff-deleted">-{{ diffStats.deleted }}</span>
+      </button>
+    </el-tooltip>
 
     <el-dialog v-model="showWorktreeDialog" title="新建工作树" width="440px" class="wt-dialog">
       <div class="wt-form">

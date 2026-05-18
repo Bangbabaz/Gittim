@@ -773,10 +773,10 @@ body {
 }
 
 /* macOS hiddenInset places the traffic-light buttons in the top-left.
-   Pad the bar so our title text and any future left-aligned content clears them. */
+   Pad the bar so the title text clears them; keep space-between (inherited
+   from .title-bar) so the settings button still pins to the far right. */
 .title-bar.mac {
   padding-left: 78px;
-  justify-content: center;
 }
 
 .title-bar-text {

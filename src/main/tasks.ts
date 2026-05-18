@@ -126,15 +126,24 @@ function spawnPty(t: Task): void {
   const cwd = t.cwd && isValidDir(t.cwd) ? t.cwd : process.env.HOME || process.cwd()
   const shell = defaultShell()
   // Run the command through the shell so users can use pipes, &&, env vars,
-  // and `npm run x` resolves from node_modules/.bin.
-  const args = isWindows ? ['/d', '/s', '/c', t.command] : ['-c', t.command]
+  // and `npm run x` resolves from node_modules/.bin. Login + interactive on
+  // POSIX so the user's full PATH (nvm/homebrew/…) is sourced.
+  const args = isWindows ? ['/d', '/s', '/c', t.command] : ['-l', '-i', '-c', t.command]
+
+  // Per-task environment: a fresh copy (never the shared live process.env) with
+  // PWD pinned to this task's cwd and the stale INIT_CWD dropped. Without this,
+  // tools that trust $PWD/$INIT_CWD (npm) inherit whatever dir Electron was
+  // launched from, so the same `npm run dev` in two folders looks identical.
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) }
+  env.PWD = cwd
+  delete env.INIT_CWD
 
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
     cwd,
-    env: process.env as { [key: string]: string },
+    env,
     ...(isWindows ? { useConpty: true } : {})
   })
 

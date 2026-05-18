@@ -97,7 +97,7 @@ export function shellIntegration(shellPath: string): ShellSpec {
     const env = { ...baseEnv }
     if (env.ZDOTDIR) env.ZDOTDIR_REAL = env.ZDOTDIR
     env.ZDOTDIR = writeZshDir()
-    return { shell: shellPath, args: [], env }
+    return { shell: shellPath, args: ['-l'], env }
   }
 
   if (name === 'powershell' || name === 'pwsh') {
