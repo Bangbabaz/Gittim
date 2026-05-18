@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import type { SearchAddon, ISearchOptions } from '@xterm/addon-search'
+import { useTheme } from '../composables/useTheme'
+
+const { mode } = useTheme()
 
 // Shared search box for any xterm instance. Owns the query string, the
 // prev/next/close controls, the match-count readout and the highlight
@@ -26,24 +29,35 @@ const countText = computed(() => {
 // `onDidChangeResults` only fires (and matches only get a background) when
 // decorations are enabled, so every search call must carry these options.
 // Requires the terminal to be created with `allowProposedApi: true`.
-const OPTS: ISearchOptions = {
-  decorations: {
-    matchBackground: '#62331c',
-    matchBorder: '#00000000',
-    matchOverviewRuler: '#cc8033',
-    activeMatchBackground: '#d7a23b',
-    activeMatchColorOverviewRuler: '#ffd700'
-  }
-}
+// xterm decorations are JS colors (not CSS), so they can't read our tokens —
+// pick a palette per theme so highlights stay readable on a light terminal.
+const searchOpts = computed<ISearchOptions>(() => ({
+  decorations:
+    mode.value === 'dark'
+      ? {
+          matchBackground: '#62331c',
+          matchBorder: '#00000000',
+          matchOverviewRuler: '#cc8033',
+          activeMatchBackground: '#d7a23b',
+          activeMatchColorOverviewRuler: '#ffd700'
+        }
+      : {
+          matchBackground: '#ffe9a8',
+          matchBorder: '#00000000',
+          matchOverviewRuler: '#cc8033',
+          activeMatchBackground: '#ffb300',
+          activeMatchColorOverviewRuler: '#b8860b'
+        }
+}))
 
 let disposeResults: (() => void) | null = null
 
 function next(): void {
-  if (term.value) props.searchAddon.findNext(term.value, OPTS)
+  if (term.value) props.searchAddon.findNext(term.value, searchOpts.value)
 }
 
 function prev(): void {
-  if (term.value) props.searchAddon.findPrevious(term.value, OPTS)
+  if (term.value) props.searchAddon.findPrevious(term.value, searchOpts.value)
 }
 
 function close(): void {
@@ -67,7 +81,7 @@ watch(term, (v) => {
     results.value = { index: -1, count: 0 }
     return
   }
-  props.searchAddon.findNext(v, { ...OPTS, incremental: true })
+  props.searchAddon.findNext(v, { ...searchOpts.value, incremental: true })
 })
 
 onMounted(() => {
@@ -96,64 +110,56 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .search-overlay {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #2d2d30;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
+  background: var(--bg-toolbar);
+  border: 1px solid var(--border);
+  border-radius: $radius;
   padding: 4px 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-overlay);
 }
 
 .search-input {
   width: 220px;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 3px;
-  color: #d4d4d4;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: $radius-sm;
+  color: var(--text-primary);
   font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: $font-ui;
   padding: 3px 6px;
   outline: none;
-}
 
-.search-input:focus {
-  border-color: #094771;
+  &:focus {
+    border-color: var(--focus-ring);
+  }
 }
 
 .search-count {
   min-width: 44px;
   text-align: center;
   font-size: 11px;
-  color: #9d9d9d;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-}
 
-.search-count.none {
-  color: #f14c4c;
+  &.none {
+    color: var(--danger);
+  }
 }
 
 .search-btn {
-  background: none;
+  @include icon-btn(22px);
   border: 1px solid transparent;
-  color: #ccc;
-  width: 22px;
-  height: 22px;
-  border-radius: 3px;
-  cursor: pointer;
+  color: var(--text-regular);
   font-size: 13px;
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
 
-.search-btn:hover {
-  background: #3e3e42;
-  border-color: #555;
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
 }
 </style>

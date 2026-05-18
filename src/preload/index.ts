@@ -86,13 +86,24 @@ const api = {
       scrollback?: number
       paneLayout?: SavedLayout
       autoOpenTasksOnRun?: boolean
+      theme?: 'system' | 'dark' | 'light'
     }>,
   settingsSet: (patch: {
     fontSize?: number
     scrollback?: number
     paneLayout?: SavedLayout | null
     autoOpenTasksOnRun?: boolean
+    theme?: 'system' | 'dark' | 'light'
   }) => ipcRenderer.send('settings-set', patch),
+  themeSetSource: (src: 'system' | 'dark' | 'light') =>
+    ipcRenderer.send('theme-set-source', src),
+  themeShouldUseDark: () =>
+    ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
+  onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {
+    const listener = (_e: IpcRendererEvent, shouldUseDark: boolean): void => cb(shouldUseDark)
+    ipcRenderer.on('native-theme-updated', listener)
+    return () => ipcRenderer.removeListener('native-theme-updated', listener)
+  },
   ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
     ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
@@ -137,6 +148,9 @@ const api = {
   taskCreate: (opts: { name?: string; command: string; cwd: string }) =>
     ipcRenderer.invoke('task-create', opts) as Promise<TaskMeta>,
   taskStop: (id: string) => ipcRenderer.invoke('task-stop', id) as Promise<void>,
+  taskInput: (id: string, data: string) => ipcRenderer.send('task-input', id, data),
+  taskResize: (id: string, cols: number, rows: number) =>
+    ipcRenderer.send('task-resize', id, cols, rows),
   taskRestart: (id: string) => ipcRenderer.invoke('task-restart', id) as Promise<TaskMeta | null>,
   taskRemove: (id: string) => ipcRenderer.invoke('task-remove', id) as Promise<void>,
   taskUpdate: (id: string, patch: { name?: string; command?: string; cwd?: string }) =>

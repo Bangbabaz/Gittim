@@ -32,7 +32,8 @@
     "electron-updater": "^6.3.9",
     "element-plus": "^2.14.0",
     "lucide-vue-next": "^1.0.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "sass": "^1.99.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",

@@ -17,7 +17,10 @@ import {
   Terminal as TerminalIcon
 } from 'lucide-vue-next'
 import SearchOverlay from './SearchOverlay.vue'
+import { useTheme } from '../composables/useTheme'
 import '@xterm/xterm/css/xterm.css'
+
+const { xtermTheme } = useTheme()
 
 type TaskMeta = {
   id: string
@@ -64,22 +67,33 @@ let logResizeObserver: ResizeObserver | null = null
 const showLogSearch = ref(false)
 const searchAddon = shallowRef<SearchAddon | null>(null)
 
+// Push the viewer's grid size to the selected *running* task's PTY so
+// full-screen TUIs (Next.js overlay, vite menu, prompts) render aligned.
+function syncTaskSize(): void {
+  if (!term) return
+  const id = selectedId.value
+  if (!id) return
+  const t = tasks.value.find((x) => x.id === id)
+  if (t && t.status === 'running' && term.cols > 0 && term.rows > 0) {
+    window.api.taskResize(id, term.cols, term.rows)
+  }
+}
+
+function focusTerm(): void {
+  term?.focus()
+}
+
 function ensureTerm(): void {
   if (term || !logRef.value) return
   term = new Terminal({
     fontSize: 12,
     fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
     cursorBlink: false,
-    disableStdin: true,
     convertEol: true,
     // Required for SearchAddon match decorations (the highlight background)
     // to render — same as the terminal panes.
     allowProposedApi: true,
-    theme: {
-      background: '#1b1b1f',
-      foreground: '#d4d4d4',
-      selectionBackground: '#264f78'
-    }
+    theme: xtermTheme.value
   })
   fit = new FitAddon()
   const sa = new SearchAddon()
@@ -87,12 +101,22 @@ function ensureTerm(): void {
   term.loadAddon(fit)
   term.loadAddon(sa)
   term.open(logRef.value)
+  // Interactive: forward keystrokes/paste to whichever task is selected AND
+  // running. The one terminal is reused across tasks, so resolve the target
+  // at call time; idle/exited tasks are no-ops (backend guards too).
+  term.onData((d) => {
+    const id = selectedId.value
+    if (!id) return
+    const t = tasks.value.find((x) => x.id === id)
+    if (t && t.status === 'running') window.api.taskInput(id, d)
+  })
   logResizeObserver = new ResizeObserver(() => {
     try {
       fit?.fit()
     } catch {
-      // element hidden / detached
+      return // element hidden / detached
     }
+    syncTaskSize()
   })
   logResizeObserver.observe(logRef.value)
 }
@@ -111,6 +135,7 @@ async function bindLog(id: string | null): Promise<void> {
   } catch {
     // ignore
   }
+  syncTaskSize()
 }
 
 function selectTask(id: string): void {
@@ -142,7 +167,11 @@ onMounted(async () => {
   unsubData = window.api.onTaskData(({ id, chunk }) => {
     if (id === selectedId.value && term) term.write(chunk)
   })
-  unsubStatus = window.api.onTaskStatus((meta) => upsert(meta))
+  unsubStatus = window.api.onTaskStatus((meta) => {
+    upsert(meta)
+    // A task we're viewing just started — match its PTY to the viewer size.
+    if (meta.id === selectedId.value && meta.status === 'running') syncTaskSize()
+  })
   unsubCleared = window.api.onTaskCleared(({ id }) => {
     if (id === selectedId.value && term) term.reset()
   })
@@ -182,6 +211,7 @@ watch(
     } catch {
       // ignore
     }
+    syncTaskSize()
   }
 )
 
@@ -192,6 +222,11 @@ watch(
     if (id && props.modelValue) selectTask(id)
   }
 )
+
+// Re-theme the shared log terminal when the app theme changes.
+watch(xtermTheme, (t) => {
+  if (term) term.options.theme = t
+})
 
 // Command CRUD lives in the manager dialog (App-owned). The drawer just
 // surfaces entry points and per-row run/stop controls.
@@ -253,8 +288,8 @@ function closeLogSearch(): void {
   >
     <div class="tasks-shell">
       <!-- Top header bar — kept visually consistent with the app title bar
-           (same 32px height + #1e1e1e bg). `no-drag` so the area that overlaps
-           the OS title-bar strip stays clickable. -->
+           (shared $titlebar-h + --bg-titlebar token). `no-drag` so the area
+           that overlaps the OS title-bar strip stays clickable. -->
       <header class="tasks-header">
         <span class="tasks-header-title">任务</span>
         <div class="tasks-header-ops">
@@ -355,7 +390,7 @@ function closeLogSearch(): void {
             <div v-if="showLogSearch && searchAddon" class="log-search-pos">
               <SearchOverlay :search-addon="searchAddon" @close="closeLogSearch" />
             </div>
-            <div ref="logRef" class="log-body"></div>
+            <div ref="logRef" class="log-body" @click="focusTerm"></div>
           </div>
         </section>
       </div>
@@ -363,12 +398,12 @@ function closeLogSearch(): void {
   </el-drawer>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .tasks-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  @include ui-font;
   /* The drawer overlaps the OS title-bar strip; without no-drag the buttons
      under that strip get hijacked by the window-drag region. */
   -webkit-app-region: no-drag;
@@ -381,11 +416,11 @@ function closeLogSearch(): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 32px;
+  height: $titlebar-h;
   flex-shrink: 0;
   padding: 0 6px 0 14px;
-  background: #1e1e1e;
-  border-bottom: 1px solid #3e3e42;
+  background: var(--bg-titlebar);
+  border-bottom: 1px solid var(--border);
   user-select: none;
   -webkit-app-region: drag;
 }
@@ -393,7 +428,7 @@ function closeLogSearch(): void {
 .tasks-header-title {
   font-size: 12px;
   font-weight: 600;
-  color: #cccccc;
+  color: var(--text-regular);
 }
 
 .tasks-header-ops {
@@ -409,15 +444,15 @@ function closeLogSearch(): void {
   height: 22px;
   background: transparent;
   border: none;
-  color: #9d9d9d;
+  color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: $radius;
   -webkit-app-region: no-drag;
 }
 
 .hdr-btn:hover {
-  background: #3e3e42;
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-bright);
 }
 
 .tasks-layout {
@@ -431,106 +466,8 @@ function closeLogSearch(): void {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #252526;
-  border-right: 1px solid #3e3e42;
-}
-
-.task-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border-bottom: 1px solid #3e3e42;
-}
-
-.tf-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #858585;
-}
-
-.tf-input {
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  color: #d4d4d4;
-  font-size: 12px;
-  padding: 6px 8px;
-  outline: none;
-  font-family: inherit;
-}
-
-.tf-input:focus {
-  border-color: #094771;
-}
-
-.tf-scripts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-
-.tf-scripts-label {
-  font-size: 11px;
-  color: #858585;
-}
-
-.tf-chip {
-  background: #0e639c33;
-  border: 1px solid #0e639c66;
-  color: #6cb6ff;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.tf-chip:hover {
-  background: #0e639c55;
-}
-
-.tf-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.tf-submit {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  background: #0e639c;
-  border: none;
-  color: #fff;
-  font-size: 12px;
-  padding: 7px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.tf-submit:hover {
-  background: #1177bb;
-}
-
-.tf-cancel {
-  background: transparent;
-  border: 1px solid #3e3e42;
-  color: #ccc;
-  font-size: 12px;
-  padding: 7px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.tf-cancel:hover {
-  background: #3e3e42;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
 }
 
 .task-list {
@@ -540,7 +477,7 @@ function closeLogSearch(): void {
 }
 
 .task-empty {
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 12px;
   text-align: center;
   padding: 24px 0;
@@ -556,11 +493,11 @@ function closeLogSearch(): void {
 }
 
 .task-row:hover {
-  background: #2d2d30;
+  background: var(--bg-hover);
 }
 
 .task-row.active {
-  background: #04395e;
+  background: var(--bg-selected);
 }
 
 .status-dot {
@@ -568,20 +505,20 @@ function closeLogSearch(): void {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: #6b6b6b;
+  background: var(--dot-idle);
 }
 
 .status-dot.running {
-  background: #3fb950;
-  box-shadow: 0 0 4px #3fb95088;
+  background: var(--success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
 }
 
 .status-dot.failed {
-  background: #f14c4c;
+  background: var(--danger);
 }
 
 .status-dot.exited {
-  background: #6b6b6b;
+  background: var(--dot-idle);
 }
 
 .task-meta {
@@ -591,19 +528,15 @@ function closeLogSearch(): void {
 
 .task-name {
   font-size: 12.5px;
-  color: #d4d4d4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-primary);
+  @include ellipsis;
 }
 
 .task-cmd {
   font-size: 11px;
-  color: #858585;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  color: var(--text-muted);
+  @include ellipsis;
+  font-family: $font-mono;
 }
 
 .task-cwd {
@@ -611,7 +544,7 @@ function closeLogSearch(): void {
   align-items: center;
   gap: 4px;
   margin-top: 2px;
-  color: #6b6b6b;
+  color: var(--text-faint);
 }
 
 .task-cwd-icon {
@@ -620,10 +553,8 @@ function closeLogSearch(): void {
 
 .task-cwd-text {
   font-size: 10.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  @include ellipsis;
+  font-family: $font-mono;
 }
 
 .task-ops {
@@ -647,52 +578,67 @@ function closeLogSearch(): void {
   padding: 0 5px;
   background: transparent;
   border: none;
-  color: #b5b5b5;
+  color: var(--text-regular);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   font-size: 11px;
   font-family: inherit;
 }
 
 .op-btn:hover {
-  background: #ffffff1a;
-  color: #fff;
+  background: color-mix(in srgb, var(--text-bright) 10%, transparent);
+  color: var(--text-bright);
 }
 
 .op-btn.danger:hover {
-  background: #c42b1c44;
-  color: #f14c4c;
+  background: color-mix(in srgb, var(--danger-strong) 27%, transparent);
+  color: var(--danger);
 }
 
 /* Per-row command buttons: unified white icons on semantic filled
    backgrounds (run=green, stop/delete=red, restart=amber, edit=neutral). */
+/* Neutral default (the edit button): outlined like the worktree button so
+   the icon stays readable in both themes (a filled neutral chip with the
+   base white icon is invisible in the light theme). The semantic variants
+   below stay filled with white icons on their saturated fills. */
 .task-ops .op-btn {
-  background: #3a3a42;
-  color: #fff;
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-regular);
 }
 
 .task-ops .op-btn:hover {
-  background: #4a4a52;
-  color: #fff;
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text-bright);
+}
+
+.task-ops .op-btn.run,
+.task-ops .op-btn.run:hover,
+.task-ops .op-btn.stop,
+.task-ops .op-btn.danger,
+.task-ops .op-btn.stop:hover,
+.task-ops .op-btn.danger:hover {
+  border: none;
+  color: var(--text-on-accent);
 }
 
 .task-ops .op-btn.run {
-  background: #2e944a;
+  background: var(--success-solid);
 }
 
 .task-ops .op-btn.run:hover {
-  background: #37b058;
+  background: var(--success-solid-hover);
 }
 
 .task-ops .op-btn.stop,
 .task-ops .op-btn.danger {
-  background: #c0392b;
+  background: var(--danger-solid);
 }
 
 .task-ops .op-btn.stop:hover,
 .task-ops .op-btn.danger:hover {
-  background: #da4233;
-  color: #fff;
+  background: var(--danger-solid-hover);
 }
 
 .tasks-log {
@@ -700,7 +646,7 @@ function closeLogSearch(): void {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #1b1b1f;
+  background: var(--bg-app);
 }
 
 .log-head {
@@ -708,25 +654,25 @@ function closeLogSearch(): void {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid #3e3e42;
+  border-bottom: 1px solid var(--border);
 }
 
 .log-head-icon {
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .log-head-title {
   font-size: 12.5px;
-  color: #d4d4d4;
+  color: var(--text-primary);
   flex-shrink: 0;
 }
 
 .log-head-status {
   font-size: 11px;
   padding: 1px 7px;
-  border-radius: 3px;
-  background: #6b6b6b33;
-  color: #9d9d9d;
+  border-radius: $radius-sm;
+  background: color-mix(in srgb, var(--dot-idle) 20%, transparent);
+  color: var(--text-muted);
 }
 
 .log-head-cwd {
@@ -736,11 +682,9 @@ function closeLogSearch(): void {
   flex: 1;
   min-width: 0;
   font-size: 11px;
-  color: #6b6b6b;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font-family: $font-mono;
+  @include ellipsis;
 }
 
 .log-head-cwd-icon {
@@ -748,13 +692,13 @@ function closeLogSearch(): void {
 }
 
 .log-head-status.running {
-  background: #3fb95022;
-  color: #3fb950;
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
 }
 
 .log-head-status.failed {
-  background: #f14c4c22;
-  color: #f14c4c;
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+  color: var(--danger);
 }
 
 .log-head-ops {
@@ -782,19 +726,5 @@ function closeLogSearch(): void {
   top: 8px;
   right: 14px;
   z-index: 5;
-}
-</style>
-
-<style>
-.tasks-drawer .el-drawer__body {
-  padding: 0;
-  background: #1b1b1f;
-  /* Punch a no-drag hole over the OS title-bar strip the drawer overlaps,
-     otherwise clicks on controls near the top become window drags. */
-  -webkit-app-region: no-drag;
-}
-
-.tasks-drawer.el-drawer {
-  background: #1b1b1f;
 }
 </style>

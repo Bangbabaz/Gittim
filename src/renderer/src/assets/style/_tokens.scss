@@ -1,0 +1,202 @@
+// Runtime theme tokens. Emitted ONCE globally (main.ts imports the style
+// entry). Every component references these via var(--token); switching
+// html[data-theme] re-themes the whole app with no rebuild and no JS touching
+// component styles.
+//
+// :root holds the dark values so anything rendered before the theme attribute
+// is applied still looks right (dark is the historical default). The explicit
+// [data-theme='dark'] block mirrors it; [data-theme='light'] overrides.
+
+@mixin dark-tokens {
+  // Surfaces
+  --bg-app: #1b1b1f;
+  --bg-titlebar: #1e1e1e;
+  --bg-elevated: #252526;
+  --bg-toolbar: #2d2d30;
+  --bg-input: #1e1e1e;
+  --bg-row: #1e1e1e;
+  --bg-hover: #2d2d30;
+  --bg-selected: #04395e;
+  --bg-neutral: #3a3a42;
+  --bg-neutral-hover: #4a4a52;
+  --bg-menu: #252526;
+  --bg-menu-hover: #04395e;
+  --bg-code: #0d1117;
+  --bg-code-head: #161b22;
+  --bg-disabled: #3a3a3a;
+
+  // Borders
+  --border: #3e3e42;
+  --border-strong: #555555;
+  --border-menu: #454545;
+  --border-code: #21262d;
+  --border-code-soft: #30363d;
+
+  // Text
+  --text-primary: #d4d4d4;
+  --text-regular: #cccccc;
+  --text-muted: #858585;
+  --text-faint: #6b6b6b;
+  --text-disabled: #555555;
+  --text-bright: #ffffff;
+  --text-titlebar: #999999;
+  --text-on-accent: #ffffff;
+  --text-menu-hover: #ffffff;
+
+  // Accent / focus / selection
+  --accent: #094771;
+  --accent-strong: #1177bb;
+  --focus-ring: #094771;
+  --selection: #264f78;
+
+  // Semantic
+  --success: #3fb950;
+  --success-solid: #2e944a;
+  --success-solid-hover: #37b058;
+  --danger: #f14c4c;
+  --danger-solid: #c0392b;
+  --danger-solid-hover: #da4233;
+  --danger-strong: #c42b1c;
+  --warn: #d7a23b;
+  --warn-2: #e0a04d;
+  --git: #e74856;
+  --info: #569cd6;
+
+  // Tags / badges
+  --tag-local-fg: #6a9955;
+  --tag-local-bg: #6a995522;
+  --tag-remote-fg: #569cd6;
+  --tag-remote-bg: #569cd622;
+  --tag-worktree-fg: #c19c00;
+  --tag-worktree-bg: #c19c0022;
+
+  // Diff
+  --diff-add-fg: #3fb950;
+  --diff-del-fg: #f85149;
+  --diff-add-bg: rgba(46, 160, 67, 0.15);
+  --diff-del-bg: rgba(248, 81, 73, 0.12);
+  --diff-empty-bg: rgba(110, 118, 129, 0.08);
+  --diff-hunk-bg: rgba(56, 139, 253, 0.1);
+  --diff-hunk-fg: #6e7681;
+  --diff-num-fg: #6e7681;
+
+  // Chips (package.json scripts)
+  --chip-fg: #6cb6ff;
+  --chip-bg: #0e639c33;
+  --chip-border: #0e639c66;
+  --chip-bg-hover: #0e639c55;
+
+  // Primary action button (save / submit)
+  --primary-btn: #0e639c;
+  --primary-btn-hover: #1177bb;
+
+  // Shadows
+  --shadow-menu: 0 4px 16px rgba(0, 0, 0, 0.44);
+  --shadow-overlay: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  // Status dot
+  --dot-idle: #6b6b6b;
+}
+
+@mixin light-tokens {
+  // Surfaces
+  --bg-app: #ffffff;
+  --bg-titlebar: #e4e4e6;
+  --bg-elevated: #f3f3f3;
+  --bg-toolbar: #ececef;
+  --bg-input: #ffffff;
+  --bg-row: #f7f7f8;
+  --bg-hover: #e6e6e9;
+  --bg-selected: #cfe4fb;
+  --bg-neutral: #e2e2e6;
+  --bg-neutral-hover: #d4d4d9;
+  --bg-menu: #ffffff;
+  --bg-menu-hover: #0067c0;
+  --bg-code: #f6f8fa;
+  --bg-code-head: #f6f8fa;
+  --bg-disabled: #ededed;
+
+  // Borders
+  --border: #d4d4d8;
+  --border-strong: #b5b5bb;
+  --border-menu: #c8c8cc;
+  --border-code: #e1e4e8;
+  --border-code-soft: #e1e4e8;
+
+  // Text
+  --text-primary: #1f1f1f;
+  --text-regular: #2f2f2f;
+  --text-muted: #6a6a6a;
+  --text-faint: #949494;
+  --text-disabled: #b0b0b0;
+  --text-bright: #000000;
+  --text-titlebar: #555555;
+  --text-on-accent: #ffffff;
+  --text-menu-hover: #ffffff;
+
+  // Accent / focus / selection
+  --accent: #0067c0;
+  --accent-strong: #005ba1;
+  --focus-ring: #0067c0;
+  --selection: #add6ff;
+
+  // Semantic (darkened so they stay legible on white)
+  --success: #1a7f37;
+  --success-solid: #1f883d;
+  --success-solid-hover: #1a7f37;
+  --danger: #cf222e;
+  --danger-solid: #cf222e;
+  --danger-solid-hover: #a40e26;
+  --danger-strong: #cf222e;
+  --warn: #9a6700;
+  --warn-2: #9a6700;
+  --git: #cf222e;
+  --info: #0969da;
+
+  // Tags / badges
+  --tag-local-fg: #1a7f37;
+  --tag-local-bg: rgba(26, 127, 55, 0.13);
+  --tag-remote-fg: #0969da;
+  --tag-remote-bg: rgba(9, 105, 218, 0.13);
+  --tag-worktree-fg: #9a6700;
+  --tag-worktree-bg: rgba(154, 103, 0, 0.13);
+
+  // Diff
+  --diff-add-fg: #1a7f37;
+  --diff-del-fg: #cf222e;
+  --diff-add-bg: rgba(46, 160, 67, 0.15);
+  --diff-del-bg: rgba(207, 34, 46, 0.12);
+  --diff-empty-bg: rgba(110, 118, 129, 0.06);
+  --diff-hunk-bg: rgba(9, 105, 218, 0.08);
+  --diff-hunk-fg: #57606a;
+  --diff-num-fg: #8c959f;
+
+  // Chips
+  --chip-fg: #0969da;
+  --chip-bg: rgba(9, 105, 218, 0.1);
+  --chip-border: rgba(9, 105, 218, 0.35);
+  --chip-bg-hover: rgba(9, 105, 218, 0.18);
+
+  // Primary action button
+  --primary-btn: #0067c0;
+  --primary-btn-hover: #0078d4;
+
+  // Shadows
+  --shadow-menu: 0 4px 16px rgba(0, 0, 0, 0.18);
+  --shadow-overlay: 0 4px 12px rgba(0, 0, 0, 0.14);
+
+  // Status dot
+  --dot-idle: #9a9a9a;
+}
+
+:root {
+  @include dark-tokens;
+}
+
+html[data-theme='dark'] {
+  @include dark-tokens;
+}
+
+html[data-theme='light'] {
+  @include light-tokens;
+}

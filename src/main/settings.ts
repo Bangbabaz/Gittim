@@ -39,14 +39,17 @@ export interface Settings {
   tasks?: TaskDef[]
   /** Auto-open the tasks drawer when a task starts. Default true. */
   autoOpenTasksOnRun?: boolean
+  /** UI theme. 'system' follows the OS via Electron nativeTheme. Default 'system'. */
+  theme?: 'system' | 'dark' | 'light'
 }
 
 const DEFAULTS: Settings = {
   windowBounds: { width: 1100, height: 720 },
   windowMaximized: false,
-  fontSize: 14,
+  fontSize: 13,
   scrollback: 10000,
-  autoOpenTasksOnRun: true
+  autoOpenTasksOnRun: true,
+  theme: 'system'
 }
 
 let cache: Settings | null = null

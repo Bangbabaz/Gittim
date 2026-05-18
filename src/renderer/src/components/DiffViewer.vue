@@ -166,18 +166,18 @@ function jumpTo(id: string): void {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .dv-root {
   display: flex;
   height: 78vh;
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  font-family: $font-mono;
 }
 
 /* Left: changed-files list */
 .dv-sidebar {
   width: 250px;
   flex-shrink: 0;
-  border-right: 1px solid #3e3e42;
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 8px 6px;
   display: flex;
@@ -189,9 +189,9 @@ function jumpTo(id: string): void {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: #858585;
+  color: var(--text-muted);
   padding: 4px 8px 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  @include ui-font;
 }
 
 .dv-file-item {
@@ -202,17 +202,17 @@ function jumpTo(id: string): void {
   padding: 5px 8px;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: $radius;
   cursor: pointer;
   text-align: left;
-}
 
-.dv-file-item:hover {
-  background: #2d2d30;
-}
+  &:hover {
+    background: var(--bg-hover);
+  }
 
-.dv-file-item.active {
-  background: #04395e;
+  &.active {
+    background: var(--bg-selected);
+  }
 }
 
 .dv-main {
@@ -223,10 +223,10 @@ function jumpTo(id: string): void {
 
 .dv-file {
   margin-bottom: 18px;
-}
 
-.dv-file:last-child {
-  margin-bottom: 0;
+  &:last-child {
+    margin-bottom: 0;
+  }
 }
 
 /* Filename stays pinned while scrolling through a long file. */
@@ -238,48 +238,46 @@ function jumpTo(id: string): void {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-code-head);
+  border-bottom: 1px solid var(--border-code-soft);
+  @include ui-font;
 }
 
 .dv-badge {
   font-size: 10px;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   flex-shrink: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  @include ui-font;
 }
 
 .st-new {
-  color: #3fb950;
-  background: #2ea04326;
+  color: var(--diff-add-fg);
+  background: color-mix(in srgb, var(--diff-add-fg) 15%, transparent);
 }
 
 .st-del {
-  color: #f85149;
-  background: #f8514926;
+  color: var(--diff-del-fg);
+  background: color-mix(in srgb, var(--diff-del-fg) 15%, transparent);
 }
 
 .st-ren {
-  color: #d29922;
-  background: #d2992226;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
 }
 
 .st-mod {
-  color: #58a6ff;
-  background: #58a6ff26;
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 15%, transparent);
 }
 
 .dv-file-name {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  color: #d4d4d4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  color: var(--text-primary);
+  @include ellipsis;
+  font-family: $font-mono;
 }
 
 .dv-counts {
@@ -290,11 +288,11 @@ function jumpTo(id: string): void {
 }
 
 .dv-add {
-  color: #3fb950;
+  color: var(--diff-add-fg);
 }
 
 .dv-del {
-  color: #f85149;
+  color: var(--diff-del-fg);
 }
 
 /* Side-by-side grid: [old#][old code][new#][new code] */
@@ -308,8 +306,8 @@ function jumpTo(id: string): void {
 .dv-hunk {
   grid-column: 1 / -1;
   padding: 2px 12px;
-  color: #6e7681;
-  background: rgba(56, 139, 253, 0.1);
+  color: var(--diff-hunk-fg);
+  background: var(--diff-hunk-bg);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -317,9 +315,9 @@ function jumpTo(id: string): void {
 .dv-num {
   text-align: right;
   padding: 0 0.6em;
-  color: #6e7681;
-  background: #0d1117;
-  border-right: 1px solid #21262d;
+  color: var(--diff-num-fg);
+  background: var(--bg-code);
+  border-right: 1px solid var(--border-code);
   user-select: none;
   white-space: nowrap;
 }
@@ -329,28 +327,28 @@ function jumpTo(id: string): void {
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
-  color: #d4d4d4;
+  color: var(--text-primary);
 }
 
 .dv-num.del,
 .dv-code.del {
-  background: rgba(248, 81, 73, 0.12);
+  background: var(--diff-del-bg);
 }
 
 .dv-num.ins,
 .dv-code.ins {
-  background: rgba(46, 160, 67, 0.15);
+  background: var(--diff-add-bg);
 }
 
 .dv-num.empty,
 .dv-code.empty {
-  background: rgba(110, 118, 129, 0.08);
+  background: var(--diff-empty-bg);
 }
 
 .dv-binary {
   padding: 16px 12px;
-  color: #6e7681;
+  color: var(--diff-hunk-fg);
   font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  @include ui-font;
 }
 </style>

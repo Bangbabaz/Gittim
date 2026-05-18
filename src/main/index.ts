@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, screen } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, screen, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -32,6 +32,8 @@ import {
   removeTask,
   updateTask,
   createTask,
+  writeTask,
+  resizeTask,
   killAllTasks
 } from './tasks'
 import { readFileSync, existsSync } from 'fs'
@@ -178,6 +180,27 @@ app.whenReady().then(() => {
     updateSettings(patch)
   })
 
+  // Theme IPC. The renderer owns the CSS-token swap; nativeTheme is the source
+  // of truth for "follow system" (and keeps native chrome — dialogs, scrollbars
+  // — consistent with the chosen theme).
+  const applyThemeSource = (src: unknown): void => {
+    nativeTheme.themeSource =
+      src === 'dark' || src === 'light' ? src : 'system'
+  }
+  applyThemeSource(readSettings().theme)
+  ipcMain.on('theme-set-source', (_event, src: 'system' | 'dark' | 'light') => {
+    applyThemeSource(src)
+  })
+  ipcMain.handle('theme-should-use-dark', () => nativeTheme.shouldUseDarkColors)
+  // Fires when the OS appearance changes (only meaningful in 'system' mode).
+  nativeTheme.on('updated', () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('native-theme-updated', nativeTheme.shouldUseDarkColors)
+      }
+    }
+  })
+
   ipcMain.handle(
     'pty-start',
     (event, opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) => {
@@ -220,6 +243,10 @@ app.whenReady().then(() => {
   ipcMain.handle('task-create', (_event, opts: { name?: string; command: string; cwd: string }) => {
     return createTask(opts)
   })
+  ipcMain.on('task-input', (_event, id: string, data: string) => writeTask(id, data))
+  ipcMain.on('task-resize', (_event, id: string, cols: number, rows: number) =>
+    resizeTask(id, cols, rows)
+  )
   ipcMain.handle('task-stop', (_event, id: string) => stopTask(id))
   ipcMain.handle('task-restart', (_event, id: string) => restartTask(id))
   ipcMain.handle('task-remove', (_event, id: string) => removeTask(id))

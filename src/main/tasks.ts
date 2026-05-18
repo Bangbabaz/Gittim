@@ -20,7 +20,15 @@ interface Task extends TaskMeta {
   // a chatty dev server can't grow memory unbounded.
   output: string[]
   outputBytes: number
+  // Last known PTY grid size. Tracks the log viewer so full-screen TUIs
+  // (Next.js overlay, vite menu) render aligned, and a re-run respawns at the
+  // same size instead of the 120×30 default.
+  cols: number
+  rows: number
 }
+
+const DEFAULT_COLS = 120
+const DEFAULT_ROWS = 30
 
 const OUTPUT_BYTE_CAP = 512 * 1024
 
@@ -99,7 +107,9 @@ export function loadPersistedTasks(): void {
       startedAt: null,
       pty: null,
       output: [],
-      outputBytes: 0
+      outputBytes: 0,
+      cols: DEFAULT_COLS,
+      rows: DEFAULT_ROWS
     })
   }
 }
@@ -140,8 +150,8 @@ function spawnPty(t: Task): void {
 
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
+    cols: t.cols || DEFAULT_COLS,
+    rows: t.rows || DEFAULT_ROWS,
     cwd,
     env,
     ...(isWindows ? { useConpty: true } : {})
@@ -200,7 +210,9 @@ export function startTask(opts: {
       startedAt: null,
       pty: null,
       output: [],
-      outputBytes: 0
+      outputBytes: 0,
+      cols: DEFAULT_COLS,
+      rows: DEFAULT_ROWS
     }
     tasks.set(t.id, t)
   }
@@ -222,7 +234,9 @@ export function createTask(opts: { name?: string; command: string; cwd: string }
     startedAt: null,
     pty: null,
     output: [],
-    outputBytes: 0
+    outputBytes: 0,
+    cols: DEFAULT_COLS,
+    rows: DEFAULT_ROWS
   }
   tasks.set(t.id, t)
   persistDefs()
@@ -240,6 +254,31 @@ export function stopTask(id: string): void {
     t.pty = null
     t.status = 'exited'
     broadcast('task-status', toMeta(t))
+  }
+}
+
+/** Forward keystrokes/paste from the log viewer to a running task's PTY. */
+export function writeTask(id: string, data: string): void {
+  const t = tasks.get(id)
+  if (t && t.pty) t.pty.write(data)
+}
+
+/**
+ * Resize a task's PTY to match the log viewer. Stored on the task so a later
+ * re-run respawns at the same size. No-op for non-positive dims.
+ */
+export function resizeTask(id: string, cols: number, rows: number): void {
+  if (!(cols > 0 && rows > 0)) return
+  const t = tasks.get(id)
+  if (!t) return
+  t.cols = cols
+  t.rows = rows
+  if (t.pty) {
+    try {
+      t.pty.resize(cols, rows)
+    } catch {
+      // pty may have exited between the check and the resize
+    }
   }
 }
 

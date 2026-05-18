@@ -1,0 +1,7 @@
+// Auto-injected into every .scss / <style lang="scss"> via Vite's
+// additionalData (see electron.vite.config.ts). MUST emit zero CSS — only
+// @forward of mixins/functions/$variables — otherwise every component would
+// duplicate the output. Runtime color tokens are NOT here; they are emitted
+// once globally by _tokens.scss (imported in main.ts).
+@forward 'variables';
+@forward 'mixins';

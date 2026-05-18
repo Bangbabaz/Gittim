@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
+import { useTheme, type ThemePref } from './composables/useTheme'
 
 type Pane = { type: 'pane'; id: string }
 type Split = {
@@ -44,7 +44,7 @@ const containerSize = ref({ width: 0, height: 0 })
 const isMaximized = ref(false)
 const isMac = ref(false)
 
-const DEFAULT_FONT_SIZE = 14
+const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 32
 // Global font size — single source of truth so the drawer and every open
@@ -73,6 +73,13 @@ const taskMgrFocusId = ref<string | null>(null)
 const taskMgrScopeCwd = ref<string | null>(null)
 const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
+
+// Theme is a singleton composable: it owns the html[data-theme] / .dark swap
+// and keeps Electron's nativeTheme in sync. The select binds to `themePref`.
+const { preference: themePref, setPreference: setThemePref, init: initTheme } = useTheme()
+const onThemeChange = (v: ThemePref): void => {
+  setThemePref(v)
+}
 // cwd handed to the tasks drawer's "new task" form — the active pane's dir.
 const activeCwd = computed(() => {
   const id = activeId.value
@@ -360,24 +367,6 @@ const onScrollbackChange = (size: number | undefined): void => {
   window.api.settingsSet({ scrollback: clamped })
 }
 
-const onClearSavedLayout = async (): Promise<void> => {
-  try {
-    await ElMessageBox.confirm(
-      '下次启动时将不再恢复已保存的面板和工作目录。当前打开的面板不受影响。',
-      '清除保存的布局？',
-      {
-        confirmButtonText: '清除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    window.api.settingsSet({ paneLayout: null })
-    ElMessage.success('已清除保存的布局')
-  } catch {
-    // user cancelled — nothing to do
-  }
-}
-
 const onToggleAutoOpenTasks = (val: boolean): void => {
   autoOpenTasksOnRun.value = val
   window.api.settingsSet({ autoOpenTasksOnRun: val })
@@ -456,6 +445,8 @@ const scheduleSave = (): void => {
 const flushSaveOnUnload = (): void => flushSave()
 
 onMounted(async () => {
+  // Resolve + apply the saved theme ASAP (async; doesn't block the rest).
+  initTheme()
   cwd.value = await window.api.getCwd()
   isMac.value = (await window.api.getPlatform()) === 'darwin'
   isMaximized.value = await window.api.winIsMaximized()
@@ -558,7 +549,7 @@ onUnmounted(() => {
           </svg>
           <svg v-else width="10" height="10" viewBox="0 0 10 10">
             <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" />
-            <rect x="0" y="3" width="8" height="7" fill="#2d2d30" stroke="currentColor" />
+            <rect x="0" y="3" width="8" height="7" fill="var(--bg-titlebar)" stroke="currentColor" />
           </svg>
         </button>
         <button class="tb-btn tb-close" title="关闭" @click="winClose">
@@ -659,6 +650,24 @@ onUnmounted(() => {
                 }}）。调大可向上翻看更多构建/日志输出，过大略增内存占用。
               </p>
             </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">主题</label>
+                <el-select
+                  :model-value="themePref"
+                  size="small"
+                  style="width: 140px"
+                  @update:model-value="(v: ThemePref) => onThemeChange(v)"
+                >
+                  <el-option label="跟随系统" value="system" />
+                  <el-option label="黑色" value="dark" />
+                  <el-option label="白色" value="light" />
+                </el-select>
+              </div>
+              <p class="settings-item-desc">
+                选择界面主题。“跟随系统”会随操作系统的浅色 / 深色外观自动切换。
+              </p>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -677,15 +686,6 @@ onUnmounted(() => {
               </div>
               <p class="settings-item-desc">
                 关闭后，后台任务启动时不会自动弹出任务抽屉，需手动点工具栏的查看按钮。
-              </p>
-            </div>
-            <div class="settings-item">
-              <div class="settings-item-row">
-                <label class="settings-item-label">已保存的窗口布局</label>
-                <button class="danger-btn" @click="onClearSavedLayout">清除</button>
-              </div>
-              <p class="settings-item-desc">
-                清除后下次启动不再恢复之前的面板和工作目录，从主目录单面板开始。
               </p>
             </div>
           </section>
@@ -770,16 +770,10 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style>
-body {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
+<style lang="scss">
 .title-bar {
   height: 32px;
-  background: #1e1e1e;
+  background: var(--bg-titlebar);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -796,9 +790,9 @@ body {
 }
 
 .title-bar-text {
-  color: #999;
+  color: var(--text-titlebar);
   font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: $font-ui;
 }
 
 .title-bar-right {
@@ -812,15 +806,15 @@ body {
   display: flex;
   margin-left: 4px;
   padding-left: 4px;
-  border-left: 1px solid #3e3e42;
+  border-left: 1px solid var(--border);
 }
 
 .tb-settings {
-  color: #9d9d9d;
+  color: var(--text-muted);
 }
 
 .tb-settings:hover {
-  color: #fff;
+  color: var(--text-bright);
 }
 
 .tb-btn {
@@ -828,7 +822,7 @@ body {
   height: 24px;
   border: none;
   background: none;
-  color: #ccc;
+  color: var(--text-regular);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -837,19 +831,19 @@ body {
 }
 
 .tb-btn:hover {
-  background: #3e3e42;
+  background: var(--bg-hover);
 }
 
 .tb-close:hover {
-  background: #c42b1c;
-  color: #fff;
+  background: var(--danger-strong);
+  color: var(--text-on-accent);
 }
 
 .layout-root {
   position: relative;
   width: 100vw;
-  height: calc(100vh - 32px);
-  background: #1b1b1f;
+  height: calc(100vh - #{$titlebar-h});
+  background: var(--bg-app);
 }
 
 .layout-root.dragging {
@@ -866,12 +860,12 @@ body {
 }
 
 .pane-slot.active {
-  border-color: #094771;
+  border-color: var(--accent);
 }
 
 .divider {
   position: absolute;
-  background: #3e3e42;
+  background: var(--border);
   z-index: 1;
 }
 
@@ -887,17 +881,17 @@ body {
 
 .settings-drawer .el-drawer__body {
   padding: 0;
-  background: #1b1b1f;
+  background: var(--bg-app);
 }
 
 .settings-drawer.el-drawer {
-  background: #1b1b1f;
+  background: var(--bg-app);
 }
 
 .settings-layout {
   display: flex;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: $font-ui;
 }
 
 .settings-sidebar {
@@ -905,8 +899,8 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #252526;
-  border-right: 1px solid #3e3e42;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
   padding: 14px 0 14px 0;
 }
 
@@ -915,7 +909,7 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #858585;
+  color: var(--text-muted);
   padding: 0 18px 12px 18px;
 }
 
@@ -935,19 +929,19 @@ body {
   padding: 6px 12px;
   background: transparent;
   border: none;
-  color: #cccccc;
+  color: var(--text-regular);
   font-size: 13px;
   cursor: pointer;
   border-radius: 4px;
 }
 
 .settings-nav-item:hover {
-  background: #2d2d30;
+  background: var(--bg-hover);
 }
 
 .settings-nav-item.active {
-  background: #094771;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--text-on-accent);
 }
 
 .settings-nav-icon {
@@ -976,11 +970,11 @@ body {
   align-items: center;
   gap: 6px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #3e3e42;
+  border-bottom: 1px solid var(--border);
 }
 
 .settings-section-icon {
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .settings-section-title {
@@ -989,7 +983,7 @@ body {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .settings-item {
@@ -1008,13 +1002,13 @@ body {
 
 .settings-item-label {
   font-size: 13px;
-  color: #d4d4d4;
+  color: var(--text-primary);
 }
 
 .settings-item-desc {
   margin: 0;
   font-size: 11.5px;
-  color: #858585;
+  color: var(--text-muted);
   line-height: 1.55;
 }
 
@@ -1022,8 +1016,8 @@ body {
 .font-size-control {
   display: flex;
   align-items: center;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px;
   gap: 2px;
@@ -1037,7 +1031,7 @@ body {
   justify-content: center;
   background: transparent;
   border: none;
-  color: #d4d4d4;
+  color: var(--text-primary);
   font-size: 14px;
   cursor: pointer;
   border-radius: 3px;
@@ -1045,11 +1039,11 @@ body {
 }
 
 .fs-btn:hover:not(:disabled) {
-  background: #3e3e42;
+  background: var(--bg-hover);
 }
 
 .fs-btn:disabled {
-  color: #555;
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
@@ -1057,7 +1051,7 @@ body {
   min-width: 28px;
   text-align: center;
   font-size: 12px;
-  color: #d4d4d4;
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1069,7 +1063,7 @@ body {
   justify-content: center;
   background: transparent;
   border: none;
-  color: #858585;
+  color: var(--text-muted);
   cursor: pointer;
   border-radius: 3px;
   padding: 0;
@@ -1077,26 +1071,8 @@ body {
 }
 
 .fs-reset:hover {
-  background: #3e3e42;
-  color: #d4d4d4;
-}
-
-/* Destructive button (clear layout) */
-.danger-btn {
-  background: transparent;
-  border: 1px solid #c42b1c66;
-  color: #f14c4c;
-  font-size: 12px;
-  padding: 4px 14px;
-  border-radius: 3px;
-  cursor: pointer;
-  line-height: 1.4;
-  font-family: inherit;
-}
-
-.danger-btn:hover {
-  background: #c42b1c22;
-  border-color: #c42b1c;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* About tab */
@@ -1109,13 +1085,13 @@ body {
 
 .about-logo {
   font-size: 22px;
-  color: #d4d4d4;
+  color: var(--text-primary);
   font-weight: 600;
   letter-spacing: 1px;
 }
 
 .about-tagline {
-  color: #858585;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1135,17 +1111,17 @@ body {
 }
 
 .about-row dt {
-  color: #d4d4d4;
+  color: var(--text-primary);
   font-weight: normal;
 }
 
 .about-row dd {
   margin: 0;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .about-row .mono {
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  font-family: $font-mono;
   font-size: 11px;
 }
 </style>

@@ -18,6 +18,16 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
+    css: {
+      preprocessorOptions: {
+        scss: {
+          // Auto-inject SCSS mixins/$variables (zero CSS output) into every
+          // <style lang="scss"> so components use @include/$font-* without an
+          // explicit @use. Runtime color tokens are global CSS vars, not here.
+          additionalData: `@use "@renderer/assets/style/abstracts" as *;\n`
+        }
+      }
+    },
     plugins: [
       vue(),
       AutoImport({

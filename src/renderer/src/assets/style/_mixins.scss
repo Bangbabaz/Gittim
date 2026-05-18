@@ -1,0 +1,57 @@
+// Reusable mixins (no CSS output until @include'd). Forwarded via _abstracts
+// and auto-injected, so every component can @include these without importing.
+
+@use 'variables' as *;
+
+@mixin btn-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+@mixin hide-scrollbar {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// Single-line truncation with ellipsis. Needs a constrained width / min-width:0
+// on the flex item to actually clip.
+@mixin ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@mixin ui-font {
+  font-family: $font-ui;
+}
+
+@mixin mono-font {
+  font-family: $font-mono;
+}
+
+// Standard focus treatment for text inputs (border turns accent).
+@mixin focus-accent {
+  &:focus {
+    border-color: var(--focus-ring);
+  }
+}
+
+// Small square icon button used across toolbars/menus.
+@mixin icon-btn($size: 20px) {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: $size;
+  height: $size;
+  border-radius: $radius-sm;
+  flex-shrink: 0;
+}

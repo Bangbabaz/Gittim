@@ -19,9 +19,12 @@ import {
 } from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
 import SearchOverlay from './SearchOverlay.vue'
+import { useTheme } from '../composables/useTheme'
 import '@xterm/xterm/css/xterm.css'
 
-const DEFAULT_FONT_SIZE = 14
+const { xtermTheme } = useTheme()
+
+const DEFAULT_FONT_SIZE = 13
 const DEFAULT_SCROLLBACK = 10000
 
 const props = withDefaults(
@@ -84,28 +87,7 @@ const terminal = new Terminal({
   cursorBlink: true,
   rightClickSelectsWord: false,
   allowProposedApi: true,
-  theme: {
-    background: '#1b1b1f',
-    foreground: '#d4d4d4',
-    cursor: '#d4d4d4',
-    selectionBackground: '#264f78',
-    black: '#0c0c0c',
-    red: '#c50f1f',
-    green: '#13a10e',
-    yellow: '#c19c00',
-    blue: '#0037da',
-    magenta: '#881798',
-    cyan: '#3a96dd',
-    white: '#cccccc',
-    brightBlack: '#767676',
-    brightRed: '#e74856',
-    brightGreen: '#16c60c',
-    brightYellow: '#f9f1a5',
-    brightBlue: '#3b78ff',
-    brightMagenta: '#b4009e',
-    brightCyan: '#61d6d6',
-    brightWhite: '#f2f2f2'
-  },
+  theme: xtermTheme.value,
   ...props.options
 })
 
@@ -210,6 +192,12 @@ watch(
     if (typeof n === 'number' && n > 0) terminal.options.scrollback = n
   }
 )
+
+// Re-theme live when the app theme changes (user toggle or, in "follow
+// system" mode, an OS appearance change). xterm applies it in place.
+watch(xtermTheme, (t) => {
+  terminal.options.theme = t
+})
 
 const openSearch = (): void => {
   showSearch.value = true
@@ -555,14 +543,14 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .terminal-wrapper {
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
   padding: 0;
-  background-color: #1b1b1f;
+  background-color: var(--bg-app);
   box-sizing: border-box;
   position: relative;
 }
@@ -575,78 +563,8 @@ onUnmounted(() => {
 
 .search-pos {
   position: absolute;
-  top: 32px;
+  top: $titlebar-h;
   right: 12px;
   z-index: 10;
-}
-</style>
-
-<style>
-.context-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-}
-
-.context-menu {
-  position: fixed;
-  background: #252526;
-  border: 1px solid #454545;
-  border-radius: 6px;
-  padding: 4px;
-  min-width: 220px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.cm-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: #cccccc;
-  font-size: 13px;
-  user-select: none;
-}
-
-.cm-item:hover {
-  background: #04395e;
-  color: #ffffff;
-}
-
-.cm-item.disabled {
-  color: #6b6b6b;
-  pointer-events: none;
-}
-
-.cm-icon {
-  flex-shrink: 0;
-  opacity: 0.85;
-}
-
-.cm-label {
-  flex: 1;
-  white-space: nowrap;
-}
-
-.cm-shortcut {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #8a8a8a;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-}
-
-.cm-item:hover .cm-shortcut {
-  color: #c5d6e3;
-}
-
-.cm-divider {
-  height: 1px;
-  margin: 4px 6px;
-  background: #454545;
 }
 </style>

@@ -75,13 +75,18 @@ declare global {
         scrollback?: number
         paneLayout?: SavedLayout
         autoOpenTasksOnRun?: boolean
+        theme?: 'system' | 'dark' | 'light'
       }>
       settingsSet: (patch: {
         fontSize?: number
         scrollback?: number
         paneLayout?: SavedLayout | null
         autoOpenTasksOnRun?: boolean
+        theme?: 'system' | 'dark' | 'light'
       }) => void
+      themeSetSource: (src: 'system' | 'dark' | 'light') => void
+      themeShouldUseDark: () => Promise<boolean>
+      onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => () => void
       ptyStart: (opts: {
         paneId: string
         cols?: number
@@ -106,6 +111,8 @@ declare global {
       }) => Promise<TaskMeta>
       taskCreate: (opts: { name?: string; command: string; cwd: string }) => Promise<TaskMeta>
       taskStop: (id: string) => Promise<void>
+      taskInput: (id: string, data: string) => void
+      taskResize: (id: string, cols: number, rows: number) => void
       taskRestart: (id: string) => Promise<TaskMeta | null>
       taskRemove: (id: string) => Promise<void>
       taskUpdate: (

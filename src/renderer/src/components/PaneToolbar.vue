@@ -798,14 +798,14 @@ const stopTask = async (id: string): Promise<void> => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .wt-btn {
   background: none;
-  border: 1px solid #555;
-  color: #ccc;
+  border: 1px solid var(--border-strong);
+  color: var(--text-regular);
   width: 20px;
   height: 20px;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -818,19 +818,19 @@ const stopTask = async (id: string): Promise<void> => {
 }
 
 .wt-btn:hover {
-  border-color: #888;
-  color: #fff;
-  background: #3e3e42;
+  border-color: var(--text-muted);
+  color: var(--text-bright);
+  background: var(--bg-hover);
 }
 
 /* Action buttons: white icon on a semantic filled background, unified look. */
 .run-btn {
-  background: #2e944a;
+  background: var(--success-solid);
   border: none;
-  color: #fff;
+  color: var(--text-on-accent);
   width: 20px;
   height: 20px;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   font-size: 10px;
   line-height: 1;
   cursor: pointer;
@@ -843,25 +843,31 @@ const stopTask = async (id: string): Promise<void> => {
 }
 
 .run-btn:hover {
-  background: #37b058;
-  color: #fff;
+  background: var(--success-solid-hover);
+  color: var(--text-on-accent);
 }
 
 .run-btn.stop {
-  background: #c0392b;
+  background: var(--danger-solid);
 }
 
 .run-btn.stop:hover {
-  background: #da4233;
+  background: var(--danger-solid-hover);
 }
 
-/* View tasks — neutral, not a semantic run/stop action. */
+/* View tasks — neutral, not a semantic run/stop action. Outlined (like the
+   worktree button) instead of a filled neutral chip: a filled neutral fill
+   with the base .run-btn's white icon is invisible in the light theme. */
 .run-btn.view {
-  background: #3a3a42;
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-regular);
 }
 
 .run-btn.view:hover {
-  background: #4a4a52;
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text-bright);
 }
 
 /* Command picker (el-dropdown custom trigger) */
@@ -873,9 +879,9 @@ const stopTask = async (id: string): Promise<void> => {
   height: 20px;
   padding: 0 6px;
   background: none;
-  border: 1px solid #555;
-  border-radius: 3px;
-  color: #ccc;
+  border: 1px solid var(--border-strong);
+  border-radius: $radius-sm;
+  color: var(--text-regular);
   font-size: 12px;
   cursor: pointer;
   margin-left: 2px;
@@ -883,8 +889,8 @@ const stopTask = async (id: string): Promise<void> => {
 }
 
 .cmd-pick:hover {
-  border-color: #888;
-  background: #3e3e42;
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
 }
 
 .cmd-pick-name {
@@ -904,22 +910,22 @@ const stopTask = async (id: string): Promise<void> => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #6b6b6b;
+  background: var(--dot-idle);
   flex-shrink: 0;
 }
 
 .status-dot.running {
-  background: #3fb950;
-  box-shadow: 0 0 4px #3fb95088;
+  background: var(--success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
 }
 
 .status-dot.failed {
-  background: #f14c4c;
+  background: var(--danger);
 }
 
 .status-dot.none {
   background: transparent;
-  border: 1px solid #6b6b6b;
+  border: 1px solid var(--dot-idle);
 }
 
 .wt-form {
@@ -936,7 +942,7 @@ const stopTask = async (id: string): Promise<void> => {
 
 .wt-label {
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-regular);
   width: 52px;
   flex-shrink: 0;
   text-align: right;
@@ -950,11 +956,11 @@ const stopTask = async (id: string): Promise<void> => {
 .wt-warn {
   margin-top: 12px;
   font-size: 12px;
-  color: #e0a04d;
-  background: #e0a04d1a;
-  border: 1px solid #e0a04d44;
+  color: var(--warn-2);
+  background: color-mix(in srgb, var(--warn-2) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn-2) 27%, transparent);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: $radius;
   word-break: break-all;
 }
 
@@ -980,36 +986,36 @@ const stopTask = async (id: string): Promise<void> => {
 }
 
 .diff-stats:hover {
-  border-color: #555;
-  background: #3e3e42;
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 
 .diff-added {
-  color: #4ec9b0;
+  color: var(--diff-add-fg);
 }
 
 .diff-deleted {
-  color: #f14c4c;
+  color: var(--diff-del-fg);
 }
 
 /* Branch-switch confirm */
 .switch-msg {
   font-size: 13px;
-  color: #d4d4d4;
+  color: var(--text-primary);
   line-height: 1.7;
 }
 
 .switch-msg code {
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-family: $font-mono;
   font-size: 12px;
-  background: #1e1e1e;
+  background: var(--bg-input);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: $radius-sm;
 }
 
 /* Worktree management list */
 .wt-manage-empty {
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 13px;
   padding: 24px 4px;
   text-align: center;
@@ -1028,9 +1034,9 @@ const stopTask = async (id: string): Promise<void> => {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 5px;
+  background: var(--bg-row);
+  border: 1px solid var(--border);
+  border-radius: $radius-md;
 }
 
 .wt-manage-info {
@@ -1040,11 +1046,9 @@ const stopTask = async (id: string): Promise<void> => {
 
 .wt-manage-path {
   font-size: 12px;
-  color: #d4d4d4;
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-primary);
+  font-family: $font-mono;
+  @include ellipsis;
 }
 
 .wt-manage-meta {
@@ -1056,7 +1060,7 @@ const stopTask = async (id: string): Promise<void> => {
 
 .wt-manage-branch {
   font-size: 11px;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .wt-del-btn {
@@ -1067,15 +1071,15 @@ const stopTask = async (id: string): Promise<void> => {
   height: 28px;
   flex-shrink: 0;
   background: transparent;
-  border: 1px solid #c42b1c66;
-  color: #f14c4c;
-  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--danger-strong) 40%, transparent);
+  color: var(--danger);
+  border-radius: $radius;
   cursor: pointer;
 }
 
 .wt-del-btn:hover:not(:disabled) {
-  background: #c42b1c22;
-  border-color: #c42b1c;
+  background: color-mix(in srgb, var(--danger-strong) 13%, transparent);
+  border-color: var(--danger-strong);
 }
 
 .wt-del-btn:disabled {
@@ -1085,13 +1089,13 @@ const stopTask = async (id: string): Promise<void> => {
 
 .wt-main-hint {
   font-size: 11px;
-  color: #6b6b6b;
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
 /* Diff viewer */
 .diff-state {
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 13px;
   padding: 40px 4px;
   text-align: center;
@@ -1099,200 +1103,49 @@ const stopTask = async (id: string): Promise<void> => {
 
 .diff-trunc {
   font-size: 12px;
-  color: #d7a23b;
-  background: #d7a23b1a;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   padding: 6px 10px;
   margin: 8px 12px 0;
-  border-radius: 4px;
+  border-radius: $radius;
 }
 </style>
 
-<style scoped>
+<style scoped lang="scss">
 .pane-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
   height: 24px;
   padding: 0 8px;
-  background: #2d2d30;
-  border-bottom: 1px solid #3e3e42;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   user-select: none;
 }
 
 .git-icon {
-  color: #e74856;
+  color: var(--git);
   flex-shrink: 0;
 }
 
 .branch-select {
   width: 160px;
   --el-select-input-font-size: 12px;
-}
 
-.branch-select :deep(.el-select__wrapper) {
-  padding: 0 8px;
-  min-height: 22px;
-}
+  :deep(.el-select__wrapper) {
+    padding: 0 8px;
+    min-height: 22px;
+  }
 
-.branch-select :deep(.el-select__selected-item) {
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
+  :deep(.el-select__selected-item) {
+    font-size: 12px;
+    font-family: $font-ui;
+  }
 
-.branch-select :deep(.el-select__placeholder) {
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-</style>
-
-<style>
-/* Task command dropdown (teleported to body by el-dropdown). */
-.task-pick-dropdown .el-dropdown-menu {
-  background: #252526;
-  border: 1px solid #454545;
-  padding: 4px;
-  max-width: 360px;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #cccccc;
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 4px;
-  line-height: 1.4;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item:not(.is-disabled):hover {
-  background: #04395e;
-  color: #fff;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item.picked {
-  color: #fff;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item--divided {
-  border-top: 1px solid #454545;
-  margin-top: 4px;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item--divided::before {
-  display: none;
-}
-
-.task-pick-dropdown .el-dropdown-menu__item.cmd-empty,
-.task-pick-dropdown .el-dropdown-menu__item.cmd-empty:hover {
-  color: #6b6b6b;
-  font-size: 11px;
-  background: transparent;
-  cursor: default;
-}
-
-.task-pick-dropdown .status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #6b6b6b;
-  flex-shrink: 0;
-}
-
-.task-pick-dropdown .status-dot.running {
-  background: #3fb950;
-  box-shadow: 0 0 4px #3fb95088;
-}
-
-.task-pick-dropdown .status-dot.failed {
-  background: #f14c4c;
-}
-
-.task-pick-dropdown .td-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* el-select's dropdown popper is teleported to body — scoped styles can't
-   reach it, so override via popper-class globally. */
-.branch-select-dropdown .el-select-dropdown__list {
-  padding: 4px 0;
-}
-
-/* Widen the dropdown so long branch names + tags fit on one line without
-   wrapping or aggressive truncation. The trigger stays narrow. */
-.branch-select-dropdown.el-popper {
-  min-width: 280px !important;
-}
-
-.branch-select-dropdown .el-select-dropdown__list {
-  padding: 4px 0;
-}
-
-.branch-select-dropdown .el-select-dropdown__item {
-  height: auto;
-  line-height: 1.4;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-/* Divider between local-containing and remote-only branches. The class is
-   placed on the first remote-only option from PaneToolbar's firstRemoteOnlyIdx. */
-.branch-select-dropdown .el-select-dropdown__item.first-remote {
-  border-top: 1px solid #3e3e42;
-  margin-top: 4px;
-  padding-top: 6px;
-}
-
-/* Each option fills its row; name takes the slack, tags pin right. */
-.br-opt {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-}
-
-.br-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.br-tag {
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 2px;
-  line-height: 16px;
-  flex-shrink: 0;
-}
-
-.br-tag.local {
-  color: #6a9955;
-  background: #6a995522;
-}
-
-.br-tag.remote {
-  color: #569cd6;
-  background: #569cd622;
-}
-
-.br-tag.worktree {
-  color: #c19c00;
-  background: #c19c0022;
-}
-
-/* Diff viewer dialog — el-dialog body is teleported to <body>, so scope it
-   via the dialog class globally. DiffViewer manages its own internal scroll
-   (sidebar + main), so the dialog body itself must not scroll. */
-.diff-dialog .el-dialog__body {
-  padding: 0;
-  overflow: hidden;
+  :deep(.el-select__placeholder) {
+    font-size: 12px;
+    font-family: $font-ui;
+  }
 }
 </style>

@@ -1,0 +1,51 @@
+// Global reset + document chrome. Replaces the old assets/base.css and
+// assets/main.css. Emitted once via the style entry.
+
+@use 'abstracts' as *;
+
+@font-face {
+  font-family: 'SF Mono';
+  src: url('../font/SFMono-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  font-weight: normal;
+}
+
+ul {
+  list-style: none;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--text-primary);
+  background: var(--bg-app);
+  line-height: 1.6;
+  font-family: $font-ui;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+}
+
+// App-wide: hide scrollbars (terminal/log content scrolls; chrome stays clean).
+* {
+  @include hide-scrollbar;
+}

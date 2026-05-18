@@ -1,0 +1,253 @@
+// Chrome for elements that Element Plus / <Teleport> move to <body>, so
+// component-scoped styles can never reach them. Centralized here (instead of
+// scattered non-scoped <style> blocks in leaf components) and tokenized so it
+// follows the theme.
+
+@use 'abstracts' as *;
+
+// --- Terminal right-click context menu -----------------------------------
+.context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.context-menu {
+  position: fixed;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-menu);
+  border-radius: $radius-lg;
+  padding: 4px;
+  min-width: 220px;
+  box-shadow: var(--shadow-menu);
+  @include ui-font;
+
+  .cm-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: $radius;
+    cursor: pointer;
+    color: var(--text-regular);
+    font-size: 13px;
+    user-select: none;
+
+    &:hover {
+      background: var(--bg-menu-hover);
+      color: var(--text-menu-hover);
+    }
+
+    &.disabled {
+      color: var(--text-faint);
+      pointer-events: none;
+    }
+  }
+
+  .cm-icon {
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+
+  .cm-label {
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  .cm-shortcut {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  .cm-item:hover .cm-shortcut {
+    color: var(--text-menu-hover);
+  }
+
+  .cm-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border-menu);
+  }
+}
+
+// --- Task command picker dropdown (el-dropdown → body) --------------------
+.task-pick-dropdown {
+  .el-dropdown-menu {
+    background: var(--bg-menu);
+    border: 1px solid var(--border-menu);
+    padding: 4px;
+    max-width: 360px;
+  }
+
+  .el-dropdown-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-regular);
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: $radius;
+    line-height: 1.4;
+
+    &:not(.is-disabled):hover {
+      background: var(--bg-menu-hover);
+      color: var(--text-menu-hover);
+    }
+
+    &.picked {
+      color: var(--text-bright);
+    }
+
+    &--divided {
+      border-top: 1px solid var(--border-menu);
+      margin-top: 4px;
+
+      &::before {
+        display: none;
+      }
+    }
+
+    &.cmd-empty,
+    &.cmd-empty:hover {
+      color: var(--text-faint);
+      font-size: 11px;
+      background: transparent;
+      cursor: default;
+    }
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--dot-idle);
+    flex-shrink: 0;
+
+    &.running {
+      background: var(--success);
+      box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
+    }
+
+    &.failed {
+      background: var(--danger);
+    }
+  }
+
+  .td-label {
+    flex: 1;
+    min-width: 0;
+    @include ellipsis;
+  }
+}
+
+// --- Branch select dropdown (el-select → body) ---------------------------
+.branch-select-dropdown {
+  &.el-popper {
+    min-width: 280px !important;
+  }
+
+  .el-select-dropdown__list {
+    padding: 4px 0;
+  }
+
+  .el-select-dropdown__item {
+    height: auto;
+    line-height: 1.4;
+    padding: 4px 10px;
+    font-size: 12px;
+    @include ui-font;
+
+    // Divider above the first remote-only branch (class set by PaneToolbar).
+    &.first-remote {
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+      padding-top: 6px;
+    }
+  }
+}
+
+.br-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.br-name {
+  flex: 1;
+  min-width: 0;
+  @include ellipsis;
+}
+
+.br-tag {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 16px;
+  flex-shrink: 0;
+
+  &.local {
+    color: var(--tag-local-fg);
+    background: var(--tag-local-bg);
+  }
+
+  &.remote {
+    color: var(--tag-remote-fg);
+    background: var(--tag-remote-bg);
+  }
+
+  &.worktree {
+    color: var(--tag-worktree-fg);
+    background: var(--tag-worktree-bg);
+  }
+}
+
+// --- Diff viewer dialog (el-dialog body → body) --------------------------
+// DiffViewer manages its own internal scroll, so the dialog body must not.
+.diff-dialog .el-dialog__body {
+  padding: 0;
+  overflow: hidden;
+}
+
+// --- Tasks drawer (el-drawer → body) -------------------------------------
+.tasks-drawer {
+  &.el-drawer {
+    background: var(--bg-app);
+  }
+
+  .el-drawer__body {
+    padding: 0;
+    background: var(--bg-app);
+    // No-drag hole over the OS title-bar strip the drawer overlaps, else
+    // clicks on top controls become window drags.
+    -webkit-app-region: no-drag;
+  }
+}
+
+// --- Task manager dialog (el-dialog → body) ------------------------------
+.task-mgr-dialog {
+  &.el-dialog {
+    background: var(--bg-app);
+    border: 1px solid var(--border);
+  }
+
+  .el-dialog__title {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .el-dialog__header {
+    border-bottom: 1px solid var(--border);
+    margin-right: 0;
+    padding: 13px 16px 11px;
+  }
+
+  .el-dialog__body {
+    padding: 14px 16px 16px;
+  }
+}

@@ -1,0 +1,18 @@
+// SCSS-only constants (no CSS output). Forwarded via _abstracts.scss and
+// auto-injected into every component, so these are usable everywhere without
+// an explicit @use. Colors do NOT live here — those are runtime CSS custom
+// properties in _tokens.scss so they can switch theme without a rebuild.
+
+$font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+$font-term: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo,
+  Consolas, monospace;
+
+$radius-sm: 3px;
+$radius: 4px;
+$radius-md: 5px;
+$radius-lg: 6px;
+
+// Chrome strip height shared by the title bar and the tasks-drawer header so
+// the two read as one continuous bar.
+$titlebar-h: 32px;

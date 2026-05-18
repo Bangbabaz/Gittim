@@ -284,7 +284,7 @@ async function save(): Promise<void> {
   </el-dialog>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .tm-body {
   display: flex;
   height: 420px;
@@ -296,7 +296,7 @@ async function save(): Promise<void> {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #3e3e42;
+  border-right: 1px solid var(--border);
 }
 
 .tm-list-head {
@@ -311,7 +311,7 @@ async function save(): Promise<void> {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .tm-add {
@@ -321,15 +321,15 @@ async function save(): Promise<void> {
   width: 24px;
   height: 24px;
   background: transparent;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  color: #ccc;
+  border: 1px solid var(--border);
+  border-radius: $radius;
+  color: var(--text-regular);
   cursor: pointer;
 }
 
 .tm-add:hover {
-  background: #3e3e42;
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-bright);
 }
 
 .tm-list-scroll {
@@ -339,7 +339,7 @@ async function save(): Promise<void> {
 }
 
 .tm-empty {
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 12px;
   padding: 16px 4px;
 }
@@ -354,29 +354,27 @@ async function save(): Promise<void> {
 }
 
 .tm-item:hover {
-  background: #2d2d30;
+  background: var(--bg-hover);
 }
 
 .tm-item.active {
-  background: #04395e;
+  background: var(--bg-selected);
 }
 
 .tm-item-label {
   flex: 1;
   min-width: 0;
   font-size: 12.5px;
-  color: #d4d4d4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-primary);
+  @include ellipsis;
 }
 
 .tm-badge.new {
   font-size: 10px;
-  color: #d7a23b;
-  background: #d7a23b22;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   flex-shrink: 0;
 }
 
@@ -384,7 +382,7 @@ async function save(): Promise<void> {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d7a23b;
+  background: var(--warn);
   flex-shrink: 0;
 }
 
@@ -396,9 +394,9 @@ async function save(): Promise<void> {
   height: 20px;
   background: transparent;
   border: none;
-  color: #9d9d9d;
+  color: var(--text-muted);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   flex-shrink: 0;
 }
 
@@ -407,8 +405,8 @@ async function save(): Promise<void> {
 }
 
 .tm-del:hover {
-  background: #c42b1c44;
-  color: #f14c4c;
+  background: color-mix(in srgb, var(--danger-strong) 27%, transparent);
+  color: var(--danger);
 }
 
 .tm-detail {
@@ -428,14 +426,14 @@ async function save(): Promise<void> {
 
 .tm-label {
   font-size: 12px;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .tm-input {
-  background: #1e1e1e;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  color: #d4d4d4;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: $radius;
+  color: var(--text-primary);
   font-size: 13px;
   padding: 7px 9px;
   outline: none;
@@ -443,12 +441,12 @@ async function save(): Promise<void> {
 }
 
 .tm-input.mono {
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-family: $font-mono;
   font-size: 12px;
 }
 
 .tm-input:focus {
-  border-color: #094771;
+  border-color: var(--focus-ring);
 }
 
 .tm-cwd-row {
@@ -467,15 +465,15 @@ async function save(): Promise<void> {
   justify-content: center;
   width: 34px;
   background: transparent;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  color: #ccc;
+  border: 1px solid var(--border);
+  border-radius: $radius;
+  color: var(--text-regular);
   cursor: pointer;
 }
 
 .tm-browse:hover {
-  background: #3e3e42;
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-bright);
 }
 
 .tm-scripts {
@@ -487,13 +485,13 @@ async function save(): Promise<void> {
 
 .tm-scripts-label {
   font-size: 11px;
-  color: #858585;
+  color: var(--text-muted);
 }
 
 .tm-chip {
-  background: #0e639c33;
-  border: 1px solid #0e639c66;
-  color: #6cb6ff;
+  background: var(--chip-bg);
+  border: 1px solid var(--chip-border);
+  color: var(--chip-fg);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
@@ -501,7 +499,7 @@ async function save(): Promise<void> {
 }
 
 .tm-chip:hover {
-  background: #0e639c55;
+  background: var(--chip-bg-hover);
 }
 
 .tm-actions {
@@ -514,55 +512,32 @@ async function save(): Promise<void> {
 
 .tm-hint {
   font-size: 11px;
-  color: #6b6b6b;
+  color: var(--text-faint);
 }
 
 .tm-save {
-  background: #0e639c;
+  background: var(--primary-btn);
   border: none;
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 13px;
   padding: 7px 20px;
-  border-radius: 4px;
+  border-radius: $radius;
   cursor: pointer;
 }
 
 .tm-save:hover:not(:disabled) {
-  background: #1177bb;
+  background: var(--primary-btn-hover);
 }
 
 .tm-save:disabled {
-  background: #3a3a3a;
-  color: #777;
+  background: var(--bg-disabled);
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
 .tm-placeholder {
   margin: auto;
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 13px;
-}
-</style>
-
-<style>
-.task-mgr-dialog.el-dialog {
-  background: #1b1b1f;
-  border: 1px solid #3e3e42;
-}
-
-.task-mgr-dialog .el-dialog__title {
-  color: #d4d4d4;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.task-mgr-dialog .el-dialog__header {
-  border-bottom: 1px solid #3e3e42;
-  margin-right: 0;
-  padding: 13px 16px 11px;
-}
-
-.task-mgr-dialog .el-dialog__body {
-  padding: 14px 16px 16px;
 }
 </style>
