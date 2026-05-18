@@ -13,6 +13,7 @@ import {
   Search,
   Settings2,
   X,
+  FolderOpen,
   Terminal as TerminalIcon
 } from 'lucide-vue-next'
 import SearchOverlay from './SearchOverlay.vue'
@@ -35,8 +36,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'editTask', id: string): void
-  (e: 'manageTasks'): void
+  (e: 'editTask', id: string, cwd: string): void
+  (e: 'manageTasks', cwd?: string): void
 }>()
 
 const tasks = ref<TaskMeta[]>([])
@@ -195,7 +196,7 @@ watch(
 // Command CRUD lives in the manager dialog (App-owned). The drawer just
 // surfaces entry points and per-row run/stop controls.
 function editTask(t: TaskMeta): void {
-  emit('editTask', t.id)
+  emit('editTask', t.id, t.cwd)
 }
 
 async function toggleTask(t: TaskMeta): Promise<void> {
@@ -257,7 +258,7 @@ function closeLogSearch(): void {
       <header class="tasks-header">
         <span class="tasks-header-title">任务</span>
         <div class="tasks-header-ops">
-          <button class="hdr-btn" title="管理命令" @click="emit('manageTasks')">
+          <button class="hdr-btn" title="管理命令" @click="emit('manageTasks', selectedTask?.cwd)">
             <Settings2 :size="15" />
           </button>
           <button class="hdr-btn" title="关闭" @click="emit('update:modelValue', false)">
@@ -286,6 +287,10 @@ function closeLogSearch(): void {
               <div class="task-meta">
                 <div class="task-name">{{ t.name }}</div>
                 <div class="task-cmd">{{ t.command }}</div>
+                <div class="task-cwd" :title="t.cwd || '未指定工作目录'">
+                  <FolderOpen :size="11" class="task-cwd-icon" />
+                  <span class="task-cwd-text">{{ t.cwd || '未指定工作目录' }}</span>
+                </div>
               </div>
               <div class="task-ops" @click.stop>
                 <button
@@ -330,6 +335,14 @@ function closeLogSearch(): void {
                   ? ` (${selectedTask.exitCode})`
                   : ''
               }}
+            </span>
+            <span
+              v-if="selectedTask"
+              class="log-head-cwd"
+              :title="selectedTask.cwd || '未指定工作目录'"
+            >
+              <FolderOpen :size="12" class="log-head-cwd-icon" />
+              {{ selectedTask.cwd || '未指定工作目录' }}
             </span>
             <div class="log-head-ops">
               <button class="op-btn" title="搜索" @click="openLogSearch">
@@ -593,6 +606,26 @@ function closeLogSearch(): void {
   font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
 }
 
+.task-cwd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: #6b6b6b;
+}
+
+.task-cwd-icon {
+  flex-shrink: 0;
+}
+
+.task-cwd-text {
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+}
+
 .task-ops {
   display: flex;
   gap: 4px;
@@ -694,6 +727,24 @@ function closeLogSearch(): void {
   border-radius: 3px;
   background: #6b6b6b33;
   color: #9d9d9d;
+}
+
+.log-head-cwd {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: #6b6b6b;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-head-cwd-icon {
+  flex-shrink: 0;
 }
 
 .log-head-status.running {

@@ -34,7 +34,7 @@ import {
   createTask,
   killAllTasks
 } from './tasks'
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { join as joinPath } from 'path'
 import icon from '../../resources/icon.png?asset'
 
@@ -231,6 +231,14 @@ app.whenReady().then(() => {
   )
 
   // Read `scripts` from a directory's package.json for one-click task chips.
+  ipcMain.handle('path-exists', (_event, p: string): boolean => {
+    try {
+      return !!p && existsSync(p)
+    } catch {
+      return false
+    }
+  })
+
   ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
     try {
       const raw = readFileSync(joinPath(cwd, 'package.json'), 'utf8')

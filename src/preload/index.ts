@@ -143,6 +143,7 @@ const api = {
     ipcRenderer.invoke('task-update', id, patch) as Promise<TaskMeta | null>,
   readPackageScripts: (cwd: string) =>
     ipcRenderer.invoke('read-package-scripts', cwd) as Promise<Record<string, string>>,
+  pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
   onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => {
     const listener = (_e: IpcRendererEvent, p: { id: string; chunk: string }): void => cb(p)
     ipcRenderer.on('task-data', listener)

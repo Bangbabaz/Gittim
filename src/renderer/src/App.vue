@@ -68,6 +68,10 @@ const showTasks = ref(false)
 const taskSelectId = ref<string | null>(null)
 const showTaskMgr = ref(false)
 const taskMgrFocusId = ref<string | null>(null)
+// The manager is scoped to one folder (the entry point it was opened from);
+// null = legacy flat list. newDraft also starts a fresh draft on open.
+const taskMgrScopeCwd = ref<string | null>(null)
+const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
 // cwd handed to the tasks drawer's "new task" form — the active pane's dir.
 const activeCwd = computed(() => {
@@ -384,8 +388,14 @@ const openTasksDrawer = (): void => {
   showTasks.value = true
 }
 
-const openTaskManager = (focusId: string | null = null): void => {
+const openTaskManager = (
+  focusId: string | null = null,
+  scopeCwd: string | null = null,
+  newDraft = false
+): void => {
   taskMgrFocusId.value = focusId
+  taskMgrScopeCwd.value = scopeCwd
+  taskMgrNewDraft.value = newDraft
   showTaskMgr.value = true
 }
 
@@ -713,10 +723,16 @@ onUnmounted(() => {
   <TasksDrawer
     v-model="showTasks"
     :select-task-id="taskSelectId"
-    @manage-tasks="openTaskManager()"
-    @edit-task="(id: string) => openTaskManager(id)"
+    @manage-tasks="(cwd?: string) => openTaskManager(null, cwd ?? null)"
+    @edit-task="(id: string, cwd?: string) => openTaskManager(id, cwd ?? null)"
   />
-  <TaskManagerDialog v-model="showTaskMgr" :focus-id="taskMgrFocusId" :default-cwd="activeCwd" />
+  <TaskManagerDialog
+    v-model="showTaskMgr"
+    :focus-id="taskMgrFocusId"
+    :default-cwd="activeCwd"
+    :scope-cwd="taskMgrScopeCwd"
+    :new-draft="taskMgrNewDraft"
+  />
   <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
     <template v-if="cwd !== null && layout">
       <div
@@ -739,7 +755,7 @@ onUnmounted(() => {
           @font-size-change="onFontSizeChange"
           @open-settings="showSettings = true"
           @open-tasks="openTasksDrawer"
-          @manage-tasks="openTaskManager()"
+          @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
         />
       </div>
       <div

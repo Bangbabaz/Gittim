@@ -39,7 +39,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   worktreeCreated: [path: string]
   openTasks: []
-  manageTasks: []
+  // cwd scopes the manager to that folder; newDraft also starts a fresh draft
+  // (the "为此文件夹新建命令" shortcut). Both pane entries pass this pane's cwd.
+  manageTasks: [cwd?: string, newDraft?: boolean]
 }>()
 
 const isRepo = ref(false)
@@ -217,11 +219,40 @@ const parentDir = computed(() => {
 })
 
 const defaultProjectName = computed(() => {
-  const branch =
+  const raw =
     wtNewBranch.value && wtNewBranchName.value
       ? wtNewBranchName.value
       : currentBranch.value || 'worktree'
-  return `${folderName.value}-${branch}`
+  // A branch like `feat/xx` or `fix/xx` must NOT become a folder name with a
+  // slash (that nests `原文件夹-feat/xx`). Use only the last segment.
+  const leaf = raw.split('/').filter(Boolean).pop() || 'worktree'
+  return `${folderName.value}-${leaf}`
+})
+
+// Resolved target path (location + project name). Used to pre-warn when a
+// same-named folder already exists, before git refuses on submit.
+const wtFullPath = computed(() => {
+  const loc = wtLocation.value.trim().replace(/[\\/]+$/, '')
+  const name = wtProjectName.value.trim()
+  if (!loc || !name) return ''
+  const sep = loc.includes('\\') || (props.cwd ?? '').includes('\\') ? '\\' : '/'
+  return `${loc}${sep}${name}`
+})
+
+const wtPathExists = ref(false)
+let wtCheckGen = 0
+watch([wtFullPath, showWorktreeDialog], async () => {
+  if (!showWorktreeDialog.value || !wtFullPath.value) {
+    wtPathExists.value = false
+    return
+  }
+  const gen = ++wtCheckGen
+  try {
+    const exists = await window.api.pathExists(wtFullPath.value)
+    if (gen === wtCheckGen) wtPathExists.value = exists
+  } catch {
+    if (gen === wtCheckGen) wtPathExists.value = false
+  }
 })
 
 watch([wtNewBranch, wtNewBranchName], () => {
@@ -265,6 +296,14 @@ async function handleCreateWorktree(): Promise<void> {
   }
   const sep = props.cwd.includes('\\') ? '\\' : '/'
   const fullPath = `${wtLocation.value.replace(/\\/g, sep)}${sep}${wtProjectName.value.trim()}`
+  // Re-check at submit time: the reactive hint may be stale if the user
+  // clicked before the debounced check settled. Never create into an existing
+  // path — git would refuse anyway, but warn clearly instead of failing late.
+  if (await window.api.pathExists(fullPath)) {
+    wtPathExists.value = true
+    ElMessage.error(`同名文件夹已存在：${fullPath}`)
+    return
+  }
   // Remote-only base branches need the `<remote>/<name>` prefix or
   // `git worktree add` can't resolve the ref. Local branches are passed as-is.
   const fromBranchInfo = branches.value.find((b) => b.name === wtFromBranch.value)
@@ -388,37 +427,58 @@ async function openDiff(): Promise<void> {
 
 // -- Background tasks: run / restart button --------------------------------
 
-// Tasks are global; the toolbar shows every defined command in a dropdown,
-// runs the picked one, and surfaces a stop control for whatever's running.
+// Tasks are global, but each pane's picker is scoped to that pane's folder:
+// it only lists / selects / controls tasks whose cwd matches props.cwd, so
+// `npm run dev` in folder A and another in folder B stay independent (running
+// one never shows the other as running).
 const allTasks = ref<TaskMeta[]>([])
 const selectedId = ref<string | null>(null)
 let unsubTaskStatus: (() => void) | null = null
 let unsubTaskRemoved: (() => void) | null = null
 
-const selectedTask = computed<TaskMeta | null>(
-  () => allTasks.value.find((t) => t.id === selectedId.value) || null
+// Folder identity: normalize separators + trailing slash; Windows paths
+// (drive-letter prefix) compare case-insensitively.
+const normPath = (p: string | undefined): string => {
+  if (!p) return ''
+  let s = p.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (/^[a-zA-Z]:/.test(s)) s = s.toLowerCase()
+  return s
+}
+const samePath = (a: string | undefined, b: string | undefined): boolean => {
+  const na = normPath(a)
+  return na !== '' && na === normPath(b)
+}
+
+const paneTasks = computed(() =>
+  props.cwd ? allTasks.value.filter((t) => samePath(t.cwd, props.cwd)) : []
 )
-const runningTasks = computed(() => allTasks.value.filter((t) => t.status === 'running'))
+const selectedTask = computed<TaskMeta | null>(
+  () => paneTasks.value.find((t) => t.id === selectedId.value) || null
+)
+const runningTasks = computed(() => paneTasks.value.filter((t) => t.status === 'running'))
 
 const upsertTask = (m: TaskMeta): void => {
   const i = allTasks.value.findIndex((t) => t.id === m.id)
   if (i >= 0) allTasks.value[i] = m
   else allTasks.value.push(m)
-  if (!selectedId.value) selectedId.value = m.id
 }
 
-// Keep the selection valid as tasks come and go.
-watch(allTasks, (list) => {
-  if (selectedId.value && !list.some((t) => t.id === selectedId.value)) {
-    selectedId.value = list[0]?.id ?? null
-  } else if (!selectedId.value && list.length) {
-    selectedId.value = list[0].id
-  }
-})
+// Keep the selection valid and folder-scoped as tasks come/go or the pane's
+// cwd changes (paneTasks depends on both allTasks and props.cwd).
+watch(
+  paneTasks,
+  (list) => {
+    if (selectedId.value && !list.some((t) => t.id === selectedId.value)) {
+      selectedId.value = list[0]?.id ?? null
+    } else if (!selectedId.value && list.length) {
+      selectedId.value = list[0].id
+    }
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   allTasks.value = await window.api.taskList()
-  selectedId.value = allTasks.value[0]?.id ?? null
   unsubTaskStatus = window.api.onTaskStatus(upsertTask)
   unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
     allTasks.value = allTasks.value.filter((t) => t.id !== id)
@@ -432,7 +492,11 @@ onUnmounted(() => {
 
 const onPickCommand = (cmd: string): void => {
   if (cmd === '__manage__') {
-    emit('manageTasks')
+    emit('manageTasks', props.cwd)
+    return
+  }
+  if (cmd === '__new_here__') {
+    emit('manageTasks', props.cwd, true)
     return
   }
   selectedId.value = cmd
@@ -506,7 +570,7 @@ const stopTask = async (id: string): Promise<void> => {
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item
-            v-for="t in allTasks"
+            v-for="t in paneTasks"
             :key="t.id"
             :command="t.id"
             :class="{ picked: t.id === selectedId }"
@@ -514,7 +578,11 @@ const stopTask = async (id: string): Promise<void> => {
             <span class="status-dot" :class="t.status" />
             <span class="td-label">{{ t.name || t.command }}</span>
           </el-dropdown-item>
-          <el-dropdown-item divided command="__manage__">管理命令…</el-dropdown-item>
+          <el-dropdown-item v-if="!paneTasks.length" disabled class="cmd-empty">
+            该文件夹暂无命令
+          </el-dropdown-item>
+          <el-dropdown-item divided command="__new_here__">为此文件夹新建命令…</el-dropdown-item>
+          <el-dropdown-item command="__manage__">管理命令…</el-dropdown-item>
         </el-dropdown-menu>
       </template>
     </el-dropdown>
@@ -646,6 +714,8 @@ const stopTask = async (id: string): Promise<void> => {
           </div>
         </div>
       </div>
+
+      <div v-if="wtPathExists" class="wt-warn">同名文件夹已存在：{{ wtFullPath }}</div>
 
       <template #footer>
         <el-button size="small" @click="showWorktreeDialog = false">取消</el-button>
@@ -890,6 +960,17 @@ const stopTask = async (id: string): Promise<void> => {
   min-width: 0;
 }
 
+.wt-warn {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #e0a04d;
+  background: #e0a04d1a;
+  border: 1px solid #e0a04d44;
+  padding: 6px 10px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
 .wt-btn.icon {
   font-size: 0;
 }
@@ -1114,6 +1195,14 @@ const stopTask = async (id: string): Promise<void> => {
 
 .task-pick-dropdown .el-dropdown-menu__item--divided::before {
   display: none;
+}
+
+.task-pick-dropdown .el-dropdown-menu__item.cmd-empty,
+.task-pick-dropdown .el-dropdown-menu__item.cmd-empty:hover {
+  color: #6b6b6b;
+  font-size: 11px;
+  background: transparent;
+  cursor: default;
 }
 
 .task-pick-dropdown .status-dot {

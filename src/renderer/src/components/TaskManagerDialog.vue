@@ -27,6 +27,11 @@ const props = defineProps<{
   modelValue: boolean
   focusId: string | null
   defaultCwd: string
+  // When set, the dialog is scoped to ONE folder: it only lists / creates
+  // commands whose cwd is this folder. Null = legacy flat list (all folders).
+  scopeCwd: string | null
+  // Auto-start a fresh draft on open (the pane's "为此文件夹新建命令" path).
+  newDraft: boolean
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +49,27 @@ const selected = computed(() => items.value.find((i) => i.key === selectedKey.va
 
 const itemLabel = (i: EditItem): string => i.name.trim() || i.command.trim() || 'new command'
 
+const norm = (p: string | null | undefined): string => {
+  let s = (p || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  if (/^[a-zA-Z]:/.test(s)) s = s.toLowerCase()
+  return s
+}
+
+// Scoped to one folder: show only that folder's commands (plus the row being
+// edited, so a cwd edit doesn't make it vanish mid-typing). Null scope = all.
+const visibleItems = computed(() => {
+  if (!props.scopeCwd) return items.value
+  const sc = norm(props.scopeCwd)
+  return items.value.filter((i) => norm(i.cwd) === sc || i.key === selectedKey.value)
+})
+
+const scopeName = computed(() => {
+  if (!props.scopeCwd) return ''
+  const parts = props.scopeCwd.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || props.scopeCwd
+})
+const dialogTitle = computed(() => (props.scopeCwd ? `管理命令 · ${scopeName.value}` : '管理命令'))
+
 async function reload(): Promise<void> {
   const list: TaskMeta[] = await window.api.taskList()
   items.value = list.map((t) => ({
@@ -56,13 +82,18 @@ async function reload(): Promise<void> {
     dirty: false
   }))
   const focus = props.focusId ? items.value.find((i) => i.id === props.focusId) : undefined
-  selectedKey.value = focus?.key ?? items.value[0]?.key ?? null
+  const sc = props.scopeCwd ? norm(props.scopeCwd) : null
+  const firstInScope = sc ? items.value.find((i) => norm(i.cwd) === sc) : items.value[0]
+  selectedKey.value = focus?.key ?? firstInScope?.key ?? null
 }
 
 watch(
   () => props.modelValue,
-  (open) => {
-    if (open) reload()
+  async (open) => {
+    if (!open) return
+    await reload()
+    // Opened via a pane's "为此文件夹新建命令" → start a draft for this folder.
+    if (props.newDraft) addDraft(props.scopeCwd || undefined)
   }
 )
 
@@ -79,12 +110,12 @@ function select(i: EditItem): void {
   selectedKey.value = i.key
 }
 
-function addDraft(): void {
+function addDraft(cwd?: string): void {
   const draft: EditItem = {
     key: nextKey(),
     name: '',
     command: '',
-    cwd: props.defaultCwd || '',
+    cwd: cwd || props.scopeCwd || props.defaultCwd || '',
     isNew: true,
     dirty: true
   }
@@ -161,7 +192,7 @@ async function save(): Promise<void> {
 <template>
   <el-dialog
     :model-value="modelValue"
-    title="管理命令"
+    :title="dialogTitle"
     width="760px"
     :with-header="true"
     class="task-mgr-dialog"
@@ -172,14 +203,14 @@ async function save(): Promise<void> {
       <aside class="tm-list">
         <div class="tm-list-head">
           <span class="tm-list-title">命令</span>
-          <button class="tm-add" title="新建命令" @click="addDraft">
+          <button class="tm-add" title="新建命令" @click="addDraft()">
             <Plus :size="14" />
           </button>
         </div>
         <div class="tm-list-scroll">
-          <div v-if="!items.length" class="tm-empty">还没有命令</div>
+          <div v-if="!visibleItems.length" class="tm-empty">该文件夹还没有命令</div>
           <div
-            v-for="i in items"
+            v-for="i in visibleItems"
             :key="i.key"
             class="tm-item"
             :class="{ active: i.key === selectedKey }"

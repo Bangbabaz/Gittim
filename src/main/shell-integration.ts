@@ -115,7 +115,7 @@ export function shellIntegration(shellPath: string): ShellSpec {
     const env = { ...baseEnv }
     const host = env.COMPUTERNAME || 'localhost'
     env.PROMPT = `$E]7;file://${host}/$P$E\\$P$G`
-    return { shell: shellPath, args: [], env }
+    return { shell: shellPath, args: ['-l'], env }
   }
 
   // Unknown shell — let it run as-is. OSC 7 won't be emitted automatically,

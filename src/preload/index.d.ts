@@ -113,6 +113,7 @@ declare global {
         patch: { name?: string; command?: string; cwd?: string }
       ) => Promise<TaskMeta | null>
       readPackageScripts: (cwd: string) => Promise<Record<string, string>>
+      pathExists: (p: string) => Promise<boolean>
       onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => () => void
       onTaskStatus: (cb: (meta: TaskMeta) => void) => () => void
       onTaskCleared: (cb: (payload: { id: string }) => void) => () => void
