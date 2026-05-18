@@ -15,7 +15,7 @@ const autoImportGlobals = (() => {
 })()
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out', 'build'] },
+  { ignores: ['**/node_modules', '**/dist', '**/out'] },
   tseslint.configs.recommended,
   eslintPluginVue.configs['flat/recommended'],
   {
