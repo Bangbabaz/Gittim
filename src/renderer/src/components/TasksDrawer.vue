@@ -143,6 +143,24 @@ function selectTask(id: string): void {
   bindLog(id)
 }
 
+// Fired after the drawer's open transition finishes (so the log element has
+// real dimensions). Element Plus's focus trap auto-focuses a header button on
+// every open and nothing else ever moves focus into the xterm, so on the
+// 2nd+ open the terminal stayed unfocused and keystrokes never reached the
+// task. Refit to the now-correct size and explicitly focus the terminal so it
+// is interactive immediately, every open.
+function onDrawerOpened(): void {
+  ensureTerm()
+  if (!term) return
+  try {
+    fit?.fit()
+  } catch {
+    // element not measurable yet — harmless
+  }
+  syncTaskSize()
+  term.focus()
+}
+
 // --- Task data refresh ----------------------------------------------------
 async function reload(): Promise<void> {
   tasks.value = await window.api.taskList()
@@ -285,6 +303,7 @@ function closeLogSearch(): void {
     :with-header="false"
     class="tasks-drawer"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
+    @opened="onDrawerOpened"
   >
     <div class="tasks-shell">
       <!-- Top header bar — kept visually consistent with the app title bar

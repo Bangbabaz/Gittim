@@ -36,8 +36,10 @@ const props = defineProps<{
   cwd: string | undefined
 }>()
 
+type WorktreePlacement = 'top' | 'bottom' | 'left' | 'right'
+
 const emit = defineEmits<{
-  worktreeCreated: [path: string]
+  worktreeCreated: [path: string, placement: WorktreePlacement]
   openTasks: []
   // cwd scopes the manager to that folder; newDraft also starts a fresh draft
   // (the "为此文件夹新建命令" shortcut). Both pane entries pass this pane's cwd.
@@ -204,7 +206,11 @@ const wtFromBranch = ref('')
 const wtNewBranch = ref(false)
 const wtNewBranchName = ref('')
 const wtProjectName = ref('')
+// Once the user types in the 项目名 field we stop auto-deriving it from the
+// branch, so a deliberate name isn't clobbered when they tweak 从分支/新分支.
+const wtNameEdited = ref(false)
 const wtLocation = ref('')
+const wtPlacement = ref<WorktreePlacement>('right')
 const wtSubmitting = ref(false)
 
 const folderName = computed(() => {
@@ -218,11 +224,15 @@ const parentDir = computed(() => {
   return idx > 0 ? p.substring(0, idx) : p
 })
 
+// Default folder name = 项目文件夹 + "-" + 分支名. The branch is the new
+// branch name when creating one, otherwise the selected 从分支 (NOT the repo's
+// live HEAD — the dialog's dropdown is the source of truth so the name tracks
+// what the user picks).
 const defaultProjectName = computed(() => {
   const raw =
     wtNewBranch.value && wtNewBranchName.value
       ? wtNewBranchName.value
-      : currentBranch.value || 'worktree'
+      : wtFromBranch.value || currentBranch.value || 'worktree'
   // A branch like `feat/xx` or `fix/xx` must NOT become a folder name with a
   // slash (that nests `原文件夹-feat/xx`). Use only the last segment.
   const leaf = raw.split('/').filter(Boolean).pop() || 'worktree'
@@ -255,16 +265,25 @@ watch([wtFullPath, showWorktreeDialog], async () => {
   }
 })
 
-watch([wtNewBranch, wtNewBranchName], () => {
-  wtProjectName.value = defaultProjectName.value
+// Keep 项目名 in sync with 从分支 / 新分支 until the user takes it over.
+watch([wtNewBranch, wtNewBranchName, wtFromBranch], () => {
+  if (!wtNameEdited.value) wtProjectName.value = defaultProjectName.value
 })
+
+// el-input @input only fires on real user keystrokes, never on the
+// programmatic assignment above — so this reliably flags a deliberate edit.
+function onProjectNameInput(): void {
+  wtNameEdited.value = true
+}
 
 function openWorktreeDialog(): void {
   wtFromBranch.value = currentBranch.value || ''
   wtNewBranch.value = false
   wtNewBranchName.value = ''
+  wtNameEdited.value = false
   wtProjectName.value = defaultProjectName.value
   wtLocation.value = parentDir.value
+  wtPlacement.value = 'right'
   showWorktreeDialog.value = true
 }
 
@@ -321,7 +340,7 @@ async function handleCreateWorktree(): Promise<void> {
     if (result.success) {
       showWorktreeDialog.value = false
       if (result.warning) ElMessage.warning(result.warning)
-      emit('worktreeCreated', fullPath)
+      emit('worktreeCreated', fullPath, wtPlacement.value)
     } else {
       ElMessage.error(result.error || '工作树创建失败')
     }
@@ -699,7 +718,12 @@ const stopTask = async (id: string): Promise<void> => {
 
         <div class="wt-row">
           <label class="wt-label">项目名</label>
-          <el-input v-model="wtProjectName" class="wt-field" size="small" />
+          <el-input
+            v-model="wtProjectName"
+            class="wt-field"
+            size="small"
+            @input="onProjectNameInput"
+          />
         </div>
 
         <div class="wt-row">
@@ -708,6 +732,16 @@ const stopTask = async (id: string): Promise<void> => {
             <el-input v-model="wtLocation" size="small" style="flex: 1" />
             <el-button size="small" @click="handleBrowseLocation">浏览</el-button>
           </div>
+        </div>
+
+        <div class="wt-row">
+          <label class="wt-label">面板位置</label>
+          <el-radio-group v-model="wtPlacement" size="small" class="wt-field wt-placement">
+            <el-radio-button label="top">上</el-radio-button>
+            <el-radio-button label="bottom">下</el-radio-button>
+            <el-radio-button label="left">左</el-radio-button>
+            <el-radio-button label="right">右</el-radio-button>
+          </el-radio-group>
         </div>
       </div>
 
@@ -951,6 +985,19 @@ const stopTask = async (id: string): Promise<void> => {
 .wt-field {
   flex: 1;
   min-width: 0;
+}
+
+/* 4 equal-width segments so 上/下/左/右 fill the row like a segmented control. */
+.wt-placement {
+  display: flex;
+}
+
+.wt-placement :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.wt-placement :deep(.el-radio-button__inner) {
+  width: 100%;
 }
 
 .wt-warn {

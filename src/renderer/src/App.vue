@@ -143,6 +143,45 @@ const insertSplit = (
 }
 
 /**
+ * Insert `newNode` next to the pane `targetId`, choosing the split direction
+ * and which side the new node lands on. `newFirst` puts it before the target
+ * (left / top); otherwise after (right / bottom). Used by worktree placement
+ * and pane drag-and-drop.
+ */
+const insertAdjacent = (
+  node: LayoutNode,
+  targetId: string,
+  newNode: LayoutNode,
+  direction: 'row' | 'column',
+  newFirst: boolean
+): LayoutNode => {
+  if (node.type === 'pane') {
+    if (node.id !== targetId) return node
+    return {
+      type: 'split',
+      direction,
+      ratio: 0.5,
+      a: newFirst ? newNode : node,
+      b: newFirst ? node : newNode
+    }
+  }
+  const a = insertAdjacent(node.a, targetId, newNode, direction, newFirst)
+  const b = insertAdjacent(node.b, targetId, newNode, direction, newFirst)
+  if (a === node.a && b === node.b) return node
+  return { ...node, a, b }
+}
+
+const PLACEMENT_MAP: Record<
+  'top' | 'bottom' | 'left' | 'right',
+  { direction: 'row' | 'column'; newFirst: boolean }
+> = {
+  right: { direction: 'row', newFirst: false },
+  left: { direction: 'row', newFirst: true },
+  bottom: { direction: 'column', newFirst: false },
+  top: { direction: 'column', newFirst: true }
+}
+
+/**
  * Remove a leaf from the tree. If a split ends up with only one surviving
  * child, collapse it — the survivor replaces the split. Returns null if
  * removing the target empties the whole tree.
@@ -326,10 +365,21 @@ const onClose = (paneId: string): void => {
   }
 }
 
-const onCreateWorktree = (paneId: string, worktreePath: string): void => {
+const onCreateWorktree = (
+  paneId: string,
+  worktreePath: string,
+  placement: 'top' | 'bottom' | 'left' | 'right' = 'right'
+): void => {
   if (!layout.value) return
   const newId = newPaneId()
-  layout.value = insertSplit(layout.value, paneId, newId, 'row')
+  const { direction, newFirst } = PLACEMENT_MAP[placement] ?? PLACEMENT_MAP.right
+  layout.value = insertAdjacent(
+    layout.value,
+    paneId,
+    { type: 'pane', id: newId },
+    direction,
+    newFirst
+  )
   paneCwd.value = { ...paneCwd.value, [newId]: worktreePath }
   activeId.value = newId
 }
@@ -413,6 +463,97 @@ const onDividerMove = (e: MouseEvent): void => {
 const onDividerUp = (): void => {
   dragState.value = null
 }
+
+// --- Pane drag-and-drop reorder -------------------------------------------
+// Grab a pane by its top strip and drop it onto another pane's edge to
+// re-split the layout. Pane IDs are preserved across the tree rewrite, so the
+// xterm DOM (keyed by id) survives — the moved terminal keeps its session.
+type DropZone = 'left' | 'right' | 'top' | 'bottom'
+const paneDrag = ref<{ id: string } | null>(null)
+const dropTarget = ref<{ id: string; zone: DropZone } | null>(null)
+
+const onPaneDragStart = (paneId: string): void => {
+  paneDrag.value = { id: paneId }
+  dropTarget.value = null
+}
+
+// Split the target pane into 4 triangular zones along its diagonals; the
+// dropped pane lands on whichever side the cursor is nearest.
+const zoneForPoint = (rect: Rect, mx: number, my: number): DropZone => {
+  const fx = (mx - rect.left) / rect.width - 0.5
+  const fy = (my - rect.top) / rect.height - 0.5
+  if (Math.abs(fx) >= Math.abs(fy)) return fx < 0 ? 'left' : 'right'
+  return fy < 0 ? 'top' : 'bottom'
+}
+
+const onPaneDragMove = (e: MouseEvent): void => {
+  if (!paneDrag.value || !containerRef.value) return
+  const root = containerRef.value.getBoundingClientRect()
+  const mx = e.clientX - root.left
+  const my = e.clientY - root.top
+  const hit = layoutResult.value.panes.find(
+    (p) =>
+      mx >= p.rect.left &&
+      mx <= p.rect.left + p.rect.width &&
+      my >= p.rect.top &&
+      my <= p.rect.top + p.rect.height
+  )
+  if (!hit || hit.id === paneDrag.value.id) {
+    dropTarget.value = null
+    return
+  }
+  dropTarget.value = { id: hit.id, zone: zoneForPoint(hit.rect, mx, my) }
+}
+
+const ZONE_MAP: Record<DropZone, { direction: 'row' | 'column'; newFirst: boolean }> = {
+  left: { direction: 'row', newFirst: true },
+  right: { direction: 'row', newFirst: false },
+  top: { direction: 'column', newFirst: true },
+  bottom: { direction: 'column', newFirst: false }
+}
+
+const onPaneDragUp = (): void => {
+  const drag = paneDrag.value
+  const target = dropTarget.value
+  paneDrag.value = null
+  dropTarget.value = null
+  if (!drag || !target || !layout.value || drag.id === target.id) return
+  const removed = removePane(layout.value, drag.id)
+  if (!removed) return
+  const { direction, newFirst } = ZONE_MAP[target.zone]
+  const next = insertAdjacent(
+    removed,
+    target.id,
+    { type: 'pane', id: drag.id },
+    direction,
+    newFirst
+  )
+  // insertAdjacent returns the same ref when targetId wasn't found — bail
+  // instead of committing a tree that lost the dragged pane.
+  if (next === removed) return
+  layout.value = next
+  activeId.value = drag.id
+}
+
+const onPaneDragKey = (e: KeyboardEvent): void => {
+  if (e.key === 'Escape' && paneDrag.value) {
+    paneDrag.value = null
+    dropTarget.value = null
+  }
+}
+
+const draggedRect = computed(() => (paneDrag.value ? findPaneRect(paneDrag.value.id) : null))
+const dropIndicatorRect = computed<Rect | null>(() => {
+  const t = dropTarget.value
+  if (!t) return null
+  const r = findPaneRect(t.id)
+  if (!r) return null
+  if (t.zone === 'left') return { left: r.left, top: r.top, width: r.width / 2, height: r.height }
+  if (t.zone === 'right')
+    return { left: r.left + r.width / 2, top: r.top, width: r.width / 2, height: r.height }
+  if (t.zone === 'top') return { left: r.left, top: r.top, width: r.width, height: r.height / 2 }
+  return { left: r.left, top: r.top + r.height / 2, width: r.width, height: r.height / 2 }
+})
 
 const rectStyle = (rect: Rect): Record<string, string> => ({
   left: rect.left + 'px',
@@ -506,6 +647,9 @@ onMounted(async () => {
 
   window.addEventListener('mousemove', onDividerMove)
   window.addEventListener('mouseup', onDividerUp)
+  window.addEventListener('mousemove', onPaneDragMove)
+  window.addEventListener('mouseup', onPaneDragUp)
+  window.addEventListener('keydown', onPaneDragKey)
 
   if (containerRef.value) {
     const update = (): void => {
@@ -526,6 +670,9 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   window.removeEventListener('mousemove', onDividerMove)
   window.removeEventListener('mouseup', onDividerUp)
+  window.removeEventListener('mousemove', onPaneDragMove)
+  window.removeEventListener('mouseup', onPaneDragUp)
+  window.removeEventListener('keydown', onPaneDragKey)
   window.removeEventListener('beforeunload', flushSaveOnUnload)
 })
 </script>
@@ -549,7 +696,14 @@ onUnmounted(() => {
           </svg>
           <svg v-else width="10" height="10" viewBox="0 0 10 10">
             <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" />
-            <rect x="0" y="3" width="8" height="7" fill="var(--bg-titlebar)" stroke="currentColor" />
+            <rect
+              x="0"
+              y="3"
+              width="8"
+              height="7"
+              fill="var(--bg-titlebar)"
+              stroke="currentColor"
+            />
           </svg>
         </button>
         <button class="tb-btn tb-close" title="关闭" @click="winClose">
@@ -733,7 +887,11 @@ onUnmounted(() => {
     :scope-cwd="taskMgrScopeCwd"
     :new-draft="taskMgrNewDraft"
   />
-  <div ref="containerRef" class="layout-root" :class="{ dragging: !!dragState }">
+  <div
+    ref="containerRef"
+    class="layout-root"
+    :class="{ dragging: !!dragState, 'pane-dragging': !!paneDrag }"
+  >
     <template v-if="cwd !== null && layout">
       <div
         v-for="pane in layoutResult.panes"
@@ -750,6 +908,7 @@ onUnmounted(() => {
           @focus="setActive"
           @split="onSplit"
           @close="onClose"
+          @pane-drag-start="onPaneDragStart"
           @create-worktree="onCreateWorktree"
           @cwd-change="onCwdChange"
           @font-size-change="onFontSizeChange"
@@ -766,6 +925,14 @@ onUnmounted(() => {
         :style="rectStyle(d.rect)"
         @mousedown="(e) => onDividerDown(e, i)"
       ></div>
+      <template v-if="paneDrag">
+        <div v-if="draggedRect" class="pane-drag-source" :style="rectStyle(draggedRect)"></div>
+        <div
+          v-if="dropIndicatorRect"
+          class="pane-drop-indicator"
+          :style="rectStyle(dropIndicatorRect)"
+        ></div>
+      </template>
     </template>
   </div>
 </template>
@@ -849,6 +1016,34 @@ onUnmounted(() => {
 .layout-root.dragging {
   user-select: none;
   cursor: inherit;
+}
+
+.layout-root.pane-dragging,
+.layout-root.pane-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.pane-drag-source {
+  position: absolute;
+  z-index: 2;
+  background: var(--bg-app);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.pane-drop-indicator {
+  position: absolute;
+  z-index: 3;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  pointer-events: none;
+  transition:
+    left 0.08s,
+    top 0.08s,
+    width 0.08s,
+    height 0.08s;
 }
 
 .pane-slot {

@@ -2,6 +2,7 @@ import { spawn, IPty } from 'node-pty'
 import { WebContents } from 'electron'
 import { statSync } from 'fs'
 import { readSettings, updateSettings, TaskDef } from './settings'
+import { killProcessTree } from './proc'
 
 const isWindows = process.platform === 'win32'
 
@@ -123,6 +124,24 @@ export function getTaskOutput(id: string): string {
   return t ? t.output.join('') : ''
 }
 
+/**
+ * Stop a task's PTY *and* every descendant it spawned. `pty.kill()` only
+ * signals the shell wrapping the command, so `npm run dev`-style trees
+ * (npm → node → vite/esbuild) outlive it and keep holding the port. Capture
+ * the pid first — `kill()` tears the handle down.
+ */
+function killTaskTree(t: Task): void {
+  const pty = t.pty
+  if (!pty) return
+  const pid = pty.pid
+  try {
+    pty.kill()
+  } catch {
+    // already gone
+  }
+  killProcessTree(pid)
+}
+
 function appendOutput(t: Task, chunk: string): void {
   t.output.push(chunk)
   t.outputBytes += chunk.length
@@ -186,11 +205,7 @@ export function startTask(opts: {
   let t = opts.id ? tasks.get(opts.id) : undefined
   if (t) {
     if (t.pty) {
-      try {
-        t.pty.kill()
-      } catch {
-        // already gone
-      }
+      killTaskTree(t)
       t.pty = null
     }
     if (opts.command) t.command = opts.command
@@ -247,10 +262,19 @@ export function createTask(opts: { name?: string; command: string; cwd: string }
 export function stopTask(id: string): void {
   const t = tasks.get(id)
   if (!t || !t.pty) return
+  const pid = t.pty.pid
+  let threw = false
   try {
     t.pty.kill()
   } catch {
-    // already gone — onExit may not fire, settle status manually
+    threw = true
+  }
+  // Reap the whole tree — the shell's children (dev servers/watchers) don't
+  // die just because the shell got SIGHUP.
+  killProcessTree(pid)
+  if (threw) {
+    // kill() threw → the process was already gone; onExit won't fire, so
+    // settle the status manually.
     t.pty = null
     t.status = 'exited'
     broadcast('task-status', toMeta(t))
@@ -291,13 +315,7 @@ export function restartTask(id: string): TaskMeta | null {
 export function removeTask(id: string): void {
   const t = tasks.get(id)
   if (!t) return
-  if (t.pty) {
-    try {
-      t.pty.kill()
-    } catch {
-      // ignore
-    }
-  }
+  if (t.pty) killTaskTree(t)
   tasks.delete(id)
   persistDefs()
   broadcast('task-removed', { id })
@@ -320,12 +338,6 @@ export function updateTask(
 /** Kill every running task — called on app quit so no orphans linger. */
 export function killAllTasks(): void {
   for (const t of tasks.values()) {
-    if (t.pty) {
-      try {
-        t.pty.kill()
-      } catch {
-        // ignore
-      }
-    }
+    if (t.pty) killTaskTree(t)
   }
 }

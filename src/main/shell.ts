@@ -4,6 +4,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync } from 'fs'
 import { shellIntegration } from './shell-integration'
+import { killProcessTree } from './proc'
 
 const execFileP = promisify(execFile)
 
@@ -152,35 +153,6 @@ export function resizePty(paneId: string, cols: number, rows: number): void {
     } catch {
       // pty may have already exited
     }
-  }
-}
-
-/**
- * Kill a process and every descendant it spawned. `pty.kill()` alone only
- * signals the shell; long-running children (dev servers, watchers) get
- * reparented and linger. node-pty starts the shell as a session/group leader
- * on POSIX, so signalling the negative PID hits the whole group; on Windows
- * `taskkill /T` walks the process tree.
- */
-function killProcessTree(pid: number): void {
-  if (!pid) return
-  if (isWindows) {
-    // Fire-and-forget; /T = tree, /F = force. Errors (already gone) ignored.
-    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => {})
-    return
-  }
-  try {
-    // Negative pid → the whole process group (node-pty calls setsid).
-    process.kill(-pid, 'SIGTERM')
-    setTimeout(() => {
-      try {
-        process.kill(-pid, 'SIGKILL')
-      } catch {
-        // group already gone
-      }
-    }, 2000)
-  } catch {
-    // group already gone, or pid invalid
   }
 }
 

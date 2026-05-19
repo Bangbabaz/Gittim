@@ -47,9 +47,15 @@ const emit = defineEmits<{
   (e: 'focus', paneId: string): void
   (e: 'split', paneId: string, direction: 'row' | 'column'): void
   (e: 'close', paneId: string): void
-  (e: 'createWorktree', paneId: string, cwd: string): void
+  (
+    e: 'createWorktree',
+    paneId: string,
+    cwd: string,
+    placement: 'top' | 'bottom' | 'left' | 'right'
+  ): void
   (e: 'cwdChange', paneId: string, cwd: string): void
   (e: 'fontSizeChange', size: number): void
+  (e: 'paneDragStart', paneId: string): void
   (e: 'openSettings'): void
   (e: 'openTasks'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
@@ -463,10 +469,17 @@ onUnmounted(() => {
 
 <template>
   <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
+    <div
+      class="pane-drag-strip"
+      title="拖拽以重排面板"
+      @mousedown.left.prevent="emit('paneDragStart', props.paneId)"
+    >
+      <span class="pds-grip" />
+    </div>
     <PaneToolbar
       ref="toolbarRef"
       :cwd="currentCwd"
-      @worktree-created="(path) => emit('createWorktree', props.paneId, path)"
+      @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />
@@ -553,6 +566,40 @@ onUnmounted(() => {
   background-color: var(--bg-app);
   box-sizing: border-box;
   position: relative;
+}
+
+/* Always-present grab strip at the very top of every pane (repo or not) so
+   the pane can be dragged onto another to re-split the layout. */
+.pane-drag-strip {
+  height: 7px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-toolbar);
+  cursor: grab;
+  -webkit-app-region: no-drag;
+}
+
+.pane-drag-strip:hover {
+  background: var(--bg-hover);
+}
+
+.pane-drag-strip:active {
+  cursor: grabbing;
+}
+
+.pds-grip {
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0.5;
+  transition: opacity 0.1s;
+}
+
+.pane-drag-strip:hover .pds-grip {
+  opacity: 0.95;
 }
 
 .terminal-container {
