@@ -39,6 +39,8 @@ export interface Settings {
   tasks?: TaskDef[]
   /** Auto-open the tasks drawer when a task starts. Default true. */
   autoOpenTasksOnRun?: boolean
+  /** Tasks drawer width in px (drag-to-resize). Default 860. */
+  tasksDrawerWidth?: number
   /** UI theme. 'system' follows the OS via Electron nativeTheme. Default 'system'. */
   theme?: 'system' | 'dark' | 'light'
 }
@@ -49,6 +51,7 @@ const DEFAULTS: Settings = {
   fontSize: 13,
   scrollback: 10000,
   autoOpenTasksOnRun: true,
+  tasksDrawerWidth: 860,
   theme: 'system'
 }
 

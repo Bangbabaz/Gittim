@@ -75,6 +75,7 @@ declare global {
         scrollback?: number
         paneLayout?: SavedLayout
         autoOpenTasksOnRun?: boolean
+        tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
       }>
       settingsSet: (patch: {
@@ -82,6 +83,7 @@ declare global {
         scrollback?: number
         paneLayout?: SavedLayout | null
         autoOpenTasksOnRun?: boolean
+        tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
       }) => void
       themeSetSource: (src: 'system' | 'dark' | 'light') => void

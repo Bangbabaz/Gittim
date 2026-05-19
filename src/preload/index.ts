@@ -86,6 +86,7 @@ const api = {
       scrollback?: number
       paneLayout?: SavedLayout
       autoOpenTasksOnRun?: boolean
+      tasksDrawerWidth?: number
       theme?: 'system' | 'dark' | 'light'
     }>,
   settingsSet: (patch: {
@@ -93,6 +94,7 @@ const api = {
     scrollback?: number
     paneLayout?: SavedLayout | null
     autoOpenTasksOnRun?: boolean
+    tasksDrawerWidth?: number
     theme?: 'system' | 'dark' | 'light'
   }) => ipcRenderer.send('settings-set', patch),
   themeSetSource: (src: 'system' | 'dark' | 'light') =>

@@ -222,6 +222,10 @@
   .el-drawer__body {
     padding: 0;
     background: var(--bg-app);
+    // The shell sizes itself to 100% and scrolls internally (task list +
+    // xterm log). Element Plus defaults the body to `overflow: auto`, so a
+    // sub-pixel overflow leaks a tiny stray scroll — pin it like .diff-dialog.
+    overflow: hidden;
     // No-drag hole over the OS title-bar strip the drawer overlaps, else
     // clicks on top controls become window drags.
     -webkit-app-region: no-drag;

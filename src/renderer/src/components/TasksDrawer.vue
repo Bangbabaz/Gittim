@@ -35,13 +35,22 @@ type TaskMeta = {
 const props = defineProps<{
   modelValue: boolean
   selectTaskId: string | null
+  width: number
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'editTask', id: string, cwd: string): void
   (e: 'manageTasks', cwd?: string): void
+  (e: 'widthChange', width: number): void
 }>()
+
+// el-drawer (Element Plus 2.14) drag-to-resize: it emits the final px size on
+// resize-end; App owns the value, clamps + persists it, and feeds it back via
+// the `width` prop.
+function onResizeEnd(_e: MouseEvent, size: number): void {
+  emit('widthChange', size)
+}
 
 const tasks = ref<TaskMeta[]>([])
 const selectedId = ref<string | null>(null)
@@ -299,11 +308,13 @@ function closeLogSearch(): void {
   <el-drawer
     :model-value="modelValue"
     direction="rtl"
-    size="860px"
+    :size="width"
+    resizable
     :with-header="false"
     class="tasks-drawer"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
     @opened="onDrawerOpened"
+    @resize-end="onResizeEnd"
   >
     <div class="tasks-shell">
       <!-- Top header bar — kept visually consistent with the app title bar

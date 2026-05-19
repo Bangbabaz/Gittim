@@ -74,6 +74,23 @@ const taskMgrScopeCwd = ref<string | null>(null)
 const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
 
+// Tasks drawer width (drag-to-resize, persisted). Clamp keeps it usable: the
+// task list is a fixed 320px, so a too-narrow drawer leaves no log space.
+const DEFAULT_TASKS_DRAWER_WIDTH = 860
+const MIN_TASKS_DRAWER_WIDTH = 480
+const MAX_TASKS_DRAWER_WIDTH = 2000
+const tasksDrawerWidth = ref(DEFAULT_TASKS_DRAWER_WIDTH)
+
+const clampDrawerWidth = (w: number): number =>
+  Math.round(Math.max(MIN_TASKS_DRAWER_WIDTH, Math.min(MAX_TASKS_DRAWER_WIDTH, w)))
+
+const onTasksDrawerWidthChange = (w: number): void => {
+  const clamped = clampDrawerWidth(w)
+  if (tasksDrawerWidth.value === clamped) return
+  tasksDrawerWidth.value = clamped
+  window.api.settingsSet({ tasksDrawerWidth: clamped })
+}
+
 // Theme is a singleton composable: it owns the html[data-theme] / .dark swap
 // and keeps Electron's nativeTheme in sync. The select binds to `themePref`.
 const { preference: themePref, setPreference: setThemePref, init: initTheme } = useTheme()
@@ -615,6 +632,9 @@ onMounted(async () => {
   if (typeof settings.autoOpenTasksOnRun === 'boolean') {
     autoOpenTasksOnRun.value = settings.autoOpenTasksOnRun
   }
+  if (typeof settings.tasksDrawerWidth === 'number') {
+    tasksDrawerWidth.value = clampDrawerWidth(settings.tasksDrawerWidth)
+  }
   if (settings.paneLayout) {
     const restoredPaneCwd: Record<string, string> = {}
     const restored = deserializeLayout(settings.paneLayout, restoredPaneCwd)
@@ -877,6 +897,8 @@ onUnmounted(() => {
   <TasksDrawer
     v-model="showTasks"
     :select-task-id="taskSelectId"
+    :width="tasksDrawerWidth"
+    @width-change="onTasksDrawerWidthChange"
     @manage-tasks="(cwd?: string) => openTaskManager(null, cwd ?? null)"
     @edit-task="(id: string, cwd?: string) => openTaskManager(id, cwd ?? null)"
   />
