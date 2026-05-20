@@ -11,6 +11,7 @@ import {
   ptyHasRunningProcess,
   getGitInfo,
   getGitBranches,
+  getRepoName,
   checkoutGitBranch,
   gitAddWorktree,
   gitHasUncommittedChanges,
@@ -36,6 +37,7 @@ import {
   resizeTask,
   killAllTasks
 } from './tasks'
+import { detectIdes, openIde } from './ide'
 import { readFileSync, existsSync } from 'fs'
 import { join as joinPath } from 'path'
 import icon from '../../resources/icon.png?asset'
@@ -134,6 +136,7 @@ app.whenReady().then(() => {
   ipcMain.handle('get-app-version', () => app.getVersion())
   ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
   ipcMain.handle('get-git-branches', (_event, cwd: string) => getGitBranches(cwd))
+  ipcMain.handle('get-repo-name', (_event, cwd: string) => getRepoName(cwd))
   ipcMain.handle('git-diff-stats', (_event, cwd: string) => getGitDiffStats(cwd))
   ipcMain.handle('git-has-changes', (_event, cwd: string) => gitHasUncommittedChanges(cwd))
 
@@ -184,8 +187,7 @@ app.whenReady().then(() => {
   // of truth for "follow system" (and keeps native chrome — dialogs, scrollbars
   // — consistent with the chosen theme).
   const applyThemeSource = (src: unknown): void => {
-    nativeTheme.themeSource =
-      src === 'dark' || src === 'light' ? src : 'system'
+    nativeTheme.themeSource = src === 'dark' || src === 'light' ? src : 'system'
   }
   applyThemeSource(readSettings().theme)
   ipcMain.on('theme-set-source', (_event, src: 'system' | 'dark' | 'light') => {
@@ -266,6 +268,12 @@ app.whenReady().then(() => {
     }
   })
 
+  // IDE detection + launch. Detection scans PATH + a handful of well-known
+  // install dirs; the result is cached for the session unless the renderer
+  // explicitly forces a re-scan (e.g. after the user installed something new).
+  ipcMain.handle('ide-list', (_event, force?: boolean) => detectIdes(!!force))
+  ipcMain.handle('ide-open', (_event, ideId: string, cwd: string) => openIde(ideId, cwd))
+
   ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
     try {
       const raw = readFileSync(joinPath(cwd, 'package.json'), 'utf8')
@@ -283,15 +291,36 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
-  killAllTasks()
-  flushSettings()
+// before-quit fires synchronously and Electron tears the process down right
+// after we return — but killAllTasks is now async (it has to snapshot the
+// descendant tree before each pty.kill()). Defer the actual quit until the
+// cleanup resolves; without this the snapshot PowerShell is killed mid-flight
+// and detached survivors (Nx workers, dev servers) are left running.
+let cleanupDone = false
+let cleanupPromise: Promise<void> | null = null
+
+async function runCleanup(): Promise<void> {
+  if (!cleanupPromise) {
+    cleanupPromise = (async () => {
+      try {
+        await killAllTasks()
+      } finally {
+        flushSettings()
+        cleanupDone = true
+      }
+    })()
+  }
+  return cleanupPromise
+}
+
+app.on('before-quit', (event) => {
+  if (cleanupDone) return
+  event.preventDefault()
+  runCleanup().then(() => app.quit())
 })
 
 app.on('window-all-closed', () => {
-  killAllTasks()
-  flushSettings()
   if (process.platform !== 'darwin') {
-    app.quit()
+    runCleanup().then(() => app.quit())
   }
 })

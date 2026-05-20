@@ -8,10 +8,13 @@ import {
   ListChecks,
   ChevronDown,
   FolderGit2,
-  Trash2
+  Trash2,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DiffViewer from './DiffViewer.vue'
+import { iconFor } from './ideIcons'
 
 type WorktreeInfo = {
   path: string
@@ -212,8 +215,14 @@ const wtNameEdited = ref(false)
 const wtLocation = ref('')
 const wtPlacement = ref<WorktreePlacement>('right')
 const wtSubmitting = ref(false)
+// Cached repo name (main working tree's folder name). Fetched on dialog open
+// so the project-name default is `<repo>-<branch>` even when the user is
+// already inside a worktree — otherwise the current folder is already named
+// `<repo>-<oldBranch>` and we'd compound it into `<repo>-<oldBranch>-<new>`.
+const repoName = ref<string | null>(null)
 
 const folderName = computed(() => {
+  if (repoName.value) return repoName.value
   const parts = (props.cwd ?? '').replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] || '项目'
 })
@@ -276,15 +285,30 @@ function onProjectNameInput(): void {
   wtNameEdited.value = true
 }
 
-function openWorktreeDialog(): void {
+async function openWorktreeDialog(): Promise<void> {
+  // Reset repo name first so the computed defaultProjectName falls back to
+  // folderName-from-cwd if the IPC call lags. The fetched value below then
+  // re-triggers the watcher and the project-name field updates.
+  repoName.value = null
   wtFromBranch.value = currentBranch.value || ''
   wtNewBranch.value = false
   wtNewBranchName.value = ''
   wtNameEdited.value = false
-  wtProjectName.value = defaultProjectName.value
   wtLocation.value = parentDir.value
   wtPlacement.value = 'right'
   showWorktreeDialog.value = true
+
+  if (props.cwd) {
+    try {
+      repoName.value = await window.api.getRepoName(props.cwd)
+    } catch {
+      repoName.value = null
+    }
+  }
+  // Re-apply the default with the (possibly newly-fetched) repo name. The
+  // watcher on wtNewBranch/wtFromBranch will also keep this in sync as the
+  // user toggles new-branch / picks a different base.
+  if (!wtNameEdited.value) wtProjectName.value = defaultProjectName.value
 }
 
 async function handleBrowseLocation(): Promise<void> {
@@ -530,6 +554,87 @@ const runSelected = async (): Promise<void> => {
 const stopTask = async (id: string): Promise<void> => {
   await window.api.taskStop(id)
 }
+
+// -- IDE picker ------------------------------------------------------------
+// Detection happens once per session on the main side (cached); the picker
+// here is a "default IDE + dropdown to switch". Left chip = open default
+// IDE on cwd; small caret = expand the list. Choosing an entry both opens
+// the cwd AND remembers that IDE as the new default (persisted via
+// settings.json → `defaultIde`).
+type IdeInfo = { id: string; name: string; command: string; iconDataUrl?: string }
+const ides = ref<IdeInfo[]>([])
+const ideLoading = ref(false)
+const defaultIdeId = ref<string | null>(null)
+
+// The actually-resolved default: the persisted id if it's still installed,
+// else the first detected IDE, else null. We re-derive on every change so
+// uninstalled IDEs don't leave a dead chip on the toolbar.
+const defaultIde = computed<IdeInfo | null>(() => {
+  if (!ides.value.length) return null
+  const persisted = defaultIdeId.value ? ides.value.find((i) => i.id === defaultIdeId.value) : null
+  return persisted || ides.value[0]
+})
+
+const defaultIdeIcon = computed(() =>
+  defaultIde.value ? iconFor(defaultIde.value.id, defaultIde.value.name) : null
+)
+
+async function loadIdes(force = false): Promise<void> {
+  ideLoading.value = true
+  try {
+    ides.value = await window.api.ideList(force)
+  } catch {
+    ides.value = []
+  } finally {
+    ideLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  // Read the persisted default in parallel with the detection scan — the
+  // computed above tolerates either landing first.
+  const [settings] = await Promise.all([window.api.settingsGet(), loadIdes(false)])
+  if (typeof settings.defaultIde === 'string') {
+    defaultIdeId.value = settings.defaultIde
+  }
+})
+
+// Open with a specific IDE. Single source of truth for "open + remember" so
+// the chip click and the dropdown click can't drift apart.
+async function openWithIde(id: string): Promise<void> {
+  if (!props.cwd) return
+  const r = await window.api.ideOpen(id, props.cwd)
+  if (!r.success) {
+    ElMessage.error(r.error || '打开 IDE 失败')
+    return
+  }
+  if (defaultIdeId.value !== id) {
+    defaultIdeId.value = id
+    window.api.settingsSet({ defaultIde: id })
+  }
+}
+
+// Left chip click: open with the resolved default. Refuses politely if
+// nothing is detected — the dropdown next to it stays available for the
+// "重新检测" entry so the user has a path forward.
+const openDefaultIde = async (): Promise<void> => {
+  if (!defaultIde.value) {
+    ElMessage.warning('未检测到任何 IDE，请点旁边的下拉箭头重新检测')
+    return
+  }
+  await openWithIde(defaultIde.value.id)
+}
+
+// Dropdown command handler. Carets ('__refresh__') are sentinels we own;
+// everything else is an IDE id.
+const onPickIde = async (cmd: string): Promise<void> => {
+  if (cmd === '__refresh__') {
+    await loadIdes(true)
+    ElMessage.success(ides.value.length ? `检测到 ${ides.value.length} 个 IDE` : '未检测到任何 IDE')
+    return
+  }
+  await openWithIde(cmd)
+}
 </script>
 
 <template>
@@ -659,6 +764,104 @@ const stopTask = async (id: string): Promise<void> => {
         <ListChecks :size="13" />
       </button>
     </el-tooltip>
+
+    <!-- Open in IDE — connected pair. Left chip = open with default IDE
+         immediately; right caret = expand the list to pick a different one
+         (which also becomes the new default). Together carry margin-left:
+         auto so they (and the diff badge after) anchor to the right. -->
+    <div class="ide-group">
+      <el-tooltip
+        :content="defaultIde ? `在 ${defaultIde.name} 中打开` : '在 IDE 中打开'"
+        placement="bottom"
+        :show-after="300"
+      >
+        <button
+          class="ide-chip"
+          :class="{ 'has-real-icon': !!defaultIde?.iconDataUrl }"
+          :disabled="ideLoading"
+          :style="
+            defaultIde?.iconDataUrl
+              ? undefined
+              : defaultIdeIcon
+                ? { background: defaultIdeIcon.color, color: '#fff' }
+                : undefined
+          "
+          @click="openDefaultIde"
+        >
+          <!-- Priority: real icon extracted from the .exe / .app → handwritten
+               brand SVG → coloured chip with the IDE's initial → generic
+               external-link glyph (nothing detected at all). -->
+          <img
+            v-if="defaultIde?.iconDataUrl"
+            class="ide-chip-img"
+            :src="defaultIde.iconDataUrl"
+            alt=""
+            draggable="false"
+          />
+          <svg
+            v-else-if="defaultIdeIcon && defaultIdeIcon.path"
+            class="ide-chip-svg"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path :d="defaultIdeIcon.path" fill="currentColor" />
+          </svg>
+          <span v-else-if="defaultIdeIcon" class="ide-chip-letter">
+            {{ defaultIdeIcon.letter }}
+          </span>
+          <ExternalLink v-else :size="13" />
+        </button>
+      </el-tooltip>
+      <el-dropdown
+        trigger="click"
+        placement="bottom-end"
+        popper-class="ide-pick-dropdown"
+        @command="onPickIde"
+      >
+        <button class="ide-caret" :disabled="ideLoading" title="切换 IDE">
+          <ChevronDown :size="12" />
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="ide in ides"
+              :key="ide.id"
+              :command="ide.id"
+              :title="ide.command"
+              :class="{ picked: ide.id === defaultIde?.id }"
+            >
+              <span
+                class="ide-row-icon"
+                :class="{ 'has-real-icon': !!ide.iconDataUrl }"
+                :style="
+                  ide.iconDataUrl ? undefined : { background: iconFor(ide.id, ide.name).color }
+                "
+              >
+                <img v-if="ide.iconDataUrl" :src="ide.iconDataUrl" alt="" draggable="false" />
+                <svg
+                  v-else-if="iconFor(ide.id, ide.name).path"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path :d="iconFor(ide.id, ide.name).path" fill="#fff" />
+                </svg>
+                <span v-else class="ide-row-letter">
+                  {{ iconFor(ide.id, ide.name).letter }}
+                </span>
+              </span>
+              <span class="td-label">{{ ide.name }}</span>
+            </el-dropdown-item>
+            <el-dropdown-item v-if="!ides.length" disabled class="cmd-empty">
+              未检测到 IDE
+            </el-dropdown-item>
+            <el-dropdown-item divided command="__refresh__">
+              <RefreshCw :size="12" style="margin-right: 6px" />
+              重新检测
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
 
     <el-tooltip
       v-if="diffStats.added || diffStats.deleted"
@@ -1015,8 +1218,139 @@ const stopTask = async (id: string): Promise<void> => {
   font-size: 0;
 }
 
-.diff-stats {
+/* Open-in-IDE control: a connected pair (brand chip + small caret) that
+   together carry the auto margin anchoring the right-hand cluster. */
+.ide-group {
   margin-left: auto;
+  display: inline-flex;
+  align-items: stretch;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Left chip — coloured square showing the active IDE's brand logo. The
+   inline `background` style on the element supplies the brand colour;
+   :hover dims/brightens via filter so we don't have to mirror each colour. */
+.ide-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  border-radius: $radius-sm 0 0 $radius-sm;
+  background: var(--bg-input);
+  color: var(--text-regular);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: filter 0.12s;
+}
+
+.ide-chip:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.ide-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ide-chip-svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.ide-chip-img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  /* Native exe icons already bring their own colour scheme; we just need a
+     transparent chip behind them. The :class="has-real-icon" branch handles
+     that — but make sure the image itself sits crisp at 16px on both DPIs. */
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.ide-chip.has-real-icon {
+  background: transparent !important;
+  border-color: var(--border-strong);
+}
+
+.ide-chip-letter {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  font-family: $font-ui;
+}
+
+/* Caret — slim button glued to the chip's right edge. */
+.ide-caret {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+  padding: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 0 $radius-sm $radius-sm 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ide-caret:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+  border-color: var(--text-muted);
+}
+
+.ide-caret:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dropdown rows: brand-coloured 18px square + IDE name. The current default
+   gets a subtle highlight so the user can see what the chip will open. */
+.ide-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.ide-row-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.ide-row-icon img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.ide-row-icon.has-real-icon {
+  background: transparent !important;
+}
+
+.ide-row-letter {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  font-family: $font-ui;
+}
+
+.diff-stats {
   display: flex;
   align-items: center;
   gap: 6px;

@@ -3,6 +3,7 @@ import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync } from 'fs'
+import { basename, dirname } from 'path'
 import { shellIntegration } from './shell-integration'
 import { killProcessTree } from './proc'
 
@@ -47,7 +48,11 @@ function cleanGitError(err: unknown): string {
 
 function defaultShell(): string {
   if (isWindows) {
-    return process.env.COMSPEC || 'cmd.exe'
+    // Default to Windows PowerShell on Windows. PowerShell ships with every
+    // modern Windows install (5.1 in System32, 7+ as `pwsh` if installed) and
+    // gives users a richer prompt + tab-completion than cmd.exe. The user can
+    // override via GITTIM_SHELL if they prefer cmd, pwsh, or git-bash.
+    return process.env.GITTIM_SHELL || 'powershell.exe'
   }
   return process.env.SHELL || '/bin/bash'
 }
@@ -156,18 +161,27 @@ export function resizePty(paneId: string, cols: number, rows: number): void {
   }
 }
 
-export function killPty(paneId: string): void {
+export async function killPty(paneId: string): Promise<void> {
   const session = sessions.get(paneId)
   if (!session) return
   session.disposed = true
   const pid = session.pty.pid
+  // Reap the descendant tree FIRST. On Windows we need a live snapshot of
+  // the process tree before pty.kill() reparents detached grandchildren
+  // (Nx workers, vite/esbuild helpers, dev servers) to the system process,
+  // at which point taskkill /T can no longer reach them.
+  if (pid) {
+    try {
+      await killProcessTree(pid)
+    } catch {
+      // never let a stuck snapshot block PTY teardown
+    }
+  }
   try {
     session.pty.kill()
   } catch {
-    // ignore
+    // ignore — process may have exited during the snapshot
   }
-  // Also tear down any descendants the shell spawned (servers, watchers, …).
-  if (pid) killProcessTree(pid)
   sessions.delete(paneId)
   sessionsByWebContents.get(session.wcId)?.delete(paneId)
 }
@@ -250,6 +264,40 @@ export async function getPtyCwd(paneId: string): Promise<string | null> {
     // PID gone, permissions denied, lsof missing — silently fall back
   }
   return null
+}
+
+/**
+ * Returns the name of the repository's main working tree (the folder
+ * containing the real `.git` directory), regardless of whether `cwd` is the
+ * main repo or a linked worktree. Used by the new-worktree dialog so the
+ * default project name is `<repo>-<branch>`, not `<currentFolder>-<branch>`
+ * — which would compound (`repo-master-test`) when creating worktrees from
+ * inside an existing worktree.
+ *
+ * Strategy: `git rev-parse --git-common-dir` returns the path to the shared
+ * `.git` directory; its parent is the main working tree, and its basename
+ * is the repo name. Returns null when cwd is not inside a git repo.
+ */
+export async function getRepoName(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { ...GIT_OPTS, cwd, timeout: 3000 }
+    )
+    const gitDir = stdout.trim()
+    if (!gitDir) return null
+    // gitDir is something like `D:/project/myrepo/.git`. Its parent
+    // (`D:/project/myrepo`) is the main working tree; its basename is the
+    // repo name. For bare repos `--git-common-dir` returns the bare dir
+    // itself (e.g. `myrepo.git`), strip the trailing `.git` in that case.
+    const parent = dirname(gitDir)
+    const bare = basename(gitDir).replace(/\.git$/, '')
+    const name = basename(parent)
+    return name && name !== '.' ? name : bare || null
+  } catch {
+    return null
+  }
 }
 
 export async function getGitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }> {

@@ -33,6 +33,7 @@ declare global {
       ) => Promise<
         { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
       >
+      getRepoName: (cwd: string) => Promise<string | null>
       getGitDiffStats: (cwd: string) => Promise<{ added: number; deleted: number }>
       gitHasChanges: (cwd: string) => Promise<boolean>
       gitCheckout: (
@@ -77,6 +78,7 @@ declare global {
         autoOpenTasksOnRun?: boolean
         tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
+        defaultIde?: string
       }>
       settingsSet: (patch: {
         fontSize?: number
@@ -85,6 +87,7 @@ declare global {
         autoOpenTasksOnRun?: boolean
         tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
+        defaultIde?: string
       }) => void
       themeSetSource: (src: 'system' | 'dark' | 'light') => void
       themeShouldUseDark: () => Promise<boolean>
@@ -122,6 +125,10 @@ declare global {
         patch: { name?: string; command?: string; cwd?: string }
       ) => Promise<TaskMeta | null>
       readPackageScripts: (cwd: string) => Promise<Record<string, string>>
+      ideList: (
+        force?: boolean
+      ) => Promise<{ id: string; name: string; command: string; iconDataUrl?: string }[]>
+      ideOpen: (ideId: string, cwd: string) => Promise<{ success: boolean; error?: string }>
       pathExists: (p: string) => Promise<boolean>
       onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => () => void
       onTaskStatus: (cb: (meta: TaskMeta) => void) => () => void

@@ -1,0 +1,721 @@
+import { execFile, spawn } from 'child_process'
+import { promisify } from 'util'
+import { existsSync, readdirSync } from 'fs'
+import { join, dirname, basename } from 'path'
+import { app } from 'electron'
+
+const execFileP = promisify(execFile)
+const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+
+export interface IdeInfo {
+  id: string
+  name: string
+  /** Full path to the launcher (resolved via PATH, registry, or a known install dir). */
+  command: string
+  /**
+   * Real icon extracted from the executable / .app bundle, as a base64 PNG
+   * data URL ready to drop into an <img src>. Undefined when extraction
+   * failed (e.g. a .cmd script with no associated .exe we can find).
+   */
+  iconDataUrl?: string
+}
+
+interface IdeCandidate {
+  id: string
+  name: string
+  /** Binary names to try on PATH (in priority order). */
+  bins: string[]
+  /** Extra absolute paths to probe; supports `*` wildcard segments. */
+  extraPaths?: () => string[]
+  /**
+   * Windows registry DisplayName substring(s). The PowerShell sweep over
+   * HKLM/HKCU Uninstall keys collects InstallLocation + DisplayIcon for any
+   * entry whose DisplayName contains one of these strings.
+   */
+  registryNames?: string[]
+  /**
+   * Subpath under InstallLocation pointing to the preferred launcher (a
+   * `.cmd` shim that accepts a folder arg). When this resolves we prefer
+   * it over the raw .exe — the shim handles `<launcher> <folder>` cleanly
+   * for VS Code-family editors. Forward slashes only; we join with the OS sep.
+   */
+  launcherRelPath?: string
+  /** Fallback when launcherRelPath isn't found: subpath to the GUI .exe. */
+  exeRelPath?: string
+  /**
+   * macOS .app bundle name keywords. system_profiler's `_name` is matched
+   * with `includes` (case-sensitive) against any of these — so 'IntelliJ IDEA'
+   * picks up both 'IntelliJ IDEA' (Community) and 'IntelliJ IDEA Ultimate'.
+   * Same shape as `registryNames` on Windows.
+   */
+  macAppNames?: string[]
+  /** Subpath inside the .app bundle to the CLI launcher (POSIX-style). */
+  macLauncherRelPath?: string
+}
+
+const home = (): string => app.getPath('home')
+const localAppData = (): string => process.env.LOCALAPPDATA || join(home(), 'AppData', 'Local')
+const programFiles = (): string => process.env.ProgramFiles || 'C:\\Program Files'
+const programFilesX86 = (): string => process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+
+function jetbrainsScriptsDir(): string {
+  return join(localAppData(), 'JetBrains', 'Toolbox', 'scripts')
+}
+
+function jetbrainsToolboxAppsDir(): string {
+  return join(localAppData(), 'JetBrains', 'Toolbox', 'apps')
+}
+
+/**
+ * Expand a path that contains `*` wildcards in one or more segments. Lists
+ * the parent dir, filters entries by literal prefix/suffix, sorts lexicogra-
+ * phically (proxy for "newest version"), then recurses on the rest. Returns
+ * the first concrete path that actually exists, or null.
+ */
+function expandWildcard(p: string): string | null {
+  if (!p.includes('*')) return existsSync(p) ? p : null
+  const sep = p.includes('\\') ? '\\' : '/'
+  const starIdx = p.indexOf('*')
+  const segStart = Math.max(p.lastIndexOf('\\', starIdx), p.lastIndexOf('/', starIdx)) + 1
+  const nextBackslash = p.indexOf('\\', starIdx)
+  const nextForward = p.indexOf('/', starIdx)
+  const seps = [nextBackslash, nextForward].filter((i) => i >= 0)
+  const segEnd = seps.length ? Math.min(...seps) : p.length
+  const parentDir = p.slice(0, Math.max(0, segStart - 1))
+  const segPattern = p.slice(segStart, segEnd)
+  const rest = p.slice(segEnd)
+  const wildIn = segPattern.indexOf('*')
+  const prefix = segPattern.slice(0, wildIn)
+  const suffix = segPattern.slice(wildIn + 1)
+  if (!existsSync(parentDir)) return null
+  let entries: string[]
+  try {
+    entries = readdirSync(parentDir)
+  } catch {
+    return null
+  }
+  const matches = entries.filter((e) => e.startsWith(prefix) && e.endsWith(suffix)).sort()
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const candidate = parentDir + sep + matches[i] + rest
+    const resolved = expandWildcard(candidate)
+    if (resolved) return resolved
+  }
+  return null
+}
+
+function candidates(): IdeCandidate[] {
+  return [
+    {
+      id: 'vscode',
+      name: 'Visual Studio Code',
+      bins: ['code', 'code.cmd'],
+      registryNames: ['Visual Studio Code'],
+      launcherRelPath: 'bin/code.cmd',
+      exeRelPath: 'Code.exe',
+      macAppNames: ['Visual Studio Code'],
+      macLauncherRelPath: 'Contents/Resources/app/bin/code',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(localAppData(), 'Programs', 'Microsoft VS Code', 'bin', 'code.cmd'),
+              join(programFiles(), 'Microsoft VS Code', 'bin', 'code.cmd'),
+              join(programFilesX86(), 'Microsoft VS Code', 'bin', 'code.cmd')
+            ]
+          : []
+    },
+    {
+      id: 'vscode-insiders',
+      name: 'VS Code Insiders',
+      bins: ['code-insiders', 'code-insiders.cmd'],
+      registryNames: ['Visual Studio Code - Insiders', 'Visual Studio Code Insiders'],
+      launcherRelPath: 'bin/code-insiders.cmd',
+      exeRelPath: 'Code - Insiders.exe',
+      macAppNames: ['Visual Studio Code - Insiders'],
+      macLauncherRelPath: 'Contents/Resources/app/bin/code',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(
+                localAppData(),
+                'Programs',
+                'Microsoft VS Code Insiders',
+                'bin',
+                'code-insiders.cmd'
+              )
+            ]
+          : []
+    },
+    {
+      id: 'cursor',
+      name: 'Cursor',
+      bins: ['cursor', 'cursor.cmd'],
+      registryNames: ['Cursor'],
+      launcherRelPath: 'resources/app/bin/cursor.cmd',
+      exeRelPath: 'Cursor.exe',
+      macAppNames: ['Cursor'],
+      macLauncherRelPath: 'Contents/Resources/app/bin/cursor',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(localAppData(), 'Programs', 'cursor', 'resources', 'app', 'bin', 'cursor.cmd'),
+              join(localAppData(), 'Programs', 'Cursor', 'resources', 'app', 'bin', 'cursor.cmd')
+            ]
+          : []
+    },
+    {
+      id: 'trae',
+      name: 'Trae',
+      bins: ['trae', 'trae.cmd'],
+      registryNames: ['Trae'],
+      launcherRelPath: 'resources/app/bin/trae.cmd',
+      exeRelPath: 'Trae.exe',
+      macAppNames: ['Trae'],
+      macLauncherRelPath: 'Contents/Resources/app/bin/trae',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(localAppData(), 'Programs', 'Trae', 'resources', 'app', 'bin', 'trae.cmd'),
+              join(localAppData(), 'Programs', 'Trae', 'bin', 'trae.cmd')
+            ]
+          : []
+    },
+    {
+      id: 'windsurf',
+      name: 'Windsurf',
+      bins: ['windsurf', 'windsurf.cmd'],
+      registryNames: ['Windsurf'],
+      launcherRelPath: 'resources/app/bin/windsurf.cmd',
+      exeRelPath: 'Windsurf.exe',
+      macAppNames: ['Windsurf'],
+      macLauncherRelPath: 'Contents/Resources/app/bin/windsurf',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(
+                localAppData(),
+                'Programs',
+                'Windsurf',
+                'resources',
+                'app',
+                'bin',
+                'windsurf.cmd'
+              )
+            ]
+          : []
+    },
+    jb(
+      'idea',
+      'IntelliJ IDEA',
+      ['IDEA-U', 'IDEA-C', 'IDEA', 'IntelliJ IDEA', 'idea'],
+      ['IntelliJ IDEA Ultimate', 'IntelliJ IDEA Community', 'IntelliJ IDEA']
+    ),
+    jb('webstorm', 'WebStorm', ['WebStorm', 'webstorm'], ['WebStorm']),
+    jb(
+      'pycharm',
+      'PyCharm',
+      ['PyCharm-P', 'PyCharm-C', 'PyCharm', 'pycharm'],
+      ['PyCharm Professional', 'PyCharm Community', 'PyCharm']
+    ),
+    jb('goland', 'GoLand', ['GoLand', 'goland'], ['GoLand']),
+    jb('clion', 'CLion', ['CLion', 'clion'], ['CLion']),
+    jb('rider', 'JetBrains Rider', ['Rider', 'rider'], ['JetBrains Rider', 'Rider']),
+    jb('phpstorm', 'PhpStorm', ['PhpStorm', 'phpstorm'], ['PhpStorm']),
+    jb('rubymine', 'RubyMine', ['RubyMine', 'rubymine'], ['RubyMine']),
+    jb('datagrip', 'DataGrip', ['DataGrip', 'datagrip'], ['DataGrip']),
+    jb('fleet', 'JetBrains Fleet', ['Fleet', 'fleet'], ['Fleet', 'JetBrains Fleet']),
+    {
+      id: 'subl',
+      name: 'Sublime Text',
+      bins: ['subl', 'subl.exe', 'sublime_text'],
+      registryNames: ['Sublime Text'],
+      exeRelPath: 'subl.exe',
+      macAppNames: ['Sublime Text'],
+      macLauncherRelPath: 'Contents/SharedSupport/bin/subl',
+      extraPaths: () =>
+        isWindows
+          ? [
+              join(programFiles(), 'Sublime Text', 'subl.exe'),
+              join(programFiles(), 'Sublime Text 3', 'subl.exe')
+            ]
+          : []
+    },
+    {
+      id: 'zed',
+      name: 'Zed',
+      bins: ['zed'],
+      registryNames: ['Zed'],
+      macAppNames: ['Zed'],
+      macLauncherRelPath: 'Contents/MacOS/cli'
+    }
+  ]
+}
+
+/** Build a JetBrains-flavoured IdeCandidate. */
+function jb(
+  id: string,
+  name: string,
+  productNames: string[],
+  registryNames: string[]
+): IdeCandidate {
+  const stem = productNames[productNames.length - 1]
+  return {
+    id,
+    name,
+    bins: [stem, `${stem}64.exe`, `${stem}.cmd`, `${stem}.bat`],
+    registryNames,
+    launcherRelPath: `bin/${stem}64.exe`, // JetBrains InstallLocation already includes \bin\... only for some; we re-search below
+    exeRelPath: `bin/${stem}64.exe`,
+    // Reuse the same brand-name keyword list for macOS matching — `_name`
+    // in system_profiler often differs by edition ("IntelliJ IDEA" vs
+    // "IntelliJ IDEA Ultimate"), and the registryNames already cover those
+    // variants with their substring-based semantics.
+    macAppNames: registryNames,
+    // JetBrains macOS apps put the cli under MacOS/<product> (no folder)
+    macLauncherRelPath: `Contents/MacOS/${stem}`,
+    extraPaths: () => {
+      if (!isWindows) return []
+      const paths: string[] = []
+      // 1) Toolbox shim
+      paths.push(join(jetbrainsScriptsDir(), `${stem}.cmd`))
+      paths.push(join(jetbrainsScriptsDir(), `${stem}.bat`))
+      // 2) Toolbox apps (wildcard channel + version)
+      for (const n of productNames) {
+        paths.push(join(jetbrainsToolboxAppsDir(), n, 'ch-*', '*', 'bin', `${stem}64.exe`))
+        paths.push(join(jetbrainsToolboxAppsDir(), n, 'bin', `${stem}64.exe`))
+      }
+      // 3) Standalone in LocalAppData\Programs
+      for (const n of productNames) {
+        paths.push(join(localAppData(), 'Programs', `${n}*`, 'bin', `${stem}64.exe`))
+      }
+      // 4) Program Files \ JetBrains
+      for (const n of productNames) {
+        paths.push(join(programFiles(), 'JetBrains', `${n}*`, 'bin', `${stem}64.exe`))
+        paths.push(join(programFilesX86(), 'JetBrains', `${n}*`, 'bin', `${stem}64.exe`))
+      }
+      return paths
+    }
+  }
+}
+
+async function findInPath(bin: string): Promise<string | null> {
+  try {
+    const which = isWindows ? 'where' : 'which'
+    const { stdout } = await execFileP(which, [bin], { timeout: 2000, windowsHide: true })
+    const lines = stdout
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (!lines.length) return null
+    if (isWindows) {
+      // VS Code's `bin\` ships TWO files for the launcher: `code` (POSIX
+      // shell script, no extension — can't be run by CreateProcess) and
+      // `code.cmd` (the Windows batch shim — the one we want).
+      //
+      // `where code` behaviour varies across Windows / PATHEXT configs: some
+      // return both lines, some return only the bare name. So we apply two
+      // strategies in order:
+      //   1. If any returned line already has a runnable extension, pick it.
+      //   2. Otherwise (only POSIX shim returned), probe the *same directory*
+      //      for a sibling `<name>.cmd / .exe / .bat / .com` and use that.
+      //
+      // Without (2), `spawn('D:\…\bin\code', [cwd])` errors with ENOENT and
+      // `getFileIcon` falls back to the generic disk-drive glyph.
+      const runnable = lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l))
+      if (runnable) return runnable
+      for (const cand of lines) {
+        for (const ext of ['.cmd', '.exe', '.bat', '.com']) {
+          if (existsSync(cand + ext)) return cand + ext
+        }
+      }
+      return lines[0]
+    }
+    return lines[0]
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Windows: registry-based enumeration
+// ---------------------------------------------------------------------------
+
+interface RegistryEntry {
+  DisplayName?: string
+  InstallLocation?: string
+  DisplayIcon?: string
+  Publisher?: string
+}
+
+let registryCache: RegistryEntry[] | null = null
+
+/**
+ * Sweep Windows installer registry keys for IDE-like installations. Replaces
+ * the `fetch-installed-software` package (stale + extra dep) with one
+ * inlined PowerShell query. Hits all three uninstall-key locations:
+ *
+ *   - HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall          (64-bit, system)
+ *   - HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall (32-bit, system)
+ *   - HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall          (per-user)
+ *
+ * JetBrains Toolbox + most modern installers (VS Code, Cursor, …) write to
+ * the per-user (HKCU) hive, which the older PATH-only detection misses
+ * entirely. PowerShell startup (~300ms) is acceptable on first detect; the
+ * result is cached for the session, refreshable via the toolbar's
+ * "重新检测" entry.
+ */
+async function readWindowsRegistry(): Promise<RegistryEntry[]> {
+  if (registryCache) return registryCache
+  if (!isWindows) {
+    registryCache = []
+    return registryCache
+  }
+  const script =
+    '$paths = @(' +
+    "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'," +
+    "'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'," +
+    "'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'" +
+    '); ' +
+    'Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.DisplayName } | ' +
+    'Select-Object DisplayName, InstallLocation, DisplayIcon, Publisher | ' +
+    'ConvertTo-Json -Compress'
+  try {
+    const { stdout } = await execFileP(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { timeout: 10_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }
+    )
+    const raw = stdout.trim()
+    if (!raw) {
+      registryCache = []
+      return registryCache
+    }
+    const parsed: RegistryEntry | RegistryEntry[] = JSON.parse(raw)
+    registryCache = Array.isArray(parsed) ? parsed : [parsed]
+  } catch {
+    registryCache = []
+  }
+  return registryCache
+}
+
+/**
+ * Given a registry entry, decide which IDE candidate it matches (if any) and
+ * resolve a concrete launcher path. Prefer InstallLocation + launcherRelPath
+ * (the `.cmd` shim that takes a folder arg), fall back to + exeRelPath, then
+ * to the DisplayIcon's exe path itself.
+ */
+function resolveRegistryHit(entry: RegistryEntry, c: IdeCandidate): string | null {
+  const name = (entry.DisplayName || '').trim()
+  if (!name) return null
+  if (!c.registryNames?.some((k) => name.includes(k))) return null
+
+  const install = (entry.InstallLocation || '').replace(/[\\/]+$/, '').trim()
+  const tryRel = (rel: string | undefined): string | null => {
+    if (!install || !rel) return null
+    const p = join(install, rel.replace(/\//g, '\\'))
+    return existsSync(p) ? p : null
+  }
+  return tryRel(c.launcherRelPath) || tryRel(c.exeRelPath) || cleanDisplayIcon(entry.DisplayIcon)
+}
+
+/**
+ * `DisplayIcon` can be a bare exe path or `exe,0` (icon index suffix); some
+ * installers also wrap it in quotes. Strip the cruft and validate the file
+ * actually exists before returning.
+ */
+function cleanDisplayIcon(raw: string | undefined): string | null {
+  if (!raw) return null
+  let p = raw.trim().replace(/^"+|"+$/g, '')
+  const commaIdx = p.lastIndexOf(',')
+  if (commaIdx > 0 && /^-?\d+$/.test(p.slice(commaIdx + 1).trim())) {
+    p = p.slice(0, commaIdx)
+  }
+  return existsSync(p) ? p : null
+}
+
+// ---------------------------------------------------------------------------
+// macOS: system_profiler-based enumeration
+// ---------------------------------------------------------------------------
+
+interface MacApp {
+  _name?: string
+  path?: string
+  version?: string
+}
+
+let macAppsCache: MacApp[] | null = null
+
+/**
+ * List installed macOS applications via system_profiler. Replaces the
+ * `get-mac-apps` package (extra dep wrapping the same one-liner) with one
+ * inlined call. system_profiler scans /Applications, /System/Applications,
+ * and ~/Applications and returns plist; `-json` gives us structured output
+ * directly (10.15+).
+ *
+ * Result is cached for the session.
+ */
+async function readMacApplications(): Promise<MacApp[]> {
+  if (macAppsCache) return macAppsCache
+  if (!isMac) {
+    macAppsCache = []
+    return macAppsCache
+  }
+  try {
+    const { stdout } = await execFileP('system_profiler', ['SPApplicationsDataType', '-json'], {
+      timeout: 15_000,
+      maxBuffer: 32 * 1024 * 1024
+    })
+    const parsed = JSON.parse(stdout) as { SPApplicationsDataType?: MacApp[] }
+    macAppsCache = parsed.SPApplicationsDataType || []
+  } catch {
+    macAppsCache = []
+  }
+  return macAppsCache
+}
+
+function resolveMacHit(app: MacApp, c: IdeCandidate): string | null {
+  if (!c.macAppNames?.length) return null
+  const name = app._name || ''
+  // Substring match so 'IntelliJ IDEA' picks up both Community and Ultimate,
+  // 'PyCharm' picks up Community/Professional, etc.
+  if (!c.macAppNames.some((k) => name.includes(k))) return null
+  const bundle = app.path
+  if (!bundle) return null
+  // Try the CLI launcher inside the bundle first (so we pass a folder arg
+  // properly). Fall back to `open -a <appName>` style elsewhere.
+  if (c.macLauncherRelPath) {
+    const cli = join(bundle, c.macLauncherRelPath)
+    if (existsSync(cli)) return cli
+  }
+  // Return the bundle path itself — openIde() knows to `open -a` for .app.
+  return bundle
+}
+
+// ---------------------------------------------------------------------------
+// Icon extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the .exe whose icon we should extract. .exe inputs pass through;
+ * anything else (.cmd / .bat / extensionless POSIX shim like VS Code's
+ * `bin\code`) probes a few well-known layouts:
+ *   - VS Code family: `bin\<name>` → `..\<AppName>.exe`
+ *   - JetBrains:      `bin\<name>.cmd` → `bin\<name>64.exe`
+ * Returns null when no sibling exe exists — the renderer will fall back to
+ * its hand-drawn SVG icon table.
+ *
+ * The empty-extension branch matters because `where code` lists the POSIX
+ * shell script (`bin\code`, no extension) before the `bin\code.cmd` shim,
+ * and we may have stored the former; without this fix, `getFileIcon` would
+ * receive a file Windows treats as an unknown type and return the generic
+ * "disk drive" icon, not the VS Code mark.
+ */
+function exeForShim(shim: string): string | null {
+  // Already a .exe — getFileIcon handles it directly.
+  if (/\.exe$/i.test(shim)) return shim
+  const dir = dirname(shim)
+  const stem = basename(shim).replace(/\.(cmd|bat)$/i, '')
+  const parent = dirname(dir)
+  const stemCap = stem.charAt(0).toUpperCase() + stem.slice(1)
+  const candidates2: string[] = [
+    join(parent, 'Code.exe'),
+    join(parent, 'Code - Insiders.exe'),
+    join(parent, 'Cursor.exe'),
+    join(parent, 'Trae.exe'),
+    join(parent, 'Windsurf.exe'),
+    join(parent, `${stemCap}.exe`),
+    join(dir, `${stem}64.exe`),
+    join(dir, `${stem}.exe`)
+  ]
+  for (const c of candidates2) {
+    if (existsSync(c)) return c
+  }
+  return null
+}
+
+async function extractIcon(command: string): Promise<string | undefined> {
+  try {
+    // Resolve the path whose icon we actually want. Letting `getFileIcon`
+    // see a shim (Windows extensionless `bin\code`, or a bundle-internal
+    // POSIX script on macOS) yields a generic file-type glyph, not the
+    // app's real icon.
+    let target: string | null
+    if (isMac) {
+      // For anything inside a .app bundle, hand back the bundle root — that's
+      // where .icns lives and where getFileIcon does its best work.
+      const appIdx = command.indexOf('.app/')
+      target = appIdx >= 0 ? command.slice(0, appIdx + 4) : command
+    } else if (isWindows) {
+      target = exeForShim(command)
+    } else {
+      target = command
+    }
+    if (!target || !existsSync(target)) return undefined
+    // 'large' gives us 48×48 on Windows / 256×256 on macOS — better at 2× DPI
+    // than the 32×32 'normal' size used previously. The resize below caps the
+    // renderer payload regardless of the source size.
+    const img = await app.getFileIcon(target, { size: 'large' })
+    if (img.isEmpty()) return undefined
+    const resized = img.resize({ width: 48, height: 48, quality: 'best' })
+    return resized.toDataURL()
+  } catch {
+    return undefined
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+let cache: IdeInfo[] | null = null
+
+export async function detectIdes(force = false): Promise<IdeInfo[]> {
+  if (cache && !force) return cache
+  if (force) {
+    registryCache = null
+    macAppsCache = null
+  }
+
+  // Fire both platform-wide enumerations in parallel with PATH lookup so the
+  // total wall-clock cost is one PowerShell startup, not N.
+  const [regEntries, macApps] = await Promise.all([readWindowsRegistry(), readMacApplications()])
+
+  const found: IdeInfo[] = []
+  const seenIds = new Set<string>()
+  const seenPaths = new Set<string>()
+
+  for (const c of candidates()) {
+    let path: string | null = null
+
+    // 1) PATH lookup — cheapest, works for users who deliberately exposed
+    //    the launcher (Toolbox "Add to PATH", brew install, manual symlink).
+    for (const bin of c.bins) {
+      const p = await findInPath(bin)
+      if (p) {
+        path = p
+        break
+      }
+    }
+
+    // 2) Platform-native enumeration. Catches everything installed via the
+    //    OS's package mechanism even when the launcher isn't on PATH.
+    if (!path) {
+      if (isWindows) {
+        for (const e of regEntries) {
+          const hit = resolveRegistryHit(e, c)
+          if (hit) {
+            path = hit
+            break
+          }
+        }
+      } else if (isMac) {
+        for (const a of macApps) {
+          const hit = resolveMacHit(a, c)
+          if (hit) {
+            path = hit
+            break
+          }
+        }
+      }
+    }
+
+    // 3) Known install dirs — last-resort hard-coded fallback for the cases
+    //    that slipped through the registry sweep (very old installers that
+    //    didn't write Uninstall keys, portable installs, …).
+    if (!path && c.extraPaths) {
+      for (const probe of c.extraPaths()) {
+        const expanded = expandWildcard(probe)
+        if (expanded) {
+          path = expanded
+          break
+        }
+      }
+    }
+
+    if (!path) continue
+    if (seenIds.has(c.id)) continue
+    const key = path.toLowerCase()
+    if (seenPaths.has(key)) continue
+    seenIds.add(c.id)
+    seenPaths.add(key)
+    found.push({ id: c.id, name: c.name, command: path })
+  }
+
+  // Extract icons in parallel — getFileIcon is async per-target and we don't
+  // want N serial round-trips to the OS shell.
+  await Promise.all(
+    found.map(async (ide) => {
+      ide.iconDataUrl = await extractIcon(ide.command)
+    })
+  )
+
+  cache = found
+  return found
+}
+
+/**
+ * Launch the picked IDE on `cwd`. Windows .cmd/.bat shims go through cmd.exe
+ * (never `shell: true` — that triggers Windows quoting bugs around spaces;
+ * see CVE-2024-27980). macOS .app bundles go through `open -a` so finder
+ * does the right thing whether or not a CLI shim exists in the bundle.
+ * Detached + stdio 'ignore' so closing Gittim doesn't drag the IDE down.
+ */
+export function openIde(ideId: string, cwd: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const ide = (cache || []).find((i) => i.id === ideId)
+    if (!ide) {
+      resolve({ success: false, error: '未找到该 IDE，请刷新检测列表' })
+      return
+    }
+    try {
+      const lower = ide.command.toLowerCase()
+      const isBatch = isWindows && (lower.endsWith('.cmd') || lower.endsWith('.bat'))
+      const isMacBundle = isMac && lower.endsWith('.app')
+
+      let cmd: string
+      let args: string[]
+      if (isBatch) {
+        // Explicit cmd.exe so Node handles arg quoting via args[]; `shell:true`
+        // would force-stringify and lose every space in cwd.
+        cmd = 'cmd.exe'
+        args = ['/d', '/s', '/c', ide.command, cwd]
+      } else if (isMacBundle) {
+        // No CLI shim in the bundle — use `open -a` with the .app path.
+        cmd = 'open'
+        args = ['-a', ide.command, cwd]
+      } else {
+        cmd = ide.command
+        args = [cwd]
+      }
+
+      const proc = spawn(cmd, args, {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      let settled = false
+      proc.once('error', (err) => {
+        if (settled) return
+        settled = true
+        resolve({ success: false, error: err.message })
+      })
+      proc.once('spawn', () => {
+        if (settled) return
+        settled = true
+        proc.unref()
+        resolve({ success: true })
+      })
+      // Safety net for the rare Windows configs where neither event fires.
+      setTimeout(() => {
+        if (!settled) {
+          settled = true
+          proc.unref()
+          resolve({ success: true })
+        }
+      }, 1000)
+    } catch (err) {
+      resolve({ success: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+}

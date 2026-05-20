@@ -127,19 +127,27 @@ export function getTaskOutput(id: string): string {
 /**
  * Stop a task's PTY *and* every descendant it spawned. `pty.kill()` only
  * signals the shell wrapping the command, so `npm run dev`-style trees
- * (npm → node → vite/esbuild) outlive it and keep holding the port. Capture
- * the pid first — `kill()` tears the handle down.
+ * (npm → node → vite/esbuild, or `nx run` → many worker processes) outlive
+ * it and keep holding the port. We must snapshot + tear down the descendant
+ * tree BEFORE killing the PTY — once the shell dies the OS reparents any
+ * detached grandchildren to the system process and they become unreachable.
  */
-function killTaskTree(t: Task): void {
+async function killTaskTree(t: Task): Promise<void> {
   const pty = t.pty
   if (!pty) return
   const pid = pty.pid
+  if (pid) {
+    try {
+      await killProcessTree(pid)
+    } catch {
+      // never let snapshot failure block the kill
+    }
+  }
   try {
     pty.kill()
   } catch {
     // already gone
   }
-  killProcessTree(pid)
 }
 
 function appendOutput(t: Task, chunk: string): void {
@@ -195,17 +203,17 @@ function spawnPty(t: Task): void {
   })
 }
 
-export function startTask(opts: {
+export async function startTask(opts: {
   id?: string
   name?: string
   command?: string
   cwd?: string
-}): TaskMeta {
+}): Promise<TaskMeta> {
   // Existing task (re-run): reuse the record, reset output.
   let t = opts.id ? tasks.get(opts.id) : undefined
   if (t) {
     if (t.pty) {
-      killTaskTree(t)
+      await killTaskTree(t)
       t.pty = null
     }
     if (opts.command) t.command = opts.command
@@ -259,19 +267,27 @@ export function createTask(opts: { name?: string; command: string; cwd: string }
   return toMeta(t)
 }
 
-export function stopTask(id: string): void {
+export async function stopTask(id: string): Promise<void> {
   const t = tasks.get(id)
   if (!t || !t.pty) return
   const pid = t.pty.pid
+  // Snapshot + reap the descendant tree BEFORE pty.kill() — otherwise the
+  // shell's children (dev servers, watchers, Nx executor workers) get
+  // reparented and survive. Awaiting here costs ~300ms (PowerShell start)
+  // but is what actually catches detached survivors.
+  if (pid) {
+    try {
+      await killProcessTree(pid)
+    } catch {
+      // never let snapshot failure block the kill
+    }
+  }
   let threw = false
   try {
     t.pty.kill()
   } catch {
     threw = true
   }
-  // Reap the whole tree — the shell's children (dev servers/watchers) don't
-  // die just because the shell got SIGHUP.
-  killProcessTree(pid)
   if (threw) {
     // kill() threw → the process was already gone; onExit won't fire, so
     // settle the status manually.
@@ -306,16 +322,16 @@ export function resizeTask(id: string, cols: number, rows: number): void {
   }
 }
 
-export function restartTask(id: string): TaskMeta | null {
+export async function restartTask(id: string): Promise<TaskMeta | null> {
   const t = tasks.get(id)
   if (!t) return null
   return startTask({ id: t.id })
 }
 
-export function removeTask(id: string): void {
+export async function removeTask(id: string): Promise<void> {
   const t = tasks.get(id)
   if (!t) return
-  if (t.pty) killTaskTree(t)
+  if (t.pty) await killTaskTree(t)
   tasks.delete(id)
   persistDefs()
   broadcast('task-removed', { id })
@@ -335,9 +351,16 @@ export function updateTask(
   return toMeta(t)
 }
 
-/** Kill every running task — called on app quit so no orphans linger. */
-export function killAllTasks(): void {
-  for (const t of tasks.values()) {
-    if (t.pty) killTaskTree(t)
-  }
+/**
+ * Kill every running task — called on app quit so no orphans linger.
+ * Awaiting here gives the descendant-tree snapshot time to finish before
+ * Electron tears the main process down (otherwise the snapshot's child
+ * PowerShell would be reaped mid-query and survivors would be left behind).
+ */
+export async function killAllTasks(): Promise<void> {
+  await Promise.all(
+    Array.from(tasks.values())
+      .filter((t) => t.pty)
+      .map((t) => killTaskTree(t))
+  )
 }

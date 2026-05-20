@@ -158,7 +158,16 @@ async function deleteItem(i: EditItem): Promise<void> {
   const idx = items.value.findIndex((x) => x.key === i.key)
   if (idx >= 0) items.value.splice(idx, 1)
   if (selectedKey.value === i.key) {
-    selectedKey.value = items.value[0]?.key ?? null
+    // Promote the first item that's actually in scope, not just items[0].
+    // visibleItems lets the selected row through even if its cwd doesn't
+    // match scopeCwd (so an actively-edited cwd stays visible). If we fell
+    // back to items[0] blindly here, deleting a fresh draft would promote
+    // a different-folder task into selection — and the user would see a
+    // phantom command (e.g. an old `npm run dev` from another folder) that
+    // they never created in this scope.
+    const sc = props.scopeCwd ? norm(props.scopeCwd) : null
+    const candidates = sc ? items.value.filter((x) => norm(x.cwd) === sc) : items.value
+    selectedKey.value = candidates[0]?.key ?? null
   }
 }
 

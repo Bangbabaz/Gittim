@@ -34,6 +34,7 @@ const api = {
     ipcRenderer.invoke('get-git-branches', cwd) as Promise<
       { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
     >,
+  getRepoName: (cwd: string) => ipcRenderer.invoke('get-repo-name', cwd) as Promise<string | null>,
   getGitDiffStats: (cwd: string) =>
     ipcRenderer.invoke('git-diff-stats', cwd) as Promise<{ added: number; deleted: number }>,
   gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
@@ -88,6 +89,7 @@ const api = {
       autoOpenTasksOnRun?: boolean
       tasksDrawerWidth?: number
       theme?: 'system' | 'dark' | 'light'
+      defaultIde?: string
     }>,
   settingsSet: (patch: {
     fontSize?: number
@@ -96,11 +98,10 @@ const api = {
     autoOpenTasksOnRun?: boolean
     tasksDrawerWidth?: number
     theme?: 'system' | 'dark' | 'light'
+    defaultIde?: string
   }) => ipcRenderer.send('settings-set', patch),
-  themeSetSource: (src: 'system' | 'dark' | 'light') =>
-    ipcRenderer.send('theme-set-source', src),
-  themeShouldUseDark: () =>
-    ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
+  themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
+  themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
   onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {
     const listener = (_e: IpcRendererEvent, shouldUseDark: boolean): void => cb(shouldUseDark)
     ipcRenderer.on('native-theme-updated', listener)
@@ -159,6 +160,12 @@ const api = {
     ipcRenderer.invoke('task-update', id, patch) as Promise<TaskMeta | null>,
   readPackageScripts: (cwd: string) =>
     ipcRenderer.invoke('read-package-scripts', cwd) as Promise<Record<string, string>>,
+  ideList: (force?: boolean) =>
+    ipcRenderer.invoke('ide-list', force) as Promise<
+      { id: string; name: string; command: string; iconDataUrl?: string }[]
+    >,
+  ideOpen: (ideId: string, cwd: string) =>
+    ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<{ success: boolean; error?: string }>,
   pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
   onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => {
     const listener = (_e: IpcRendererEvent, p: { id: string; chunk: string }): void => cb(p)

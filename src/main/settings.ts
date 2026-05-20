@@ -43,6 +43,12 @@ export interface Settings {
   tasksDrawerWidth?: number
   /** UI theme. 'system' follows the OS via Electron nativeTheme. Default 'system'. */
   theme?: 'system' | 'dark' | 'light'
+  /**
+   * Last-picked IDE id for the toolbar's "open in IDE" button. The main-side
+   * id (e.g. `vscode`, `idea`, `cursor`). Reset to undefined when the picked
+   * IDE is no longer detected on disk (the renderer drops stale values).
+   */
+  defaultIde?: string
 }
 
 const DEFAULTS: Settings = {
