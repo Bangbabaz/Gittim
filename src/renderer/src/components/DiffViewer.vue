@@ -239,7 +239,7 @@ function jumpTo(id: string): void {
   gap: 8px;
   padding: 7px 12px;
   background: var(--el-fill-color-light);
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--el-border-color);
   @include ui-font;
 }
 
@@ -266,9 +266,12 @@ function jumpTo(id: string): void {
   background: var(--el-color-warning-light-8);
 }
 
+/* "修改" is the most common diff status — keep it readable, not the muted
+   info grey. Use the primary brand colour so it visually outweighs the
+   placeholder/info-coloured tags. */
 .st-mod {
-  color: var(--el-color-info);
-  background: var(--el-color-info-light-8);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
 }
 
 .dv-file-name {

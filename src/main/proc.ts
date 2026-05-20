@@ -29,13 +29,21 @@ export function killProcessTree(pid: number | undefined | null): Promise<void> {
   try {
     // Negative pid → the whole process group (node-pty calls setsid).
     process.kill(-pid, 'SIGTERM')
+    // Escalate to SIGKILL only if the group is still alive after 2 s. Probing
+    // with signal 0 first avoids racing against PID reuse: if the original
+    // group is gone, we don't try to kill whatever process took its PID.
     setTimeout(() => {
+      try {
+        process.kill(-pid, 0)
+      } catch {
+        return // group already exited; nothing to escalate
+      }
       try {
         process.kill(-pid, 'SIGKILL')
       } catch {
-        // group already gone
+        // group exited between the probe and the kill
       }
-    }, 2000)
+    }, 2000).unref()
   } catch {
     // group already gone, or pid invalid
   }

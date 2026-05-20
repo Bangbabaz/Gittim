@@ -3,6 +3,7 @@ import { promisify } from 'util'
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join, dirname, basename } from 'path'
 import { app } from 'electron'
+import { is } from '@electron-toolkit/utils'
 
 const execFileP = promisify(execFile)
 const isWindows = process.platform === 'win32'
@@ -786,20 +787,23 @@ export function openIde(ideId: string, cwd: string): Promise<{ success: boolean;
       // Dev-mode diagnostic: log what we're actually about to spawn. Visible
       // in the terminal running `yarn dev` — invaluable when "nothing
       // happens" because three layers of stdio:'ignore' hide the real cause.
-      console.log('[ide] openIde', { ideId, cmd, args, hideWindow: isViaShell })
+      // Guarded by is.dev so prod builds stay quiet.
+      if (is.dev) console.log('[ide] openIde', { ideId, cmd, args, hideWindow: isViaShell })
 
       const proc = spawn(cmd, args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: isViaShell
       })
-      console.log('[ide] spawned pid:', proc.pid)
+      if (is.dev) console.log('[ide] spawned pid:', proc.pid)
       // Also log the eventual exit. If Code.exe (or whatever) dies within a
       // few ms it usually means single-instance IPC handed the request to an
       // already-running invisible instance — also a windowsHide artefact.
-      proc.once('exit', (code, signal) => {
-        console.log('[ide] proc exited', { pid: proc.pid, code, signal })
-      })
+      if (is.dev) {
+        proc.once('exit', (code, signal) => {
+          console.log('[ide] proc exited', { pid: proc.pid, code, signal })
+        })
+      }
       let settled = false
       proc.once('error', (err) => {
         if (settled) return

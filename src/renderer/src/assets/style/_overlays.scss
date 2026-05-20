@@ -76,48 +76,10 @@
 
 // --- Task command picker dropdown (el-dropdown → body) --------------------
 .task-pick-dropdown {
+  @include teleported-picker-dropdown;
+
   .el-dropdown-menu {
-    background: var(--el-bg-color-overlay);
-    border: 1px solid var(--el-border-color);
-    padding: 4px;
     max-width: 360px;
-  }
-
-  .el-dropdown-menu__item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--el-text-color-regular);
-    font-size: 12px;
-    padding: 5px 10px;
-    border-radius: $radius;
-    line-height: 1.4;
-
-    &:not(.is-disabled):hover {
-      background: var(--el-color-primary);
-      color: #fff;
-    }
-
-    &.picked {
-      color: var(--el-color-primary);
-    }
-
-    &--divided {
-      border-top: 1px solid var(--el-border-color);
-      margin-top: 4px;
-
-      &::before {
-        display: none;
-      }
-    }
-
-    &.cmd-empty,
-    &.cmd-empty:hover {
-      color: var(--el-text-color-placeholder);
-      font-size: 11px;
-      background: transparent;
-      cursor: default;
-    }
   }
 
   .status-dot {
@@ -136,68 +98,11 @@
       background: var(--el-color-danger);
     }
   }
-
-  .td-label {
-    flex: 1;
-    min-width: 0;
-    @include ellipsis;
-  }
 }
 
 // --- IDE picker dropdown (el-dropdown → body) ----------------------------
 .ide-pick-dropdown {
-  .el-dropdown-menu {
-    background: var(--el-bg-color-overlay);
-    border: 1px solid var(--el-border-color);
-    padding: 4px;
-  }
-
-  .el-dropdown-menu__item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--el-text-color-regular);
-    font-size: 12px;
-    padding: 5px 10px;
-    border-radius: $radius;
-    line-height: 1.4;
-
-    &:not(.is-disabled):hover {
-      background: var(--el-color-primary);
-      color: #fff;
-    }
-
-    &.picked {
-      color: var(--el-color-primary);
-    }
-
-    &--divided {
-      border-top: 1px solid var(--el-border-color);
-      margin-top: 4px;
-
-      &::before {
-        display: none;
-      }
-    }
-
-    &.cmd-empty {
-      color: var(--el-text-color-placeholder);
-      font-size: 11px;
-      background: transparent;
-      cursor: default;
-
-      &:hover {
-        background: transparent;
-        color: var(--el-text-color-placeholder);
-      }
-    }
-  }
-
-  .td-label {
-    flex: 1;
-    min-width: 0;
-    @include ellipsis;
-  }
+  @include teleported-picker-dropdown;
 }
 
 // --- Branch select dropdown (el-select → body) ---------------------------

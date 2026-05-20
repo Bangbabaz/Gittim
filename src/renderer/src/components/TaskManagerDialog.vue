@@ -534,8 +534,10 @@ async function save(): Promise<void> {
   cursor: pointer;
 }
 
+/* Hover darkens via filter so we don't drop to light-3 (which is paler in
+   the light theme and tanks white-on-blue contrast). */
 .tm-save:hover:not(:disabled) {
-  background: var(--el-color-primary-light-3);
+  filter: brightness(1.08);
 }
 
 .tm-save:disabled {

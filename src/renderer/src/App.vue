@@ -42,7 +42,14 @@ const activeId = ref<string | null>(null)
 const containerRef = ref<HTMLDivElement>()
 const containerSize = ref({ width: 0, height: 0 })
 const isMaximized = ref(false)
-const isMac = ref(false)
+// Read platform synchronously from the preload bridge so the title-bar
+// renders the correct controls on the very first paint. The async
+// `window.api.getPlatform()` IPC was making macOS briefly flash the
+// Windows-style buttons over the system traffic lights.
+const isMac = ref(
+  ((window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? '') ===
+    'darwin'
+)
 
 const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 8
@@ -606,7 +613,6 @@ onMounted(async () => {
   // Resolve + apply the saved theme ASAP (async; doesn't block the rest).
   initTheme()
   cwd.value = await window.api.getCwd()
-  isMac.value = (await window.api.getPlatform()) === 'darwin'
   isMaximized.value = await window.api.winIsMaximized()
   appVersion.value = await window.api.getAppVersion()
   unsubscribeWinState = window.api.onWindowStateChanged((maximized) => {

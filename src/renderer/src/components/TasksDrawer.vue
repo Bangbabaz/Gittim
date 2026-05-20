@@ -354,7 +354,9 @@ function closeLogSearch(): void {
                 <div class="task-cmd">{{ t.command }}</div>
                 <div class="task-cwd" :title="t.cwd || '未指定工作目录'">
                   <FolderOpen :size="11" class="task-cwd-icon" />
-                  <span class="task-cwd-text">{{ t.cwd || '未指定工作目录' }}</span>
+                  <span class="task-cwd-text"
+                    ><bdi>{{ t.cwd || '未指定工作目录' }}</bdi></span
+                  >
                 </div>
               </div>
               <div class="task-ops" @click.stop>
@@ -407,7 +409,9 @@ function closeLogSearch(): void {
               :title="selectedTask.cwd || '未指定工作目录'"
             >
               <FolderOpen :size="12" class="log-head-cwd-icon" />
-              {{ selectedTask.cwd || '未指定工作目录' }}
+              <span class="log-head-cwd-text"
+                ><bdi>{{ selectedTask.cwd || '未指定工作目录' }}</bdi></span
+              >
             </span>
             <div class="log-head-ops">
               <button class="op-btn" title="搜索" @click="openLogSearch">
@@ -575,16 +579,34 @@ function closeLogSearch(): void {
   gap: 4px;
   margin-top: 2px;
   color: var(--el-text-color-placeholder);
+  min-width: 0;
 }
 
 .task-cwd-icon {
   flex-shrink: 0;
 }
 
+/* Left-truncate the path so the project folder (the part at the tail) stays
+   visible — that's what tells two tasks with `D:/long/shared/prefix/projectA`
+   and `D:/long/shared/prefix/projectB` apart. `direction: rtl` flips the
+   ellipsis to the start; the inner span pulls direction back to `ltr` so the
+   text itself (path separators, latin/CJK chars) doesn't render reversed. */
 .task-cwd-text {
   font-size: 10.5px;
-  @include ellipsis;
   font-family: $font-mono;
+  flex: 1;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  // Inner content stays LTR so the path reads correctly.
+  > * {
+    direction: ltr;
+    unicode-bidi: bidi-override;
+  }
 }
 
 .task-ops {
@@ -625,21 +647,13 @@ function closeLogSearch(): void {
   color: var(--el-color-danger);
 }
 
-/* Per-row command buttons: unified white icons on semantic filled
-   backgrounds (run=green, stop/delete=red, restart=amber, edit=neutral). */
-/* Neutral default (the edit button): outlined like the worktree button so
-   the icon stays readable in both themes (a filled neutral chip with the
-   base white icon is invisible in the light theme). The semantic variants
-   below stay filled with white icons on their saturated fills. */
+/* Per-row command buttons: neutral outlined default (edit), with the
+   semantic variants below overriding to filled run/stop/danger looks. */
 .task-ops .op-btn {
-  background: none;
-  border: 1px solid var(--el-border-color);
-  color: var(--el-text-color-regular);
+  @include neutral-outlined-btn;
 }
 
 .task-ops .op-btn:hover {
-  background: var(--el-fill-color);
-  border-color: var(--el-text-color-secondary);
   color: var(--el-text-color-primary);
 }
 
@@ -653,22 +667,24 @@ function closeLogSearch(): void {
   color: #fff;
 }
 
+/* Base semantic colour (not light-3) so the white icon stays readable in
+   the light theme — light-3 would be a pale fill with ~1.6:1 contrast. */
 .task-ops .op-btn.run {
-  background: var(--el-color-success-light-3);
+  background: var(--el-color-success);
 }
 
 .task-ops .op-btn.run:hover {
-  background: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-3);
 }
 
 .task-ops .op-btn.stop,
 .task-ops .op-btn.danger {
-  background: var(--el-color-danger-light-3);
+  background: var(--el-color-danger);
 }
 
 .task-ops .op-btn.stop:hover,
 .task-ops .op-btn.danger:hover {
-  background: var(--el-color-danger-light-5);
+  background: var(--el-color-danger-light-3);
 }
 
 .tasks-log {
@@ -714,11 +730,27 @@ function closeLogSearch(): void {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   font-family: $font-mono;
-  @include ellipsis;
 }
 
 .log-head-cwd-icon {
   flex-shrink: 0;
+}
+
+// Left-truncate the path so the folder name (path tail) stays visible.
+// See .task-cwd-text for the direction:rtl + bdi trick.
+.log-head-cwd-text {
+  flex: 1;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  > * {
+    direction: ltr;
+    unicode-bidi: bidi-override;
+  }
 }
 
 .log-head-status.running {

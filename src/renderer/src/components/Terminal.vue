@@ -135,11 +135,16 @@ terminal.parser.registerOscHandler(7, (data) => {
 })
 
 // OSC 9;9 — Windows Terminal / PowerShell-style cwd notification.
-// Payload: `9;C:\path` or `9;"C:\path"`.
+// xterm hands us the raw OSC body. Sub-code "9;<path>" → cwd; anything else
+// (e.g. ConEmu/iTerm2 "9;<message>" desktop notification) is left alone so
+// xterm's default handlers can still see it.
 terminal.parser.registerOscHandler(9, (data) => {
   const m = data.match(/^9;"?([^"]+)"?\s*$/)
-  if (m) currentCwd.value = m[1]
-  return true
+  if (m) {
+    currentCwd.value = m[1]
+    return true
+  }
+  return false
 })
 
 const copySelection = async (): Promise<void> => {
@@ -396,6 +401,11 @@ defineExpose({ terminal, fitAddon })
 let unsubscribeData: (() => void) | null = null
 let unsubscribeExit: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
+// Captured at open() so we can explicitly removeEventListener on unmount.
+// terminal.dispose() also tears down its DOM, but binding to the captured
+// node directly makes the cleanup explicit and HMR-safe.
+let termElement: HTMLElement | null = null
+let termTextarea: HTMLTextAreaElement | null = null
 let lastCols = 0
 let lastRows = 0
 
@@ -433,8 +443,10 @@ onMounted(async () => {
   }
   lastCols = terminal.cols
   lastRows = terminal.rows
-  terminal.element?.addEventListener('contextmenu', onContextMenu)
-  terminal.textarea?.addEventListener('focus', onTerminalFocus)
+  termElement = terminal.element ?? null
+  termTextarea = terminal.textarea ?? null
+  termElement?.addEventListener('contextmenu', onContextMenu)
+  termTextarea?.addEventListener('focus', onTerminalFocus)
 
   unsubscribeData = window.api.onPtyData(props.paneId, (chunk) => terminal.write(chunk))
   unsubscribeExit = window.api.onPtyExit(props.paneId, (code) => {
@@ -459,6 +471,10 @@ window.addEventListener('blur', closeContextMenu)
 
 onUnmounted(() => {
   window.removeEventListener('blur', closeContextMenu)
+  termElement?.removeEventListener('contextmenu', onContextMenu)
+  termTextarea?.removeEventListener('focus', onTerminalFocus)
+  termElement = null
+  termTextarea = null
   resizeObserver?.disconnect()
   unsubscribeData?.()
   unsubscribeExit?.()

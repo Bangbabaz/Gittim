@@ -90,7 +90,11 @@ export function shellIntegration(shellPath: string): ShellSpec {
 
   if (name === 'bash') {
     const rc = writeBashRc()
-    return { shell: shellPath, args: ['--rcfile', rc], env: baseEnv }
+    // `--rcfile` only takes effect for INTERACTIVE bash. Pair it with `-i`
+    // explicitly so our hook also wins when the user starts a login shell
+    // (`-l`), where bash would otherwise skip rcfiles. `--rcfile` is mutually
+    // exclusive with `--login`, so this is the most portable combo.
+    return { shell: shellPath, args: ['--rcfile', rc, '-i'], env: baseEnv }
   }
 
   if (name === 'zsh') {
@@ -114,8 +118,15 @@ export function shellIntegration(shellPath: string): ShellSpec {
     // differ between interactive `set` and inherited-env values.
     const env = { ...baseEnv }
     const host = env.COMPUTERNAME || 'localhost'
-    env.PROMPT = `$E]7;file://${host}/$P$E\\$P$G`
-    return { shell: shellPath, args: ['-l'], env }
+    // Prefix the OSC 7 hook to the user's existing PROMPT if they had one,
+    // so their custom prompt (`$P$G> `, autotyped time stamps, …) survives.
+    // Default cmd PROMPT is `$P$G`; we fall back to that when unset.
+    const existing = env.PROMPT && env.PROMPT.length ? env.PROMPT : '$P$G'
+    env.PROMPT = `$E]7;file://${host}/$P$E\\${existing}`
+    // cmd.exe doesn't have a -l switch; passing it makes cmd open the file
+    // named "-l" and fail. The previous code worked only because cmd treats
+    // an unrecognised switch as a path and silently ignores the error.
+    return { shell: shellPath, args: [], env }
   }
 
   // Unknown shell — let it run as-is. OSC 7 won't be emitted automatically,

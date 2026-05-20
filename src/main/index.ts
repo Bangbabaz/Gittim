@@ -22,6 +22,7 @@ import {
   getGitDiff
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
+import { readFileSync, existsSync } from 'fs'
 import {
   registerTaskSubscriber,
   loadPersistedTasks,
@@ -38,8 +39,6 @@ import {
   killAllTasks
 } from './tasks'
 import { detectIdes, openIde } from './ide'
-import { readFileSync, existsSync } from 'fs'
-import { join as joinPath } from 'path'
 import icon from '../../resources/icon.png?asset'
 
 let mainWindow: BrowserWindow | null = null
@@ -130,7 +129,6 @@ app.whenReady().then(() => {
   })
 
   // IPC handlers
-  ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('get-cwd', () => getCurrentDir())
   ipcMain.handle('get-platform', () => process.platform)
   ipcMain.handle('get-app-version', () => app.getVersion())
@@ -277,7 +275,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
     try {
-      const raw = readFileSync(joinPath(cwd, 'package.json'), 'utf8')
+      const raw = readFileSync(join(cwd, 'package.json'), 'utf8')
       const pkg = JSON.parse(raw)
       return pkg && typeof pkg.scripts === 'object' ? pkg.scripts : {}
     } catch {

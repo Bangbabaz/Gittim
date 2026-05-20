@@ -196,10 +196,6 @@ const switchWithStash = async (): Promise<void> => {
   await doCheckout(t)
 }
 
-onMounted(() => {
-  refresh()
-})
-
 // Cwd is dynamic: Terminal.vue updates it from OSC 7 / OSC 9;9 and from a
 // PID-based query on focus. Re-fetch git state whenever it changes so the
 // branch indicator follows the shell's actual directory, not the launch dir.
@@ -241,15 +237,26 @@ const parentDir = computed(() => {
   return idx > 0 ? p.substring(0, idx) : p
 })
 
+// `wtFromBranch` is encoded as `<source>:<name>` (`local:master` /
+// `remote:feature/x`) so the same branch name appearing in both 本地分支 and
+// 远程分支 groups can be told apart by the el-select.
+function parseFromBranch(v: string): { source: 'local' | 'remote'; name: string } {
+  const idx = v.indexOf(':')
+  if (idx < 0) return { source: 'local', name: v }
+  const src = v.slice(0, idx)
+  return { source: src === 'remote' ? 'remote' : 'local', name: v.slice(idx + 1) }
+}
+
 // Default folder name = 项目文件夹 + "-" + 分支名. The branch is the new
 // branch name when creating one, otherwise the selected 从分支 (NOT the repo's
 // live HEAD — the dialog's dropdown is the source of truth so the name tracks
 // what the user picks).
 const defaultProjectName = computed(() => {
+  const fromName = parseFromBranch(wtFromBranch.value).name
   const raw =
     wtNewBranch.value && wtNewBranchName.value
       ? wtNewBranchName.value
-      : wtFromBranch.value || currentBranch.value || 'worktree'
+      : fromName || currentBranch.value || 'worktree'
   // A branch like `feat/xx` or `fix/xx` must NOT become a folder name with a
   // slash (that nests `原文件夹-feat/xx`). Use only the last segment.
   const leaf = raw.split('/').filter(Boolean).pop() || 'worktree'
@@ -282,11 +289,14 @@ watch([wtFullPath, showWorktreeDialog], async () => {
   }
 })
 
-// Auto-check "新分支" when the base is a remote-only branch — these branches
-// have no local copy, so `git worktree add` needs `-b` to create one.
-watch(wtFromBranch, (name) => {
-  const isRemoteOnly = remoteBranches.value.some((b) => b.name === name)
-  if (isRemoteOnly && !wtNewBranch.value) {
+// Auto-check "新分支" when the base comes from a remote — git worktree add
+// against a remote ref alone yields a detached HEAD, so the natural action
+// is to create a tracking branch with the same name. Triggers on user pick
+// of any `remote:<name>` option, even when a local branch with that name
+// also exists (user explicitly chose the remote source).
+watch(wtFromBranch, (v) => {
+  const { source, name } = parseFromBranch(v)
+  if (source === 'remote' && !wtNewBranch.value) {
     wtNewBranch.value = true
     if (!wtNameEdited.value) wtNewBranchName.value = name
   }
@@ -308,7 +318,11 @@ async function openWorktreeDialog(): Promise<void> {
   // folderName-from-cwd if the IPC call lags. The fetched value below then
   // re-triggers the watcher and the project-name field updates.
   repoName.value = null
-  wtFromBranch.value = currentBranch.value || ''
+  // currentBranch is always a local branch (HEAD), so seed with the local
+  // source — and assign it BEFORE wtNewBranch is reset so the watch on
+  // wtFromBranch (which auto-checks 新分支 for `remote:` picks) doesn't
+  // misfire and flip wtNewBranch back to true.
+  wtFromBranch.value = currentBranch.value ? `local:${currentBranch.value}` : ''
   wtNewBranch.value = false
   wtNewBranchName.value = ''
   wtNameEdited.value = false
@@ -350,8 +364,11 @@ async function handleCreateWorktree(): Promise<void> {
       ElMessage.error('请输入新分支名')
       return
     }
-    if (branches.value.some((b) => b.name === name)) {
-      ElMessage.error(`分支 "${name}" 已存在`)
+    // Only conflict with EXISTING LOCAL branches. A remote-only branch with
+    // the same name is fine — that's the canonical "track origin/<name>" path
+    // when the user picks a remote source and auto-checks 新分支.
+    if (branches.value.some((b) => b.name === name && b.local)) {
+      ElMessage.error(`本地分支 "${name}" 已存在`)
       return
     }
   }
@@ -365,13 +382,18 @@ async function handleCreateWorktree(): Promise<void> {
     ElMessage.error(`同名文件夹已存在：${fullPath}`)
     return
   }
-  // Remote-only base branches need the `<remote>/<name>` prefix or
-  // `git worktree add` can't resolve the ref. Local branches are passed as-is.
-  const fromBranchInfo = branches.value.find((b) => b.name === wtFromBranch.value)
-  const fromBranchRef =
-    fromBranchInfo && !fromBranchInfo.local && fromBranchInfo.remote
-      ? `${fromBranchInfo.remoteName || 'origin'}/${fromBranchInfo.name}`
-      : wtFromBranch.value || undefined
+  // Decode `local:<name>` / `remote:<name>` to figure out which ref to base
+  // the new worktree on. A `remote:` pick passes `<remote>/<name>` so git
+  // resolves the remote-tracking ref (and, paired with newBranch above, sets
+  // up a local tracking branch). A `local:` pick passes the bare name.
+  const { source, name: fromName } = parseFromBranch(wtFromBranch.value)
+  let fromBranchRef: string | undefined
+  if (source === 'remote' && fromName) {
+    const info = branches.value.find((b) => b.name === fromName && b.remote)
+    fromBranchRef = `${info?.remoteName || 'origin'}/${fromName}`
+  } else {
+    fromBranchRef = fromName || undefined
+  }
   wtSubmitting.value = true
   try {
     const result = await window.api.gitWorktreeAdd(props.cwd, {
@@ -538,14 +560,6 @@ watch(
   { immediate: true }
 )
 
-onMounted(async () => {
-  allTasks.value = await window.api.taskList()
-  unsubTaskStatus = window.api.onTaskStatus(upsertTask)
-  unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
-    allTasks.value = allTasks.value.filter((t) => t.id !== id)
-  })
-})
-
 onUnmounted(() => {
   unsubTaskStatus?.()
   unsubTaskRemoved?.()
@@ -609,8 +623,16 @@ async function loadIdes(force = false): Promise<void> {
 }
 
 onMounted(async () => {
-  // Read the persisted default in parallel with the detection scan — the
-  // computed above tolerates either landing first.
+  // Kick off everything that needs the IPC bridge in parallel: initial git
+  // state for the toolbar, task list + subscriptions, IDE detection, and the
+  // persisted default IDE. Each landing independently keeps the toolbar
+  // interactive even if (say) IDE detection takes a while on Windows.
+  refresh()
+  allTasks.value = await window.api.taskList()
+  unsubTaskStatus = window.api.onTaskStatus(upsertTask)
+  unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
+    allTasks.value = allTasks.value.filter((t) => t.id !== id)
+  })
   const [settings] = await Promise.all([window.api.settingsGet(), loadIdes(false)])
   if (typeof settings.defaultIde === 'string') {
     defaultIdeId.value = settings.defaultIde
@@ -672,29 +694,16 @@ const onPickIde = async (cmd: string): Promise<void> => {
     >
       <template #header>
         <div class="branch-filter-header">
-          <el-checkbox
-            :model-value="showLocal"
-            size="small"
-            @update:model-value="toggleLocal"
-          >
+          <el-checkbox :model-value="showLocal" size="small" @update:model-value="toggleLocal">
             本地 ({{ localBranches.length }})
           </el-checkbox>
-          <el-checkbox
-            :model-value="showRemote"
-            size="small"
-            @update:model-value="toggleRemote"
-          >
+          <el-checkbox :model-value="showRemote" size="small" @update:model-value="toggleRemote">
             远程 ({{ remoteBranches.length }})
           </el-checkbox>
         </div>
       </template>
       <el-option-group v-if="showLocal" label="本地分支">
-        <el-option
-          v-for="b in localBranches"
-          :key="b.name"
-          :label="b.name"
-          :value="b.name"
-        >
+        <el-option v-for="b in localBranches" :key="b.name" :label="b.name" :value="b.name">
           <span class="br-opt">
             <span class="br-name">{{ b.name }}</span>
             <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
@@ -706,12 +715,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
         </el-option>
       </el-option-group>
       <el-option-group v-if="showRemote && remoteBranches.length" label="远程分支">
-        <el-option
-          v-for="b in remoteBranches"
-          :key="b.name"
-          :label="b.name"
-          :value="b.name"
-        >
+        <el-option v-for="b in remoteBranches" :key="b.name" :label="b.name" :value="b.name">
           <span class="br-opt">
             <span class="br-name">{{ b.name }}</span>
             <span class="br-tag remote">远程</span>
@@ -958,9 +962,9 @@ const onPickIde = async (cmd: string): Promise<void> => {
             <el-option-group v-if="showLocal" label="本地分支">
               <el-option
                 v-for="b in localBranches"
-                :key="b.name"
+                :key="`local:${b.name}`"
                 :label="b.name"
-                :value="b.name"
+                :value="`local:${b.name}`"
               >
                 <span class="br-opt">
                   <span class="br-name">{{ b.name }}</span>
@@ -975,12 +979,12 @@ const onPickIde = async (cmd: string): Promise<void> => {
             <el-option-group v-if="showRemote && remoteBranches.length" label="远程分支">
               <el-option
                 v-for="b in remoteBranches"
-                :key="b.name"
-                :label="b.name"
-                :value="b.name"
+                :key="`remote:${b.name}`"
+                :label="`${b.remoteName || 'origin'}/${b.name}`"
+                :value="`remote:${b.name}`"
               >
                 <span class="br-opt">
-                  <span class="br-name">{{ b.name }}</span>
+                  <span class="br-name">{{ b.remoteName || 'origin' }}/{{ b.name }}</span>
                   <span class="br-tag remote">远程</span>
                 </span>
               </el-option>
@@ -1104,6 +1108,8 @@ const onPickIde = async (cmd: string): Promise<void> => {
       width="92%"
       top="4vh"
       class="diff-dialog"
+      :lock-scroll="true"
+      :close-on-click-modal="false"
     >
       <div v-if="diffLoading" class="diff-state">加载中…</div>
       <div v-else-if="diffEmpty" class="diff-state">没有改动</div>
@@ -1143,9 +1149,12 @@ const onPickIde = async (cmd: string): Promise<void> => {
   background: var(--el-fill-color);
 }
 
-/* Action buttons: white icon on a semantic filled background, unified look. */
+/* Action buttons: white icon on a semantic filled background, unified look.
+   Uses the base semantic colour (not light-3) so contrast is readable in
+   both themes — Element Plus's light-3 in light mode is a very pale fill
+   where white text drops below WCAG AA (~1.6:1). */
 .run-btn {
-  background: var(--el-color-success-light-3);
+  background: var(--el-color-success);
   border: none;
   color: #fff;
   width: 20px;
@@ -1163,31 +1172,23 @@ const onPickIde = async (cmd: string): Promise<void> => {
 }
 
 .run-btn:hover {
-  background: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-3);
   color: #fff;
 }
 
 .run-btn.stop {
-  background: var(--el-color-danger-light-3);
+  background: var(--el-color-danger);
 }
 
 .run-btn.stop:hover {
-  background: var(--el-color-danger-light-5);
+  background: var(--el-color-danger-light-3);
 }
 
 /* View tasks — neutral, not a semantic run/stop action. Outlined (like the
    worktree button) instead of a filled neutral chip: a filled neutral fill
    with the base .run-btn's white icon is invisible in the light theme. */
 .run-btn.view {
-  background: none;
-  border: 1px solid var(--el-border-color);
-  color: var(--el-text-color-regular);
-}
-
-.run-btn.view:hover {
-  background: var(--el-fill-color);
-  border-color: var(--el-text-color-secondary);
-  color: var(--el-color-primary);
+  @include neutral-outlined-btn;
 }
 
 /* Command picker (el-dropdown custom trigger) */

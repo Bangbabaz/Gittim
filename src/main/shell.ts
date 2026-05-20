@@ -287,14 +287,21 @@ export async function getRepoName(cwd: string): Promise<string | null> {
     )
     const gitDir = stdout.trim()
     if (!gitDir) return null
-    // gitDir is something like `D:/project/myrepo/.git`. Its parent
-    // (`D:/project/myrepo`) is the main working tree; its basename is the
-    // repo name. For bare repos `--git-common-dir` returns the bare dir
-    // itself (e.g. `myrepo.git`), strip the trailing `.git` in that case.
-    const parent = dirname(gitDir)
-    const bare = basename(gitDir).replace(/\.git$/, '')
-    const name = basename(parent)
-    return name && name !== '.' ? name : bare || null
+    // Two shapes to handle:
+    //   1) Normal repo:  D:/project/myrepo/.git → parent = myrepo, basename of
+    //      gitDir is literally ".git" (or "" on some platforms after trim).
+    //   2) Bare repo:    D:/project/myrepo.git  → no `.git` segment as parent;
+    //      basename of gitDir is "myrepo.git" — strip the suffix.
+    //
+    // Detecting bare by "the basename of gitDir IS .git" (case 1) vs anything
+    // else (case 2) avoids the old bug where `basename(parent)` returned a
+    // generic parent folder like "repos" for a bare repo at `D:/repos/x.git`.
+    const base = basename(gitDir)
+    if (base === '.git') {
+      const name = basename(dirname(gitDir))
+      return name && name !== '.' ? name : null
+    }
+    return base.replace(/\.git$/, '') || null
   } catch {
     return null
   }

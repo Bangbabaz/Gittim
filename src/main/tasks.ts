@@ -157,6 +157,15 @@ function appendOutput(t: Task, chunk: string): void {
     const dropped = t.output.shift()!
     t.outputBytes -= dropped.length
   }
+  // A single chunk larger than the cap (e.g. a giant console.log dump) would
+  // otherwise stay in memory forever — the loop above never drops the last
+  // chunk. Tail-trim it to fit so the cap is a real bound, not a soft hint.
+  if (t.outputBytes > OUTPUT_BYTE_CAP && t.output.length === 1) {
+    const only = t.output[0]
+    const tail = only.slice(only.length - OUTPUT_BYTE_CAP)
+    t.output[0] = tail
+    t.outputBytes = tail.length
+  }
 }
 
 function spawnPty(t: Task): void {

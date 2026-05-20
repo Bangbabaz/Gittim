@@ -1,7 +1,8 @@
 // SCSS-only constants (no CSS output). Forwarded via _abstracts.scss and
 // auto-injected into every component, so these are usable everywhere without
-// an explicit @use. Colors do NOT live here — those are runtime CSS custom
-// properties in _tokens.scss so they can switch theme without a rebuild.
+// an explicit @use. Colors do NOT live here — they come from Element Plus's
+// CSS custom properties (--el-color-*, --el-text-color-*, --el-bg-color-*)
+// imported in main.ts, which switch between light/dark via the html.dark class.
 
 $font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 $font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
