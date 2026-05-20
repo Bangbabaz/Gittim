@@ -309,18 +309,20 @@ async function findInPath(bin: string): Promise<string | null> {
     if (!lines.length) return null
     if (isWindows) {
       // VS Code's `bin\` ships TWO files for the launcher: `code` (POSIX
-      // shell script, no extension — can't be run by CreateProcess) and
-      // `code.cmd` (the Windows batch shim — the one we want).
+      // shell script — can't be run by CreateProcess) and `code.cmd` (the
+      // Windows batch shim — what we want). Other tools (bun/deno/some
+      // global npm packages) may also install an extensionless `code` to
+      // their own PATH dir which has NO `.cmd` sibling.
       //
-      // `where code` behaviour varies across Windows / PATHEXT configs: some
-      // return both lines, some return only the bare name. So we apply two
-      // strategies in order:
-      //   1. If any returned line already has a runnable extension, pick it.
-      //   2. Otherwise (only POSIX shim returned), probe the *same directory*
-      //      for a sibling `<name>.cmd / .exe / .bat / .com` and use that.
+      // Strategies in order:
+      //   1. Any returned line already has a runnable extension → pick it.
+      //   2. Same directory probe: does `<line>.cmd/.exe/.bat/.com` exist?
+      //   3. None of the above → return null so the caller's detection loop
+      //      moves on to the next `bin` candidate (e.g. `code.cmd`), which
+      //      `where` queries with an explicit extension and reliably resolves.
       //
-      // Without (2), `spawn('D:\…\bin\code', [cwd])` errors with ENOENT and
-      // `getFileIcon` falls back to the generic disk-drive glyph.
+      // Returning `lines[0]` here used to short-circuit the loop with a
+      // POSIX shim CreateProcess can't run — the source of the ENOENT.
       const runnable = lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l))
       if (runnable) return runnable
       for (const cand of lines) {
@@ -328,7 +330,7 @@ async function findInPath(bin: string): Promise<string | null> {
           if (existsSync(cand + ext)) return cand + ext
         }
       }
-      return lines[0]
+      return null
     }
     return lines[0]
   } catch {
@@ -669,36 +671,90 @@ export function openIde(ideId: string, cwd: string): Promise<{ success: boolean;
       return
     }
     try {
+      // Surface the resolved launcher even when it doesn't exist anymore
+      // (uninstalled / disk renamed between detection and click). Without
+      // this check spawn's ENOENT comes back without context.
+      if (!existsSync(ide.command)) {
+        resolve({
+          success: false,
+          error: `IDE 启动器不存在：${ide.command}\n请点「重新检测」刷新列表`
+        })
+        return
+      }
+
       const lower = ide.command.toLowerCase()
       const isBatch = isWindows && (lower.endsWith('.cmd') || lower.endsWith('.bat'))
       const isMacBundle = isMac && lower.endsWith('.app')
 
+      // Normalise the folder arg's separators to the host's native style.
+      // OSC 7 emits POSIX paths even on Windows (`D:/foo/bar`) — most CLIs
+      // accept both, but native Windows installers / launchers occasionally
+      // mishandle forward slashes, so canonicalise to be safe.
+      const folderArg = isWindows ? cwd.replace(/\//g, '\\') : cwd
+
       let cmd: string
       let args: string[]
       if (isBatch) {
-        // Explicit cmd.exe so Node handles arg quoting via args[]; `shell:true`
-        // would force-stringify and lose every space in cwd.
-        cmd = 'cmd.exe'
-        args = ['/d', '/s', '/c', ide.command, cwd]
+        // Skip the cmd.exe → batch → exe chain when we can. The .cmd shim is
+        // a thin wrapper that ultimately spawns the GUI .exe with the same
+        // args; going through cmd.exe + batch parsing adds two layers where
+        // `stdio: 'ignore'` swallows errors and `detached: true` orphans the
+        // intermediate so we can't observe failure. Spawning the .exe
+        // directly removes both layers and gives us a real pid we can
+        // confirm started.
+        const exe = exeForShim(ide.command)
+        if (exe && /\.exe$/i.test(exe)) {
+          cmd = exe
+          args = [folderArg]
+        } else {
+          // No associated .exe found — fall back to the batch + cmd.exe path.
+          cmd = 'cmd.exe'
+          args = ['/d', '/s', '/c', ide.command, folderArg]
+        }
       } else if (isMacBundle) {
         // No CLI shim in the bundle — use `open -a` with the .app path.
         cmd = 'open'
-        args = ['-a', ide.command, cwd]
+        args = ['-a', ide.command, folderArg]
       } else {
         cmd = ide.command
-        args = [cwd]
+        args = [folderArg]
       }
+
+      // `windowsHide: true` translates to STARTF_USESHOWWINDOW + SW_HIDE in
+      // the CreateProcess STARTUPINFO. For *console* helpers (cmd.exe, the
+      // batch fallback) that's what we want — hide the flashing cmd window.
+      // For *GUI* targets (Code.exe, idea64.exe, …) Electron / many other
+      // GUI apps respect STARTUPINFO.nCmdShow and start with the main
+      // window hidden, which looks exactly like "click did nothing" — the
+      // process runs, single-instance IPC fires, but no visible window ever
+      // appears. So only set the flag on the shell-mediated paths.
+      const isViaShell = cmd === 'cmd.exe' || cmd === 'open'
+
+      // Dev-mode diagnostic: log what we're actually about to spawn. Visible
+      // in the terminal running `yarn dev` — invaluable when "nothing
+      // happens" because three layers of stdio:'ignore' hide the real cause.
+      console.log('[ide] openIde', { ideId, cmd, args, hideWindow: isViaShell })
 
       const proc = spawn(cmd, args, {
         detached: true,
         stdio: 'ignore',
-        windowsHide: true
+        windowsHide: isViaShell
+      })
+      console.log('[ide] spawned pid:', proc.pid)
+      // Also log the eventual exit. If Code.exe (or whatever) dies within a
+      // few ms it usually means single-instance IPC handed the request to an
+      // already-running invisible instance — also a windowsHide artefact.
+      proc.once('exit', (code, signal) => {
+        console.log('[ide] proc exited', { pid: proc.pid, code, signal })
       })
       let settled = false
       proc.once('error', (err) => {
         if (settled) return
         settled = true
-        resolve({ success: false, error: err.message })
+        // Append the launcher path so the renderer's ElMessage shows the
+        // exact path that failed — invaluable when detection picks up an
+        // unexpected sibling tool (bun/deno/some `code` shim).
+        resolve({ success: false, error: `${err.message}\n路径: ${ide.command}` })
       })
       proc.once('spawn', () => {
         if (settled) return
