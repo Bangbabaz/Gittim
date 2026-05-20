@@ -56,14 +56,22 @@ const branches = ref<
 >([])
 const switching = ref(false)
 const diffStats = ref({ added: 0, deleted: 0 })
+const showLocal = ref(true)
+const showRemote = ref(true)
 
-// Index of the first remote-only entry in `branches`. Used to paint a divider
-// above it in the dropdown. -1 if there are no locals OR no remote-only entries
-// (in either case there's nothing to separate, so no divider).
-const firstRemoteOnlyIdx = computed(() => {
-  if (!branches.value.some((b) => b.local)) return -1
-  return branches.value.findIndex((b) => !b.local)
-})
+const localBranches = computed(() => branches.value.filter((b) => b.local))
+const remoteBranches = computed(() => branches.value.filter((b) => b.remote))
+
+function toggleLocal(checked: boolean | string | number): void {
+  const v = Boolean(checked)
+  if (!v && !showRemote.value) return // keep last one checked
+  showLocal.value = v
+}
+function toggleRemote(checked: boolean | string | number): void {
+  const v = Boolean(checked)
+  if (!v && !showLocal.value) return
+  showRemote.value = v
+}
 
 // Generation counter: every refresh captures the current gen; a later refresh
 // or a checkout bumps the counter so the in-flight one knows to bail before
@@ -271,6 +279,16 @@ watch([wtFullPath, showWorktreeDialog], async () => {
     if (gen === wtCheckGen) wtPathExists.value = exists
   } catch {
     if (gen === wtCheckGen) wtPathExists.value = false
+  }
+})
+
+// Auto-check "新分支" when the base is a remote-only branch — these branches
+// have no local copy, so `git worktree add` needs `-b` to create one.
+watch(wtFromBranch, (name) => {
+  const isRemoteOnly = remoteBranches.value.some((b) => b.name === name)
+  if (isRemoteOnly && !wtNewBranch.value) {
+    wtNewBranch.value = true
+    if (!wtNameEdited.value) wtNewBranchName.value = name
   }
 })
 
@@ -652,22 +670,54 @@ const onPickIde = async (cmd: string): Promise<void> => {
       placeholder="(detached HEAD)"
       @change="onBranchChange"
     >
-      <el-option
-        v-for="(b, idx) in branches"
-        :key="b.name"
-        :label="b.name"
-        :value="b.name"
-        :class="{ 'first-remote': idx === firstRemoteOnlyIdx }"
-      >
-        <span class="br-opt">
-          <span class="br-name">{{ b.name }}</span>
-          <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
-            >工作树</span
+      <template #header>
+        <div class="branch-filter-header">
+          <el-checkbox
+            :model-value="showLocal"
+            size="small"
+            @update:model-value="toggleLocal"
           >
-          <span v-if="b.local" class="br-tag local">本地</span>
-          <span v-if="b.remote" class="br-tag remote">远程</span>
-        </span>
-      </el-option>
+            本地 ({{ localBranches.length }})
+          </el-checkbox>
+          <el-checkbox
+            :model-value="showRemote"
+            size="small"
+            @update:model-value="toggleRemote"
+          >
+            远程 ({{ remoteBranches.length }})
+          </el-checkbox>
+        </div>
+      </template>
+      <el-option-group v-if="showLocal" label="本地分支">
+        <el-option
+          v-for="b in localBranches"
+          :key="b.name"
+          :label="b.name"
+          :value="b.name"
+        >
+          <span class="br-opt">
+            <span class="br-name">{{ b.name }}</span>
+            <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
+              >工作树</span
+            >
+            <span class="br-tag local">本地</span>
+            <span v-if="b.remote" class="br-tag remote">远程</span>
+          </span>
+        </el-option>
+      </el-option-group>
+      <el-option-group v-if="showRemote && remoteBranches.length" label="远程分支">
+        <el-option
+          v-for="b in remoteBranches"
+          :key="b.name"
+          :label="b.name"
+          :value="b.name"
+        >
+          <span class="br-opt">
+            <span class="br-name">{{ b.name }}</span>
+            <span class="br-tag remote">远程</span>
+          </span>
+        </el-option>
+      </el-option-group>
     </el-select>
     <el-tooltip content="新建工作树" placement="bottom" :show-after="300">
       <button class="wt-btn" @click="openWorktreeDialog">+</button>
@@ -887,22 +937,54 @@ const onPickIde = async (cmd: string): Promise<void> => {
             size="small"
             filterable
           >
-            <el-option
-              v-for="(b, idx) in branches"
-              :key="b.name"
-              :label="b.name"
-              :value="b.name"
-              :class="{ 'first-remote': idx === firstRemoteOnlyIdx }"
-            >
-              <span class="br-opt">
-                <span class="br-name">{{ b.name }}</span>
-                <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
-                  >工作树</span
+            <template #header>
+              <div class="branch-filter-header">
+                <el-checkbox
+                  :model-value="showLocal"
+                  size="small"
+                  @update:model-value="toggleLocal"
                 >
-                <span v-if="b.local" class="br-tag local">本地</span>
-                <span v-if="b.remote" class="br-tag remote">远程</span>
-              </span>
-            </el-option>
+                  本地 ({{ localBranches.length }})
+                </el-checkbox>
+                <el-checkbox
+                  :model-value="showRemote"
+                  size="small"
+                  @update:model-value="toggleRemote"
+                >
+                  远程 ({{ remoteBranches.length }})
+                </el-checkbox>
+              </div>
+            </template>
+            <el-option-group v-if="showLocal" label="本地分支">
+              <el-option
+                v-for="b in localBranches"
+                :key="b.name"
+                :label="b.name"
+                :value="b.name"
+              >
+                <span class="br-opt">
+                  <span class="br-name">{{ b.name }}</span>
+                  <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
+                    >工作树</span
+                  >
+                  <span class="br-tag local">本地</span>
+                  <span v-if="b.remote" class="br-tag remote">远程</span>
+                </span>
+              </el-option>
+            </el-option-group>
+            <el-option-group v-if="showRemote && remoteBranches.length" label="远程分支">
+              <el-option
+                v-for="b in remoteBranches"
+                :key="b.name"
+                :label="b.name"
+                :value="b.name"
+              >
+                <span class="br-opt">
+                  <span class="br-name">{{ b.name }}</span>
+                  <span class="br-tag remote">远程</span>
+                </span>
+              </el-option>
+            </el-option-group>
           </el-select>
         </div>
 
