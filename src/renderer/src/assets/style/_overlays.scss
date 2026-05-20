@@ -14,12 +14,12 @@
 
 .context-menu {
   position: fixed;
-  background: var(--bg-menu);
-  border: 1px solid var(--border-menu);
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius-lg;
   padding: 4px;
   min-width: 220px;
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--el-box-shadow);
   @include ui-font;
 
   .cm-item {
@@ -30,7 +30,7 @@
     padding: 0 10px;
     border-radius: $radius;
     cursor: pointer;
-    color: var(--text-regular);
+    color: var(--el-text-color-regular);
     font-size: 13px;
     user-select: none;
 
@@ -40,7 +40,7 @@
     }
 
     &.disabled {
-      color: var(--text-faint);
+      color: var(--el-text-color-placeholder);
       pointer-events: none;
     }
   }
@@ -58,7 +58,7 @@
   .cm-shortcut {
     flex-shrink: 0;
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--el-text-color-secondary);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
   }
@@ -70,7 +70,7 @@
   .cm-divider {
     height: 1px;
     margin: 4px 6px;
-    background: var(--border-menu);
+    background: var(--el-border-color);
   }
 }
 
@@ -124,16 +124,16 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--dot-idle);
+    background: var(--el-text-color-placeholder);
     flex-shrink: 0;
 
     &.running {
-      background: var(--success);
-      box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
+      background: var(--el-color-success);
+      box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
     }
 
     &.failed {
-      background: var(--danger);
+      background: var(--el-color-danger);
     }
   }
 
@@ -234,8 +234,8 @@
     @include ui-font;
 
     &:not(.is-disabled):hover {
-      background: var(--el-color-primary);
-      color: #fff;
+      background: var(--el-fill-color);
+      color: var(--el-text-color-primary);
     }
 
     &.is-selected {
@@ -272,18 +272,18 @@
   flex-shrink: 0;
 
   &.local {
-    color: var(--tag-local-fg);
-    background: var(--tag-local-bg);
+    color: var(--el-color-success);
+    background: color-mix(in srgb, var(--el-color-success) 13%, transparent);
   }
 
   &.remote {
-    color: var(--tag-remote-fg);
-    background: var(--tag-remote-bg);
+    color: var(--el-color-primary);
+    background: color-mix(in srgb, var(--el-color-primary) 13%, transparent);
   }
 
   &.worktree {
-    color: var(--tag-worktree-fg);
-    background: var(--tag-worktree-bg);
+    color: var(--el-color-warning);
+    background: color-mix(in srgb, var(--el-color-warning) 13%, transparent);
   }
 }
 
@@ -297,12 +297,12 @@
 // --- Tasks drawer (el-drawer → body) -------------------------------------
 .tasks-drawer {
   &.el-drawer {
-    background: var(--bg-app);
+    background: var(--el-bg-color);
   }
 
   .el-drawer__body {
     padding: 0;
-    background: var(--bg-app);
+    background: var(--el-bg-color);
     // The shell sizes itself to 100% and scrolls internally (task list +
     // xterm log). Element Plus defaults the body to `overflow: auto`, so a
     // sub-pixel overflow leaks a tiny stray scroll — pin it like .diff-dialog.
@@ -316,18 +316,18 @@
 // --- Task manager dialog (el-dialog → body) ------------------------------
 .task-mgr-dialog {
   &.el-dialog {
-    background: var(--bg-app);
-    border: 1px solid var(--border);
+    background: var(--el-bg-color);
+    border: 1px solid var(--el-border-color);
   }
 
   .el-dialog__title {
-    color: var(--text-primary);
+    color: var(--el-text-color-primary);
     font-size: 14px;
     font-weight: 600;
   }
 
   .el-dialog__header {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--el-border-color);
     margin-right: 0;
     padding: 13px 16px 11px;
   }

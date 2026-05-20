@@ -563,7 +563,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   padding: 0;
-  background-color: var(--bg-app);
+  background-color: var(--el-bg-color);
   box-sizing: border-box;
   position: relative;
 }
@@ -576,13 +576,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-toolbar);
+  background: var(--el-fill-color-light);
   cursor: grab;
   -webkit-app-region: no-drag;
 }
 
 .pane-drag-strip:hover {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .pane-drag-strip:active {
@@ -593,7 +593,7 @@ onUnmounted(() => {
   width: 26px;
   height: 3px;
   border-radius: 2px;
-  background: var(--border-strong);
+  background: var(--el-border-color);
   opacity: 0.5;
   transition: opacity 0.1s;
 }

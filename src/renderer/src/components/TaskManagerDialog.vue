@@ -305,7 +305,7 @@ async function save(): Promise<void> {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--el-border-color);
 }
 
 .tm-list-head {
@@ -320,7 +320,7 @@ async function save(): Promise<void> {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .tm-add {
@@ -330,15 +330,15 @@ async function save(): Promise<void> {
   width: 24px;
   height: 24px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   cursor: pointer;
 }
 
 .tm-add:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 .tm-list-scroll {
@@ -348,7 +348,7 @@ async function save(): Promise<void> {
 }
 
 .tm-empty {
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-size: 12px;
   padding: 16px 4px;
 }
@@ -363,25 +363,25 @@ async function save(): Promise<void> {
 }
 
 .tm-item:hover {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .tm-item.active {
-  background: var(--bg-selected);
+  background: var(--el-color-primary-light-9);
 }
 
 .tm-item-label {
   flex: 1;
   min-width: 0;
   font-size: 12.5px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   @include ellipsis;
 }
 
 .tm-badge.new {
   font-size: 10px;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: var(--el-color-warning);
+  background: color-mix(in srgb, var(--el-color-warning) 13%, transparent);
   padding: 1px 5px;
   border-radius: $radius-sm;
   flex-shrink: 0;
@@ -391,7 +391,7 @@ async function save(): Promise<void> {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--warn);
+  background: var(--el-color-warning);
   flex-shrink: 0;
 }
 
@@ -403,7 +403,7 @@ async function save(): Promise<void> {
   height: 20px;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   border-radius: $radius-sm;
   flex-shrink: 0;
@@ -414,8 +414,8 @@ async function save(): Promise<void> {
 }
 
 .tm-del:hover {
-  background: color-mix(in srgb, var(--danger-strong) 27%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
+  color: var(--el-color-danger);
 }
 
 .tm-detail {
@@ -435,14 +435,14 @@ async function save(): Promise<void> {
 
 .tm-label {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .tm-input {
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-size: 13px;
   padding: 7px 9px;
   outline: none;
@@ -455,7 +455,7 @@ async function save(): Promise<void> {
 }
 
 .tm-input:focus {
-  border-color: var(--focus-ring);
+  border-color: var(--el-color-primary);
 }
 
 .tm-cwd-row {
@@ -474,15 +474,15 @@ async function save(): Promise<void> {
   justify-content: center;
   width: 34px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   cursor: pointer;
 }
 
 .tm-browse:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 .tm-scripts {
@@ -494,13 +494,13 @@ async function save(): Promise<void> {
 
 .tm-scripts-label {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .tm-chip {
-  background: var(--chip-bg);
-  border: 1px solid var(--chip-border);
-  color: var(--chip-fg);
+  background: color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+  color: var(--el-color-primary);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
@@ -508,7 +508,7 @@ async function save(): Promise<void> {
 }
 
 .tm-chip:hover {
-  background: var(--chip-bg-hover);
+  background: color-mix(in srgb, var(--el-color-primary) 33%, transparent);
 }
 
 .tm-actions {
@@ -521,13 +521,13 @@ async function save(): Promise<void> {
 
 .tm-hint {
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
 }
 
 .tm-save {
-  background: var(--primary-btn);
+  background: var(--el-color-primary);
   border: none;
-  color: var(--text-on-accent);
+  color: #fff;
   font-size: 13px;
   padding: 7px 20px;
   border-radius: $radius;
@@ -535,18 +535,18 @@ async function save(): Promise<void> {
 }
 
 .tm-save:hover:not(:disabled) {
-  background: var(--primary-btn-hover);
+  background: var(--el-color-primary-light-3);
 }
 
 .tm-save:disabled {
-  background: var(--bg-disabled);
-  color: var(--text-disabled);
+  background: var(--el-disabled-bg-color);
+  color: var(--el-text-color-disabled);
   cursor: not-allowed;
 }
 
 .tm-placeholder {
   margin: auto;
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
 }
 </style>

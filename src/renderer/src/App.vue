@@ -721,7 +721,7 @@ onUnmounted(() => {
               y="3"
               width="8"
               height="7"
-              fill="var(--bg-titlebar)"
+              fill="var(--el-bg-color)"
               stroke="currentColor"
             />
           </svg>
@@ -962,7 +962,7 @@ onUnmounted(() => {
 <style lang="scss">
 .title-bar {
   height: 32px;
-  background: var(--bg-titlebar);
+  background: var(--el-bg-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -979,7 +979,7 @@ onUnmounted(() => {
 }
 
 .title-bar-text {
-  color: var(--text-titlebar);
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   font-family: $font-ui;
 }
@@ -995,15 +995,15 @@ onUnmounted(() => {
   display: flex;
   margin-left: 4px;
   padding-left: 4px;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--el-border-color);
 }
 
 .tb-settings {
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .tb-settings:hover {
-  color: var(--text-bright);
+  color: var(--el-text-color-primary);
 }
 
 .tb-btn {
@@ -1011,7 +1011,7 @@ onUnmounted(() => {
   height: 24px;
   border: none;
   background: none;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1020,19 +1020,19 @@ onUnmounted(() => {
 }
 
 .tb-btn:hover {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .tb-close:hover {
-  background: var(--danger-strong);
-  color: var(--text-on-accent);
+  background: var(--el-color-danger);
+  color: #fff;
 }
 
 .layout-root {
   position: relative;
   width: 100vw;
   height: calc(100vh - #{$titlebar-h});
-  background: var(--bg-app);
+  background: var(--el-bg-color);
 }
 
 .layout-root.dragging {
@@ -1049,7 +1049,7 @@ onUnmounted(() => {
 .pane-drag-source {
   position: absolute;
   z-index: 2;
-  background: var(--bg-app);
+  background: var(--el-bg-color);
   opacity: 0.45;
   pointer-events: none;
 }
@@ -1057,8 +1057,8 @@ onUnmounted(() => {
 .pane-drop-indicator {
   position: absolute;
   z-index: 3;
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  border: 2px solid var(--el-color-primary);
   border-radius: 4px;
   pointer-events: none;
   transition:
@@ -1077,12 +1077,12 @@ onUnmounted(() => {
 }
 
 .pane-slot.active {
-  border-color: var(--accent);
+  border-color: var(--el-color-primary);
 }
 
 .divider {
   position: absolute;
-  background: var(--border);
+  background: var(--el-border-color);
   z-index: 1;
 }
 
@@ -1098,11 +1098,11 @@ onUnmounted(() => {
 
 .settings-drawer .el-drawer__body {
   padding: 0;
-  background: var(--bg-app);
+  background: var(--el-bg-color);
 }
 
 .settings-drawer.el-drawer {
-  background: var(--bg-app);
+  background: var(--el-bg-color);
 }
 
 .settings-layout {
@@ -1116,8 +1116,8 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
-  border-right: 1px solid var(--border);
+  background: var(--el-bg-color-overlay);
+  border-right: 1px solid var(--el-border-color);
   padding: 14px 0 14px 0;
 }
 
@@ -1126,7 +1126,7 @@ onUnmounted(() => {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   padding: 0 18px 12px 18px;
 }
 
@@ -1146,19 +1146,19 @@ onUnmounted(() => {
   padding: 6px 12px;
   background: transparent;
   border: none;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   font-size: 13px;
   cursor: pointer;
   border-radius: 4px;
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .settings-nav-item.active {
-  background: var(--accent);
-  color: var(--text-on-accent);
+  background: var(--el-color-primary);
+  color: #fff;
 }
 
 .settings-nav-icon {
@@ -1187,11 +1187,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .settings-section-icon {
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .settings-section-title {
@@ -1200,7 +1200,7 @@ onUnmounted(() => {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .settings-item {
@@ -1219,13 +1219,13 @@ onUnmounted(() => {
 
 .settings-item-label {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
 }
 
 .settings-item-desc {
   margin: 0;
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   line-height: 1.55;
 }
 
@@ -1233,8 +1233,8 @@ onUnmounted(() => {
 .font-size-control {
   display: flex;
   align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
   border-radius: 4px;
   padding: 2px;
   gap: 2px;
@@ -1248,7 +1248,7 @@ onUnmounted(() => {
   justify-content: center;
   background: transparent;
   border: none;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-size: 14px;
   cursor: pointer;
   border-radius: 3px;
@@ -1256,11 +1256,11 @@ onUnmounted(() => {
 }
 
 .fs-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .fs-btn:disabled {
-  color: var(--text-disabled);
+  color: var(--el-text-color-disabled);
   cursor: not-allowed;
 }
 
@@ -1268,7 +1268,7 @@ onUnmounted(() => {
   min-width: 28px;
   text-align: center;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1280,7 +1280,7 @@ onUnmounted(() => {
   justify-content: center;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   border-radius: 3px;
   padding: 0;
@@ -1288,8 +1288,8 @@ onUnmounted(() => {
 }
 
 .fs-reset:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 /* About tab */
@@ -1302,13 +1302,13 @@ onUnmounted(() => {
 
 .about-logo {
   font-size: 22px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-weight: 600;
   letter-spacing: 1px;
 }
 
 .about-tagline {
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 
@@ -1328,13 +1328,13 @@ onUnmounted(() => {
 }
 
 .about-row dt {
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-weight: normal;
 }
 
 .about-row dd {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .about-row .mono {

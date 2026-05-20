@@ -449,8 +449,8 @@ function closeLogSearch(): void {
   height: $titlebar-h;
   flex-shrink: 0;
   padding: 0 6px 0 14px;
-  background: var(--bg-titlebar);
-  border-bottom: 1px solid var(--border);
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color);
   user-select: none;
   -webkit-app-region: drag;
 }
@@ -458,7 +458,7 @@ function closeLogSearch(): void {
 .tasks-header-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
 }
 
 .tasks-header-ops {
@@ -474,15 +474,15 @@ function closeLogSearch(): void {
   height: 22px;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   border-radius: $radius;
   -webkit-app-region: no-drag;
 }
 
 .hdr-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 .tasks-layout {
@@ -496,8 +496,8 @@ function closeLogSearch(): void {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
-  border-right: 1px solid var(--border);
+  background: var(--el-bg-color-overlay);
+  border-right: 1px solid var(--el-border-color);
 }
 
 .task-list {
@@ -507,7 +507,7 @@ function closeLogSearch(): void {
 }
 
 .task-empty {
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-size: 12px;
   text-align: center;
   padding: 24px 0;
@@ -523,11 +523,11 @@ function closeLogSearch(): void {
 }
 
 .task-row:hover {
-  background: var(--bg-hover);
+  background: var(--el-fill-color);
 }
 
 .task-row.active {
-  background: var(--bg-selected);
+  background: var(--el-color-primary-light-9);
 }
 
 .status-dot {
@@ -535,20 +535,20 @@ function closeLogSearch(): void {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: var(--dot-idle);
+  background: var(--el-text-color-placeholder);
 }
 
 .status-dot.running {
-  background: var(--success);
-  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
+  background: var(--el-color-success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
 }
 
 .status-dot.failed {
-  background: var(--danger);
+  background: var(--el-color-danger);
 }
 
 .status-dot.exited {
-  background: var(--dot-idle);
+  background: var(--el-text-color-placeholder);
 }
 
 .task-meta {
@@ -558,13 +558,13 @@ function closeLogSearch(): void {
 
 .task-name {
   font-size: 12.5px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   @include ellipsis;
 }
 
 .task-cmd {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   @include ellipsis;
   font-family: $font-mono;
 }
@@ -574,7 +574,7 @@ function closeLogSearch(): void {
   align-items: center;
   gap: 4px;
   margin-top: 2px;
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
 }
 
 .task-cwd-icon {
@@ -608,7 +608,7 @@ function closeLogSearch(): void {
   padding: 0 5px;
   background: transparent;
   border: none;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   cursor: pointer;
   border-radius: $radius-sm;
   font-size: 11px;
@@ -616,13 +616,13 @@ function closeLogSearch(): void {
 }
 
 .op-btn:hover {
-  background: color-mix(in srgb, var(--text-bright) 10%, transparent);
-  color: var(--text-bright);
+  background: color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+  color: var(--el-text-color-primary);
 }
 
 .op-btn.danger:hover {
-  background: color-mix(in srgb, var(--danger-strong) 27%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
+  color: var(--el-color-danger);
 }
 
 /* Per-row command buttons: unified white icons on semantic filled
@@ -633,14 +633,14 @@ function closeLogSearch(): void {
    below stay filled with white icons on their saturated fills. */
 .task-ops .op-btn {
   background: none;
-  border: 1px solid var(--border-strong);
-  color: var(--text-regular);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
 }
 
 .task-ops .op-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-muted);
-  color: var(--text-bright);
+  background: var(--el-fill-color);
+  border-color: var(--el-text-color-secondary);
+  color: var(--el-text-color-primary);
 }
 
 .task-ops .op-btn.run,
@@ -650,25 +650,25 @@ function closeLogSearch(): void {
 .task-ops .op-btn.stop:hover,
 .task-ops .op-btn.danger:hover {
   border: none;
-  color: var(--text-on-accent);
+  color: #fff;
 }
 
 .task-ops .op-btn.run {
-  background: var(--success-solid);
+  background: var(--el-color-success-light-3);
 }
 
 .task-ops .op-btn.run:hover {
-  background: var(--success-solid-hover);
+  background: var(--el-color-success-light-5);
 }
 
 .task-ops .op-btn.stop,
 .task-ops .op-btn.danger {
-  background: var(--danger-solid);
+  background: var(--el-color-danger-light-3);
 }
 
 .task-ops .op-btn.stop:hover,
 .task-ops .op-btn.danger:hover {
-  background: var(--danger-solid-hover);
+  background: var(--el-color-danger-light-5);
 }
 
 .tasks-log {
@@ -676,7 +676,7 @@ function closeLogSearch(): void {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-app);
+  background: var(--el-bg-color);
 }
 
 .log-head {
@@ -684,16 +684,16 @@ function closeLogSearch(): void {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .log-head-icon {
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .log-head-title {
   font-size: 12.5px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   flex-shrink: 0;
 }
 
@@ -701,8 +701,8 @@ function closeLogSearch(): void {
   font-size: 11px;
   padding: 1px 7px;
   border-radius: $radius-sm;
-  background: color-mix(in srgb, var(--dot-idle) 20%, transparent);
-  color: var(--text-muted);
+  background: color-mix(in srgb, var(--el-text-color-placeholder) 20%, transparent);
+  color: var(--el-text-color-secondary);
 }
 
 .log-head-cwd {
@@ -712,7 +712,7 @@ function closeLogSearch(): void {
   flex: 1;
   min-width: 0;
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-family: $font-mono;
   @include ellipsis;
 }
@@ -722,13 +722,13 @@ function closeLogSearch(): void {
 }
 
 .log-head-status.running {
-  background: color-mix(in srgb, var(--success) 13%, transparent);
-  color: var(--success);
+  background: color-mix(in srgb, var(--el-color-success) 13%, transparent);
+  color: var(--el-color-success);
 }
 
 .log-head-status.failed {
-  background: color-mix(in srgb, var(--danger) 13%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
+  color: var(--el-color-danger);
 }
 
 .log-head-ops {

@@ -177,7 +177,7 @@ function jumpTo(id: string): void {
 .dv-sidebar {
   width: 250px;
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--el-border-color);
   overflow-y: auto;
   padding: 8px 6px;
   display: flex;
@@ -189,7 +189,7 @@ function jumpTo(id: string): void {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   padding: 4px 8px 8px;
   @include ui-font;
 }
@@ -207,11 +207,11 @@ function jumpTo(id: string): void {
   text-align: left;
 
   &:hover {
-    background: var(--bg-hover);
+    background: var(--el-fill-color);
   }
 
   &.active {
-    background: var(--bg-selected);
+    background: var(--el-color-primary-light-9);
   }
 }
 
@@ -238,8 +238,8 @@ function jumpTo(id: string): void {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  background: var(--bg-code-head);
-  border-bottom: 1px solid var(--border-code-soft);
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-light);
   @include ui-font;
 }
 
@@ -252,30 +252,30 @@ function jumpTo(id: string): void {
 }
 
 .st-new {
-  color: var(--diff-add-fg);
-  background: color-mix(in srgb, var(--diff-add-fg) 15%, transparent);
+  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
+  background: var(--el-color-success-light-8);
 }
 
 .st-del {
-  color: var(--diff-del-fg);
-  background: color-mix(in srgb, var(--diff-del-fg) 15%, transparent);
+  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
+  background: var(--el-color-danger-light-8);
 }
 
 .st-ren {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-8);
 }
 
 .st-mod {
-  color: var(--info);
-  background: color-mix(in srgb, var(--info) 15%, transparent);
+  color: var(--el-color-info);
+  background: var(--el-color-info-light-8);
 }
 
 .dv-file-name {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   @include ellipsis;
   font-family: $font-mono;
 }
@@ -288,11 +288,11 @@ function jumpTo(id: string): void {
 }
 
 .dv-add {
-  color: var(--diff-add-fg);
+  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
 }
 
 .dv-del {
-  color: var(--diff-del-fg);
+  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
 }
 
 /* Side-by-side grid: [old#][old code][new#][new code] */
@@ -306,8 +306,8 @@ function jumpTo(id: string): void {
 .dv-hunk {
   grid-column: 1 / -1;
   padding: 2px 12px;
-  color: var(--diff-hunk-fg);
-  background: var(--diff-hunk-bg);
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -315,9 +315,9 @@ function jumpTo(id: string): void {
 .dv-num {
   text-align: right;
   padding: 0 0.6em;
-  color: var(--diff-num-fg);
-  background: var(--bg-code);
-  border-right: 1px solid var(--border-code);
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color-lighter);
+  border-right: 1px solid var(--el-border-color);
   user-select: none;
   white-space: nowrap;
 }
@@ -327,27 +327,27 @@ function jumpTo(id: string): void {
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
 }
 
 .dv-num.del,
 .dv-code.del {
-  background: var(--diff-del-bg);
+  background: var(--el-color-danger-light-5);
 }
 
 .dv-num.ins,
 .dv-code.ins {
-  background: var(--diff-add-bg);
+  background: var(--el-color-success-light-5);
 }
 
 .dv-num.empty,
 .dv-code.empty {
-  background: var(--diff-empty-bg);
+  background: var(--el-fill-color-light);
 }
 
 .dv-binary {
   padding: 16px 12px;
-  color: var(--diff-hunk-fg);
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   @include ui-font;
 }

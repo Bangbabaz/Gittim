@@ -1,6 +1,3 @@
-// Single global style entry. main.ts imports this once. Order matters:
-// tokens define the CSS custom properties everything else references.
-@use 'tokens';
+// Single global style entry. main.ts imports this once.
 @use 'base';
-@use 'element';
 @use 'overlays';

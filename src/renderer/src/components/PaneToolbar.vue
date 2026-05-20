@@ -1121,8 +1121,8 @@ const onPickIde = async (cmd: string): Promise<void> => {
 <style scoped lang="scss">
 .wt-btn {
   background: none;
-  border: 1px solid var(--border-strong);
-  color: var(--text-regular);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
   width: 20px;
   height: 20px;
   border-radius: $radius-sm;
@@ -1138,16 +1138,16 @@ const onPickIde = async (cmd: string): Promise<void> => {
 }
 
 .wt-btn:hover {
-  border-color: var(--text-muted);
-  color: var(--text-bright);
-  background: var(--bg-hover);
+  border-color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
+  background: var(--el-fill-color);
 }
 
 /* Action buttons: white icon on a semantic filled background, unified look. */
 .run-btn {
-  background: var(--success-solid);
+  background: var(--el-color-success-light-3);
   border: none;
-  color: var(--text-on-accent);
+  color: #fff;
   width: 20px;
   height: 20px;
   border-radius: $radius-sm;
@@ -1163,16 +1163,16 @@ const onPickIde = async (cmd: string): Promise<void> => {
 }
 
 .run-btn:hover {
-  background: var(--success-solid-hover);
-  color: var(--text-on-accent);
+  background: var(--el-color-success-light-5);
+  color: #fff;
 }
 
 .run-btn.stop {
-  background: var(--danger-solid);
+  background: var(--el-color-danger-light-3);
 }
 
 .run-btn.stop:hover {
-  background: var(--danger-solid-hover);
+  background: var(--el-color-danger-light-5);
 }
 
 /* View tasks — neutral, not a semantic run/stop action. Outlined (like the
@@ -1180,14 +1180,14 @@ const onPickIde = async (cmd: string): Promise<void> => {
    with the base .run-btn's white icon is invisible in the light theme. */
 .run-btn.view {
   background: none;
-  border: 1px solid var(--border-strong);
-  color: var(--text-regular);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
 }
 
 .run-btn.view:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-muted);
-  color: var(--text-bright);
+  background: var(--el-fill-color);
+  border-color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
 }
 
 /* Command picker (el-dropdown custom trigger) */
@@ -1199,9 +1199,9 @@ const onPickIde = async (cmd: string): Promise<void> => {
   height: 20px;
   padding: 0 6px;
   background: none;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius-sm;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   font-size: 12px;
   cursor: pointer;
   margin-left: 2px;
@@ -1209,8 +1209,8 @@ const onPickIde = async (cmd: string): Promise<void> => {
 }
 
 .cmd-pick:hover {
-  border-color: var(--text-muted);
-  background: var(--bg-hover);
+  border-color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
 }
 
 .cmd-pick-name {
@@ -1230,22 +1230,22 @@ const onPickIde = async (cmd: string): Promise<void> => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--dot-idle);
+  background: var(--el-text-color-placeholder);
   flex-shrink: 0;
 }
 
 .status-dot.running {
-  background: var(--success);
-  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 53%, transparent);
+  background: var(--el-color-success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
 }
 
 .status-dot.failed {
-  background: var(--danger);
+  background: var(--el-color-danger);
 }
 
 .status-dot.none {
   background: transparent;
-  border: 1px solid var(--dot-idle);
+  border: 1px solid var(--el-text-color-placeholder);
 }
 
 .wt-form {
@@ -1262,7 +1262,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .wt-label {
   font-size: 12px;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   width: 52px;
   flex-shrink: 0;
   text-align: right;
@@ -1289,9 +1289,9 @@ const onPickIde = async (cmd: string): Promise<void> => {
 .wt-warn {
   margin-top: 12px;
   font-size: 12px;
-  color: var(--warn-2);
-  background: color-mix(in srgb, var(--warn-2) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warn-2) 27%, transparent);
+  color: var(--el-color-warning);
+  background: color-mix(in srgb, var(--el-color-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-warning) 27%, transparent);
   padding: 6px 10px;
   border-radius: $radius;
   word-break: break-all;
@@ -1321,11 +1321,11 @@ const onPickIde = async (cmd: string): Promise<void> => {
   width: 24px;
   height: 20px;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--el-border-color);
   border-right: none;
   border-radius: $radius-sm 0 0 $radius-sm;
-  background: var(--bg-input);
-  color: var(--text-regular);
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-regular);
   cursor: pointer;
   flex-shrink: 0;
   transition: filter 0.12s;
@@ -1358,7 +1358,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .ide-chip.has-real-icon {
   background: transparent !important;
-  border-color: var(--border-strong);
+  border-color: var(--el-border-color);
 }
 
 .ide-chip-letter {
@@ -1377,18 +1377,18 @@ const onPickIde = async (cmd: string): Promise<void> => {
   width: 14px;
   height: 20px;
   padding: 0;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
   border-radius: 0 $radius-sm $radius-sm 0;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .ide-caret:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-  border-color: var(--text-muted);
+  background: var(--el-fill-color);
+  color: var(--el-color-primary);
+  border-color: var(--el-text-color-secondary);
 }
 
 .ide-caret:disabled {
@@ -1450,36 +1450,36 @@ const onPickIde = async (cmd: string): Promise<void> => {
 }
 
 .diff-stats:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-hover);
+  border-color: var(--el-border-color);
+  background: var(--el-fill-color);
 }
 
 .diff-added {
-  color: var(--diff-add-fg);
+  color: var(--el-color-success);
 }
 
 .diff-deleted {
-  color: var(--diff-del-fg);
+  color: var(--el-color-danger);
 }
 
 /* Branch-switch confirm */
 .switch-msg {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   line-height: 1.7;
 }
 
 .switch-msg code {
   font-family: $font-mono;
   font-size: 12px;
-  background: var(--bg-input);
+  background: var(--el-fill-color-blank);
   padding: 1px 5px;
   border-radius: $radius-sm;
 }
 
 /* Worktree management list */
 .wt-manage-empty {
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
   padding: 24px 4px;
   text-align: center;
@@ -1498,8 +1498,8 @@ const onPickIde = async (cmd: string): Promise<void> => {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: var(--bg-row);
-  border: 1px solid var(--border);
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius-md;
 }
 
@@ -1510,7 +1510,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .wt-manage-path {
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-family: $font-mono;
   @include ellipsis;
 }
@@ -1524,7 +1524,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .wt-manage-branch {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
 }
 
 .wt-del-btn {
@@ -1535,15 +1535,15 @@ const onPickIde = async (cmd: string): Promise<void> => {
   height: 28px;
   flex-shrink: 0;
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--danger-strong) 40%, transparent);
-  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--el-color-danger) 40%, transparent);
+  color: var(--el-color-danger);
   border-radius: $radius;
   cursor: pointer;
 }
 
 .wt-del-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger-strong) 13%, transparent);
-  border-color: var(--danger-strong);
+  background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
+  border-color: var(--el-color-danger);
 }
 
 .wt-del-btn:disabled {
@@ -1553,13 +1553,13 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .wt-main-hint {
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   flex-shrink: 0;
 }
 
 /* Diff viewer */
 .diff-state {
-  color: var(--text-faint);
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
   padding: 40px 4px;
   text-align: center;
@@ -1567,8 +1567,8 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .diff-trunc {
   font-size: 12px;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--el-color-warning);
+  background: color-mix(in srgb, var(--el-color-warning) 10%, transparent);
   padding: 6px 10px;
   margin: 8px 12px 0;
   border-radius: $radius;
@@ -1582,14 +1582,14 @@ const onPickIde = async (cmd: string): Promise<void> => {
   gap: 4px;
   height: 24px;
   padding: 0 8px;
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border);
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color);
   flex-shrink: 0;
   user-select: none;
 }
 
 .git-icon {
-  color: var(--git);
+  color: var(--el-color-danger);
   flex-shrink: 0;
 }
 

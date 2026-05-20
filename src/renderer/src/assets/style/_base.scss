@@ -31,8 +31,8 @@ body {
 
 body {
   min-height: 100vh;
-  color: var(--text-primary);
-  background: var(--bg-app);
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
   line-height: 1.6;
   font-family: $font-ui;
   text-rendering: optimizeLegibility;

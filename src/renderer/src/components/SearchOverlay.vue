@@ -115,26 +115,26 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--bg-toolbar);
-  border: 1px solid var(--border);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius;
   padding: 4px 6px;
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--el-box-shadow-light);
 }
 
 .search-input {
   width: 220px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
   border-radius: $radius-sm;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
   font-size: 12px;
   font-family: $font-ui;
   padding: 3px 6px;
   outline: none;
 
   &:focus {
-    border-color: var(--focus-ring);
+    border-color: var(--el-color-primary);
   }
 }
 
@@ -142,24 +142,24 @@ onBeforeUnmount(() => {
   min-width: 44px;
   text-align: center;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
 
   &.none {
-    color: var(--danger);
+    color: var(--el-color-danger);
   }
 }
 
 .search-btn {
   @include icon-btn(22px);
   border: 1px solid transparent;
-  color: var(--text-regular);
+  color: var(--el-text-color-regular);
   font-size: 13px;
   line-height: 1;
 
   &:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
+    background: var(--el-fill-color);
+    border-color: var(--el-border-color);
   }
 }
 </style>

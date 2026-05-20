@@ -40,7 +40,7 @@
 // Standard focus treatment for text inputs (border turns accent).
 @mixin focus-accent {
   &:focus {
-    border-color: var(--focus-ring);
+    border-color: var(--el-color-primary);
   }
 }
 
