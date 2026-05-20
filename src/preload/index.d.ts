@@ -129,6 +129,7 @@ declare global {
         force?: boolean
       ) => Promise<{ id: string; name: string; command: string; iconDataUrl?: string }[]>
       ideOpen: (ideId: string, cwd: string) => Promise<{ success: boolean; error?: string }>
+      openFolder: (cwd: string) => Promise<boolean>
       pathExists: (p: string) => Promise<boolean>
       onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => () => void
       onTaskStatus: (cb: (meta: TaskMeta) => void) => () => void

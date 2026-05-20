@@ -144,6 +144,62 @@
   }
 }
 
+// --- IDE picker dropdown (el-dropdown → body) ----------------------------
+.ide-pick-dropdown {
+  .el-dropdown-menu {
+    background: var(--bg-menu);
+    border: 1px solid var(--border-menu);
+    padding: 4px;
+  }
+
+  .el-dropdown-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-regular);
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: $radius;
+    line-height: 1.4;
+
+    &:not(.is-disabled):hover {
+      background: var(--bg-menu-hover);
+      color: var(--text-menu-hover);
+    }
+
+    &.picked {
+      color: var(--text-bright);
+    }
+
+    &--divided {
+      border-top: 1px solid var(--border-menu);
+      margin-top: 4px;
+
+      &::before {
+        display: none;
+      }
+    }
+
+    &.cmd-empty {
+      color: var(--text-faint);
+      font-size: 11px;
+      background: transparent;
+      cursor: default;
+
+      &:hover {
+        background: transparent;
+        color: var(--text-faint);
+      }
+    }
+  }
+
+  .td-label {
+    flex: 1;
+    min-width: 0;
+    @include ellipsis;
+  }
+}
+
 // --- Branch select dropdown (el-select → body) ---------------------------
 .branch-select-dropdown {
   &.el-popper {

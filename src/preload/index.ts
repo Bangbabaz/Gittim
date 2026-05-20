@@ -166,6 +166,7 @@ const api = {
     >,
   ideOpen: (ideId: string, cwd: string) =>
     ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<{ success: boolean; error?: string }>,
+  openFolder: (cwd: string) => ipcRenderer.invoke('open-folder', cwd) as Promise<boolean>,
   pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
   onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => {
     const listener = (_e: IpcRendererEvent, p: { id: string; chunk: string }): void => cb(p)

@@ -9,7 +9,7 @@ import {
   ChevronDown,
   FolderGit2,
   Trash2,
-  ExternalLink,
+  FolderClosed,
   RefreshCw
 } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -619,7 +619,8 @@ async function openWithIde(id: string): Promise<void> {
 // "重新检测" entry so the user has a path forward.
 const openDefaultIde = async (): Promise<void> => {
   if (!defaultIde.value) {
-    ElMessage.warning('未检测到任何 IDE，请点旁边的下拉箭头重新检测')
+    if (!props.cwd) return
+    await window.api.openFolder(props.cwd)
     return
   }
   await openWithIde(defaultIde.value.id)
@@ -771,7 +772,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
          auto so they (and the diff badge after) anchor to the right. -->
     <div class="ide-group">
       <el-tooltip
-        :content="defaultIde ? `在 ${defaultIde.name} 中打开` : '在 IDE 中打开'"
+        :content="defaultIde ? `在 ${defaultIde.name} 中打开` : '在文件管理器中打开'"
         placement="bottom"
         :show-after="300"
       >
@@ -809,7 +810,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
           <span v-else-if="defaultIdeIcon" class="ide-chip-letter">
             {{ defaultIdeIcon.letter }}
           </span>
-          <ExternalLink v-else :size="13" />
+          <FolderClosed v-else :size="13" />
         </button>
       </el-tooltip>
       <el-dropdown

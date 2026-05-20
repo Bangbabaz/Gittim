@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join, dirname, basename } from 'path'
 import { app } from 'electron'
 
@@ -536,6 +536,61 @@ function exeForShim(shim: string): string | null {
   return null
 }
 
+/**
+ * Parse a `.cmd` / `.bat` shim to extract the actual .exe path it delegates to.
+ * Handles two common patterns:
+ *   - JetBrains Toolbox: `set "IDE_DIR=C:\..."` + `"%IDE_DIR%\bin\<stem>64.exe"`
+ *   - Generic: any `"...\xxx.exe"` reference that exists on disk
+ */
+function exeFromBatchFile(shim: string): string | null {
+  try {
+    const content = readFileSync(shim, 'utf-8')
+    // JetBrains Toolbox: `set "IDE_DIR=<path>"`
+    const dirMatch = content.match(/set\s+"IDE_DIR=([^"\r\n]+)"/i)
+    if (dirMatch) {
+      const stem = basename(shim).replace(/\.(cmd|bat)$/i, '')
+      const exe = join(dirMatch[1], 'bin', `${stem}64.exe`)
+      if (existsSync(exe)) return exe
+    }
+    // Generic: any quoted .exe path that exists
+    const exeMatch = content.match(/"([^"\r\n]+\.exe)"/i)
+    if (exeMatch && existsSync(exeMatch[1])) return exeMatch[1]
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve a launcher path to a direct .exe (Windows only).
+ *
+ * Strategies in order:
+ *   1. Already .exe → pass through
+ *   2. Candidate's launcherRelPath → exeRelPath (structural: bin/code.cmd → Code.exe)
+ *   3. Hardcoded layout patterns (exeForShim)
+ *   4. Parse the .cmd/.bat file for embedded exe references
+ *   5. Return null — caller falls back to cmd.exe
+ */
+function resolveShimToExe(shim: string, candidateId: string): string | null {
+  if (/\.exe$/i.test(shim)) return shim
+
+  const c = candidates().find((c) => c.id === candidateId)
+  if (c?.launcherRelPath && c?.exeRelPath) {
+    const normLauncher = c.launcherRelPath.replace(/\//g, '\\')
+    const normShim = shim.replace(/\//g, '\\')
+    if (normShim.endsWith('\\' + normLauncher) || normShim === normLauncher) {
+      const root = normShim.slice(0, -normLauncher.length)
+      const exePath = join(root, c.exeRelPath.replace(/\//g, '\\'))
+      if (existsSync(exePath)) return exePath
+    }
+  }
+
+  const fromPatterns = exeForShim(shim)
+  if (fromPatterns && /\.exe$/i.test(fromPatterns)) return fromPatterns
+
+  return exeFromBatchFile(shim)
+}
+
 async function extractIcon(command: string): Promise<string | undefined> {
   try {
     // Resolve the path whose icon we actually want. Letting `getFileIcon`
@@ -595,7 +650,10 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
     for (const bin of c.bins) {
       const p = await findInPath(bin)
       if (p) {
-        path = p
+        // Resolve .cmd/.bat shims to their .exe immediately so the launcher
+        // stored in `ide.command` is always a direct exe. This keeps openIde
+        // simple: spawn the exe directly, no cmd.exe middleman.
+        path = resolveShimToExe(p, c.id) || p
         break
       }
     }
@@ -657,10 +715,10 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
 }
 
 /**
- * Launch the picked IDE on `cwd`. Windows .cmd/.bat shims go through cmd.exe
- * (never `shell: true` — that triggers Windows quoting bugs around spaces;
- * see CVE-2024-27980). macOS .app bundles go through `open -a` so finder
- * does the right thing whether or not a CLI shim exists in the bundle.
+ * Launch the picked IDE on `cwd`. Detection (detectIdes) resolves launcher
+ * paths to .exe on Windows so we can spawn the GUI process directly without
+ * cmd.exe middleman — no flashing console, no orphan intermediates.
+ * macOS .app bundles go through `open -a` so Finder does the right thing.
  * Detached + stdio 'ignore' so closing Gittim doesn't drag the IDE down.
  */
 export function openIde(ideId: string, cwd: string): Promise<{ success: boolean; error?: string }> {
@@ -695,19 +753,14 @@ export function openIde(ideId: string, cwd: string): Promise<{ success: boolean;
       let cmd: string
       let args: string[]
       if (isBatch) {
-        // Skip the cmd.exe → batch → exe chain when we can. The .cmd shim is
-        // a thin wrapper that ultimately spawns the GUI .exe with the same
-        // args; going through cmd.exe + batch parsing adds two layers where
-        // `stdio: 'ignore'` swallows errors and `detached: true` orphans the
-        // intermediate so we can't observe failure. Spawning the .exe
-        // directly removes both layers and gives us a real pid we can
-        // confirm started.
-        const exe = exeForShim(ide.command)
+        // Detection should have already resolved .cmd → .exe via
+        // resolveShimToExe. If we still see a .cmd here, try one last
+        // resolution; fall back to cmd.exe only when nothing else works.
+        const exe = resolveShimToExe(ide.command, ideId)
         if (exe && /\.exe$/i.test(exe)) {
           cmd = exe
           args = [folderArg]
         } else {
-          // No associated .exe found — fall back to the batch + cmd.exe path.
           cmd = 'cmd.exe'
           args = ['/d', '/s', '/c', ide.command, folderArg]
         }

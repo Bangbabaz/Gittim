@@ -40,6 +40,7 @@ const SUBLIME_PATH = 'M20.4 3.6L4 9.1v3.2l16.4-5.5V3.6zM3.6 11.5v3.2L20 20.4v-3.
 // Zed — angled Z inside a square.
 const ZED_PATH = 'M3 3h18v3L9 18h12v3H3v-3L15 6H3V3z'
 
+
 /**
  * id → icon registry. IDs match src/main/ide.ts CANDIDATES.
  *
