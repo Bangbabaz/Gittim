@@ -104,6 +104,19 @@ const effectiveShortcuts = computed(() => ({
   ...shortcutOverrides.value
 }))
 
+// 内部 binding 字符串统一用 'Ctrl' 表达"主修饰键"，UI 显示按平台翻译：
+// mac 上的 ⌘⇧⌥ 比文字 "Ctrl/Shift/Alt" 更符合用户习惯且省横向空间。
+const displayShortcutParts = (combo: string): string[] => {
+  const parts = combo.split('+')
+  if (!isMac.value) return parts
+  return parts.map((p) => {
+    if (p === 'Ctrl') return '⌘'
+    if (p === 'Shift') return '⇧'
+    if (p === 'Alt') return '⌥'
+    return p
+  })
+}
+
 const startRecording = (action: string): void => {
   recordingAction.value = action
 }
@@ -128,8 +141,9 @@ const onRecordingKeydown = (e: KeyboardEvent): void => {
   // Ignore standalone modifier presses
   if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return
 
-  // Require at least Ctrl or Alt
-  if (!e.ctrlKey && !e.altKey) return
+  // Require at least Ctrl/Cmd or Alt（mac 上的 Cmd = metaKey，eventToShortcut
+  // 会把它折叠成 'Ctrl'，所以这里也要让 metaKey 通过录制入口）
+  if (!e.ctrlKey && !e.metaKey && !e.altKey) return
 
   const shortcut = eventToShortcut(e)
   const targetAction = recordingAction.value
@@ -1005,7 +1019,7 @@ onUnmounted(() => {
                       @click="startRecording(def.action)"
                     >
                       <span
-                        v-for="(part, i) in effectiveShortcuts[def.action].split('+')"
+                        v-for="(part, i) in displayShortcutParts(effectiveShortcuts[def.action])"
                         :key="i"
                         class="shortcut-key-chip"
                       >

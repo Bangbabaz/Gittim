@@ -54,7 +54,11 @@ function codeToKey(code: string): string | null {
 
 export function eventToShortcut(e: KeyboardEvent): string {
   const parts: string[] = []
-  if (e.ctrlKey) parts.push('Ctrl')
+  // macOS 的 Cmd（metaKey）等价于 win/linux 的 Ctrl —— 统一报告为 'Ctrl'，
+  // 跨平台共享同一套 binding：mac 用户按 Cmd+F 也能匹配 default 的 'Ctrl+F'，
+  // win/linux 用户按 Ctrl+F 同样匹配。mac 上的 Control 键也仍然能触发同一组
+  // 快捷键，兼容习惯 win 风格的 mac 用户。
+  if (e.ctrlKey || e.metaKey) parts.push('Ctrl')
   // The =/+ key shares one physical key — ignore Shift for it so both Ctrl+=
   // and Ctrl+Shift+= match the same binding. (Old behaviour accepted both.)
   if (e.shiftKey && e.code !== 'Equal') parts.push('Shift')
