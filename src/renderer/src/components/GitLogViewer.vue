@@ -72,8 +72,11 @@ watch(authorFilter, (v) => {
 // ResizeObserver below clamps them back into the container's actual bounds
 // whenever the dialog itself is resized.
 const sidebarW = ref(360)
-const bodyH = ref(140) // commit message (subject + body) — middle band
-const metaH = ref(110) // hash / author / date / parents / refs — bottom band
+// `bodyH` covers the entire bottom band on the right side: subject + body +
+// the two compact metadata lines (hash/parents and author/time). The old
+// separately-resizable meta band was removed — the bottom rows are just a
+// fixed-style footer inside the body band now.
+const bodyH = ref(180)
 const filesW = ref(260)
 
 const bodyRef = ref<HTMLElement>()
@@ -84,25 +87,21 @@ const filesDiffRef = ref<HTMLElement>()
 // small but loose enough that a small dialog still leaves a useful diff area.
 const MIN_SIDEBAR = 220
 const MAX_SIDEBAR_FRAC = 0.65
-const MIN_BODY = 60
-const MAX_BODY_FRAC = 0.55
-const MIN_META = 60
-const MAX_META_FRAC = 0.5
+const MIN_BODY = 80
+const MAX_BODY_FRAC = 0.6
 const MIN_FILES = 160
 const MAX_FILES_FRAC = 0.6
 
 // Drag targets:
 //   sidebar — commits list ↔ right panel (horizontal axis)
 //   files   — files list ↔ diff content (horizontal axis)
-//   body    — files+diff ↔ commit-message band (vertical, INVERTED: drag down
-//             shrinks the body so files+diff grows)
-//   meta    — body ↔ metadata band (vertical, INVERTED: drag down shrinks
-//             meta so body grows)
+//   body    — files+diff ↔ commit-message-and-meta band (vertical, INVERTED:
+//             drag down shrinks the body so files+diff grows)
 interface DragState {
   axis: 'x' | 'y'
   startCoord: number
   startVal: number
-  target: 'sidebar' | 'body' | 'meta' | 'files'
+  target: 'sidebar' | 'body' | 'files'
   containerSize: number
   /** Vertical splitters above a fixed-height band invert their sign — dragging
    *  the splitter down shrinks the band below it. */
@@ -112,7 +111,7 @@ let drag: DragState | null = null
 
 function startDrag(e: MouseEvent, target: DragState['target']): void {
   e.preventDefault()
-  const axis: 'x' | 'y' = target === 'body' || target === 'meta' ? 'y' : 'x'
+  const axis: 'x' | 'y' = target === 'body' ? 'y' : 'x'
   let containerEl: HTMLElement | undefined
   let startVal = 0
   if (target === 'sidebar') {
@@ -121,9 +120,6 @@ function startDrag(e: MouseEvent, target: DragState['target']): void {
   } else if (target === 'body') {
     containerEl = rightRef.value
     startVal = bodyH.value
-  } else if (target === 'meta') {
-    containerEl = rightRef.value
-    startVal = metaH.value
   } else {
     containerEl = filesDiffRef.value
     startVal = filesW.value
@@ -151,9 +147,6 @@ function clampSplitter(target: DragState['target'], val: number, container: numb
   if (target === 'body') {
     return Math.max(MIN_BODY, Math.min(container * MAX_BODY_FRAC, val))
   }
-  if (target === 'meta') {
-    return Math.max(MIN_META, Math.min(container * MAX_META_FRAC, val))
-  }
   return Math.max(MIN_FILES, Math.min(container * MAX_FILES_FRAC, val))
 }
 
@@ -164,7 +157,6 @@ function onDragMove(e: MouseEvent): void {
   const next = clampSplitter(drag.target, drag.startVal + sign * delta, drag.containerSize)
   if (drag.target === 'sidebar') sidebarW.value = next
   else if (drag.target === 'body') bodyH.value = next
-  else if (drag.target === 'meta') metaH.value = next
   else filesW.value = next
 }
 
@@ -195,7 +187,6 @@ onMounted(async () => {
     rightRo = new ResizeObserver(() => {
       const h = rightRef.value!.getBoundingClientRect().height
       bodyH.value = clampSplitter('body', bodyH.value, h)
-      metaH.value = clampSplitter('meta', metaH.value, h)
     })
     rightRo.observe(rightRef.value)
   }
@@ -589,49 +580,51 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 
         <div class="gl-splitter-v" @mousedown="(e) => startDrag(e, 'body')" />
 
-        <!-- Middle band: subject + body (the commit message itself). -->
+        <!-- Bottom band: subject + body + compact meta footer. Single
+             resizable section; the splitter above controls its height. -->
         <div class="gl-body-msg" :style="{ height: bodyH + 'px' }">
           <div v-if="loadingDetail" class="gl-state">加载提交详情…</div>
           <template v-else-if="detail">
             <div class="gl-detail-subject">{{ detail.subject }}</div>
             <pre v-if="detail.body" class="gl-detail-body">{{ detail.body }}</pre>
             <div v-else class="gl-no-body">（无附加说明）</div>
-          </template>
-        </div>
 
-        <div class="gl-splitter-v" @mousedown="(e) => startDrag(e, 'meta')" />
-
-        <!-- Bottom band: hash, author, date, parents, decoration refs. -->
-        <div class="gl-meta-bottom" :style="{ height: metaH + 'px' }">
-          <template v-if="detail">
-            <div class="gl-detail-meta">
-              <span class="gl-detail-row">
-                <GitCommit :size="13" />
-                <code>{{ detail.hash }}</code>
-              </span>
-              <span class="gl-detail-row">
-                <User :size="13" />
-                {{ detail.author }} &lt;{{ detail.email }}&gt;
-              </span>
-              <span class="gl-detail-row">
-                <Calendar :size="13" />
-                {{ formatFullDate(detail.date) }}
-              </span>
-              <span v-if="detail.parents.length" class="gl-detail-row">
-                <span class="gl-detail-label">父提交</span>
-                <code v-for="p in detail.parents" :key="p" class="gl-parent">{{
-                  p.slice(0, 7)
-                }}</code>
-              </span>
-            </div>
-            <div v-if="detail.refs.length" class="gl-detail-refs">
-              <span
-                v-for="(d, i) in decorate(detail.refs)"
-                :key="i"
-                class="gl-ref"
-                :class="`gl-ref-${d.kind}`"
-                >{{ d.label }}</span
-              >
+            <!-- Compact two-line footer below the message. Line 1: current
+                 commit + parents (the "graph position" — what this commit IS
+                 and where it came from). Line 2: author + date (the "who
+                 and when"). Refs piggy-back as a third row when present. -->
+            <div class="gl-meta-rows">
+              <div class="gl-meta-line">
+                <span class="gl-detail-row">
+                  <GitCommit :size="12" />
+                  <code>{{ detail.shortHash }}</code>
+                </span>
+                <span v-if="detail.parents.length" class="gl-detail-row">
+                  <span class="gl-detail-label">父提交</span>
+                  <code v-for="p in detail.parents" :key="p" class="gl-parent">{{
+                    p.slice(0, 7)
+                  }}</code>
+                </span>
+              </div>
+              <div class="gl-meta-line">
+                <span class="gl-detail-row">
+                  <User :size="12" />
+                  {{ detail.author }} &lt;{{ detail.email }}&gt;
+                </span>
+                <span class="gl-detail-row">
+                  <Calendar :size="12" />
+                  {{ formatFullDate(detail.date) }}
+                </span>
+              </div>
+              <div v-if="detail.refs.length" class="gl-detail-refs">
+                <span
+                  v-for="(d, i) in decorate(detail.refs)"
+                  :key="i"
+                  class="gl-ref"
+                  :class="`gl-ref-${d.kind}`"
+                  >{{ d.label }}</span
+                >
+              </div>
             </div>
           </template>
         </div>
@@ -893,8 +886,9 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   overflow: hidden;
 }
 
-/* Middle band: commit message (subject + body). Fixed height controlled by
-   the `body` splitter; scrolls internally when the body overflows. */
+/* Bottom band: subject + body + compact meta footer. Single resizable
+   section controlled by the `body` splitter; scrolls internally when the
+   body overflows. */
 .gl-body-msg {
   flex-shrink: 0;
   overflow-y: auto;
@@ -902,14 +896,24 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   min-height: 0;
 }
 
-/* Bottom band: hash / author / date / parents / refs. Same flex behaviour
-   as the body band — fixed height with internal scroll fallback. */
-.gl-meta-bottom {
-  flex-shrink: 0;
-  overflow-y: auto;
-  padding: 8px 12px;
-  min-height: 0;
+/* Compact meta footer: parents+hash on one line, author+date on the next.
+   `flex-wrap: wrap` keeps it readable when the dialog is narrow — the
+   `<span>` rows reflow rather than truncate. */
+.gl-meta-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--el-border-color);
+}
+
+.gl-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .gl-no-body {
@@ -923,12 +927,6 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin: 4px 0 8px;
-}
-
-.gl-detail-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 .gl-detail-row {
