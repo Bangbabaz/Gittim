@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join, dirname, basename } from 'path'
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 
 const execFileP = promisify(execFile)
@@ -777,8 +777,28 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
     })
   )
 
+  // Append the OS file manager as a regular IDE entry rather than treating it
+  // as a "no IDE detected" fallback. Always last so it doesn't outrank a real
+  // editor in the picker's default position. iconDataUrl stays undefined —
+  // the renderer paints it via the ideIcons.ts handwritten folder glyph.
+  found.push(osFolderEntry())
+
   cache = found
   return found
+}
+
+/**
+ * Synthetic IDE entry for "open in the OS file manager". `command` stays empty
+ * because openIde branches on the id before reaching its launcher resolution.
+ */
+function osFolderEntry(): IdeInfo {
+  const name =
+    process.platform === 'darwin'
+      ? '访达'
+      : process.platform === 'win32'
+        ? '资源管理器'
+        : '文件管理器'
+  return { id: 'os-folder', name, command: '' }
 }
 
 /**
@@ -790,6 +810,22 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
  */
 export function openIde(ideId: string, cwd: string): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
+    // OS file manager doesn't need spawn — Electron's shell.openPath handles
+    // the per-platform open command (explorer.exe / Finder / xdg-open) and
+    // returns an empty string on success, an error message on failure.
+    if (ideId === 'os-folder') {
+      shell
+        .openPath(cwd)
+        .then((err) => {
+          if (err) resolve({ success: false, error: err })
+          else resolve({ success: true })
+        })
+        .catch((err) => {
+          resolve({ success: false, error: err instanceof Error ? err.message : String(err) })
+        })
+      return
+    }
+
     const ide = (cache || []).find((i) => i.id === ideId)
     if (!ide) {
       resolve({ success: false, error: '未找到该 IDE，请刷新检测列表' })

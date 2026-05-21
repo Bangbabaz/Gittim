@@ -171,7 +171,6 @@ type BranchRow = {
   remoteName?: string
   worktree?: boolean
 }
-const branchSelectRef = ref<{ blur: () => void } | null>(null)
 const branchMenuOpen = ref(false)
 const branchMenuPos = ref<{ x: number; y: number }>({ x: 0, y: 0 })
 const branchMenuTarget = ref<BranchRow | null>(null)
@@ -196,8 +195,10 @@ function openBranchMenu(e: MouseEvent, b: BranchRow): void {
   branchMenuTarget.value = b
   branchMenuPos.value = { x: e.clientX, y: e.clientY }
   branchMenuOpen.value = true
-  // Close the select popper so the context menu doesn't overlap it.
-  branchSelectRef.value?.blur?.()
+  // Intentionally do NOT close the select popper here — earlier we blurred it
+  // so the menu sat on a clean background, but that made the option list
+  // collapse the moment the user right-clicked. The context menu now sits on
+  // top (z-index 3500) so the popper can stay open behind it.
 }
 
 function closeBranchMenu(): void {
@@ -875,15 +876,13 @@ async function openWithIde(id: string): Promise<void> {
   }
 }
 
-// Left chip click: open with the resolved default. Refuses politely if
-// nothing is detected — the dropdown next to it stays available for the
-// "重新检测" entry so the user has a path forward.
+// Left chip click: open with the resolved default. The os-folder entry
+// (file manager / Finder / Explorer) is always present in the IDE list now,
+// so there's no "no IDE detected" branch to fall back on — defaultIde may
+// still be null on first paint while detection is running, in which case
+// we no-op until the list lands.
 const openDefaultIde = async (): Promise<void> => {
-  if (!defaultIde.value) {
-    if (!props.cwd) return
-    await window.api.openFolder(props.cwd)
-    return
-  }
+  if (!defaultIde.value) return
   await openWithIde(defaultIde.value.id)
 }
 
@@ -903,7 +902,6 @@ const onPickIde = async (cmd: string): Promise<void> => {
   <div v-if="isRepo" class="pane-toolbar" @click.stop>
     <GitBranch class="git-icon" :size="14" />
     <el-select
-      ref="branchSelectRef"
       :model-value="currentBranch"
       class="branch-select"
       popper-class="branch-select-dropdown"
@@ -1409,7 +1407,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
       v-model="showDiff"
       title="改动（相对 HEAD）"
       width="92%"
-      top="4vh"
+      align-center
       class="diff-dialog"
       :lock-scroll="true"
       :close-on-click-modal="false"
@@ -1431,7 +1429,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
       v-model="showMerge"
       title="合并 / 冲突"
       width="92%"
-      top="4vh"
+      align-center
       class="diff-dialog"
       :lock-scroll="true"
       :close-on-click-modal="false"
@@ -1452,7 +1450,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
       v-model="showLog"
       title="提交历史"
       width="92%"
-      top="4vh"
+      align-center
       class="diff-dialog"
       :lock-scroll="true"
       :close-on-click-modal="false"

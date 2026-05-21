@@ -40,6 +40,10 @@ const SUBLIME_PATH = 'M20.4 3.6L4 9.1v3.2l16.4-5.5V3.6zM3.6 11.5v3.2L20 20.4v-3.
 // Zed — angled Z inside a square.
 const ZED_PATH = 'M3 3h18v3L9 18h12v3H3v-3L15 6H3V3z'
 
+// OS file manager — generic folder silhouette (tab + body).
+const OS_FOLDER_PATH =
+  'M3 6.5C3 5.67 3.67 5 4.5 5h4.379a1.5 1.5 0 0 1 1.06.44L11.5 6.5h8a1.5 1.5 0 0 1 1.5 1.5v9.5A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-11z'
+
 /**
  * id → icon registry. IDs match src/main/ide.ts CANDIDATES.
  *
@@ -64,7 +68,10 @@ export const IDE_ICONS: Record<string, IdeIcon> = {
   datagrip: { color: '#22D3A6', path: JETBRAINS_SQUARE },
   fleet: { color: '#000000', letter: 'F' },
   subl: { color: '#FF9800', path: SUBLIME_PATH },
-  zed: { color: '#5C5CDE', path: ZED_PATH }
+  zed: { color: '#5C5CDE', path: ZED_PATH },
+  // Tinted slate so it reads as "system" rather than competing with a real
+  // editor's brand colour. Matches main/ide.ts's osFolderEntry() id.
+  'os-folder': { color: '#64748B', path: OS_FOLDER_PATH }
 }
 
 /**

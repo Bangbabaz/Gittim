@@ -124,6 +124,51 @@ function jumpTo(id: string): void {
     activeId.value = id
   }
 }
+
+// Side-by-side split ratio (left / right code columns). The two `*-num`
+// columns stay at a fixed 3.2em each — only the two `*-code` columns share
+// the remainder, so the ratio is just `left-code : right-code`. Shared
+// across every file in this DiffViewer instance.
+const midRatio = ref(0.5)
+
+const gridStyle = computed(() => ({
+  gridTemplateColumns: `3.2em ${midRatio.value * 100}fr 3.2em ${(1 - midRatio.value) * 100}fr`
+}))
+
+// Splitter X position inside the wrap element. The two `*-num` columns
+// together span 6.4em from the wrap's left edge before the usable code area
+// begins, so position = leftNumCol(3.2em) + usable * ratio.
+const splitterStyle = computed(() => ({
+  left: `calc(3.2em + (100% - 6.4em) * ${midRatio.value})`
+}))
+
+function startMidDrag(e: MouseEvent): void {
+  e.preventDefault()
+  const wrap = (e.currentTarget as HTMLElement).parentElement
+  if (!wrap) return
+  const rect = wrap.getBoundingClientRect()
+  // Read the actual font-size in case the host changed it (settings drawer
+  // adjusts terminal font but the diff viewer is fixed — still cheap and
+  // safer than hard-coding 14px).
+  const fontSize = parseFloat(getComputedStyle(wrap).fontSize) || 14
+  const numColPx = 3.2 * fontSize
+  const usable = Math.max(1, rect.width - numColPx * 2)
+
+  function move(ev: MouseEvent): void {
+    const xInUsable = ev.clientX - rect.left - numColPx
+    midRatio.value = Math.max(0.1, Math.min(0.9, xInUsable / usable))
+  }
+  function up(): void {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+}
 </script>
 
 <template>
@@ -158,16 +203,23 @@ function jumpTo(id: string): void {
         </header>
         <div v-if="f.binary" class="dv-binary">二进制文件，不显示差异</div>
         <div v-else-if="!f.rows.length" class="dv-binary">无文本差异</div>
-        <div v-else class="dv-grid">
-          <template v-for="(r, ri) in f.rows" :key="ri">
-            <div v-if="r.kind === 'hunk'" class="dv-hunk">{{ r.text }}</div>
-            <template v-if="r.kind === 'pair'">
-              <div class="dv-num" :class="r.left.kind">{{ r.left.num ?? '' }}</div>
-              <div class="dv-code" :class="r.left.kind">{{ r.left.text }}</div>
-              <div class="dv-num" :class="r.right.kind">{{ r.right.num ?? '' }}</div>
-              <div class="dv-code" :class="r.right.kind">{{ r.right.text }}</div>
+        <div v-else class="dv-grid-wrap">
+          <div class="dv-grid" :style="gridStyle">
+            <template v-for="(r, ri) in f.rows" :key="ri">
+              <div v-if="r.kind === 'hunk'" class="dv-hunk">{{ r.text }}</div>
+              <template v-if="r.kind === 'pair'">
+                <div class="dv-num" :class="r.left.kind">{{ r.left.num ?? '' }}</div>
+                <div class="dv-code" :class="r.left.kind">{{ r.left.text }}</div>
+                <div class="dv-num" :class="r.right.kind">{{ r.right.num ?? '' }}</div>
+                <div class="dv-code" :class="r.right.kind">{{ r.right.text }}</div>
+              </template>
             </template>
-          </template>
+          </div>
+          <!-- Absolute splitter overlay positioned at the column-2/3 boundary.
+               Pointer events are picked up only on the narrow drag handle to
+               keep the grid fully clickable elsewhere (text selection still
+               works). -->
+          <div class="dv-mid-splitter" :style="splitterStyle" @mousedown="startMidDrag" />
         </div>
       </section>
     </div>
@@ -307,12 +359,51 @@ function jumpTo(id: string): void {
   color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
 }
 
-/* Side-by-side grid: [old#][old code][new#][new code] */
+/* Wraps the grid + the absolute splitter overlay. position:relative so the
+   splitter can absolute-position itself against this box. */
+.dv-grid-wrap {
+  position: relative;
+}
+
+/* Side-by-side grid: [old#][old code][new#][new code]. The two `code` columns
+   share whatever remains after the two 3.2em number columns; the static
+   declaration here is a fallback — the live ratio comes from the inline
+   `gridTemplateColumns` style bound to midRatio. */
 .dv-grid {
   display: grid;
   grid-template-columns: 3.2em minmax(0, 1fr) 3.2em minmax(0, 1fr);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* Vertical splitter pinned to the column-2/3 boundary. Wider hit area than
+   visual to make grabbing it easy; the centred 2px-wide rule lights up on
+   hover/drag so the affordance is visible without cluttering the diff. */
+.dv-mid-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -4px;
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
+}
+
+.dv-mid-splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 3px;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.dv-mid-splitter:hover::after,
+.dv-mid-splitter:active::after {
+  background: var(--el-color-primary);
 }
 
 .dv-hunk {
