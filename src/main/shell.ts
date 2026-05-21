@@ -3,7 +3,8 @@ import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
-import { basename, dirname } from 'path'
+import { readFile } from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import { shellIntegration } from './shell-integration'
 import { killProcessTree } from './proc'
 
@@ -910,6 +911,50 @@ export async function continueMergeOp(
  * their editor. Includes the leading `diff --git` header so diff2html can
  * parse it.
  */
+/**
+ * 拉取某 ref 下的文件内容，供 DiffViewer 做整文件级语法高亮。
+ *
+ * - `ref === null`：读工作区文件
+ * - `ref` 是 hash / 分支 / 'HEAD'：走 `git show <ref>:<path>`
+ *
+ * 超过 2 MB、文件不存在、git show 失败、内容含 NUL（二进制）一律返回 null，
+ * 让前端 fallback 到无高亮的纯文本渲染。
+ */
+export async function gitShowFile(
+  cwd: string,
+  ref: string | null,
+  path: string
+): Promise<string | null> {
+  if (!path) return null
+  const MAX = 2 * 1024 * 1024
+  try {
+    let content: string
+    if (ref === null) {
+      const full = join(cwd, path)
+      let size: number
+      try {
+        size = statSync(full).size
+      } catch {
+        return null
+      }
+      if (size > MAX) return null
+      content = await readFile(full, 'utf-8')
+    } else {
+      const { stdout } = await execFileP('git', ['show', `${ref}:${path}`], {
+        ...GIT_OPTS,
+        cwd,
+        maxBuffer: MAX,
+        timeout: 5000
+      })
+      content = stdout
+    }
+    if (content.includes('\0')) return null
+    return content
+  } catch {
+    return null
+  }
+}
+
 export async function getFileDiff(
   cwd: string,
   file: string

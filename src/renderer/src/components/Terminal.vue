@@ -20,6 +20,8 @@ import {
 import PaneToolbar from './PaneToolbar.vue'
 import SearchOverlay from './SearchOverlay.vue'
 import { useTheme } from '../composables/useTheme'
+import { DEFAULT_SHORTCUTS, shortcutMatches } from '../shortcuts'
+import type { ShortcutAction } from '../shortcuts'
 import '@xterm/xterm/css/xterm.css'
 
 const { xtermTheme } = useTheme()
@@ -34,12 +36,14 @@ const props = withDefaults(
     cwd?: string
     fontSize?: number
     scrollback?: number
+    shortcuts?: Record<string, string>
   }>(),
   {
     options: () => ({}),
     cwd: '',
     fontSize: DEFAULT_FONT_SIZE,
-    scrollback: DEFAULT_SCROLLBACK
+    scrollback: DEFAULT_SCROLLBACK,
+    shortcuts: () => ({})
   }
 )
 
@@ -226,63 +230,52 @@ const closeSearch = (): void => {
 terminal.attachCustomKeyEventHandler((e): boolean => {
   if (e.type !== 'keydown') return true
 
-  // Ctrl+Shift+D → split right
-  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'D' || e.key === 'd')) {
-    e.preventDefault()
-    emit('split', props.paneId, 'row')
-    return false
-  }
-  // Ctrl+Shift+S → split down
-  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'S' || e.key === 's')) {
-    e.preventDefault()
-    emit('split', props.paneId, 'column')
-    return false
-  }
-  // Ctrl+Shift+W → close current pane
-  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'W' || e.key === 'w')) {
-    e.preventDefault()
-    requestClose()
-    return false
-  }
-  // Ctrl+F → open search overlay
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'F' || e.key === 'f')) {
-    e.preventDefault()
-    openSearch()
-    return false
-  }
-  // Ctrl+= or Ctrl++ → font size up. `=` (no shift) is the bare key on most
-  // QWERTY layouts; `+` arrives when shift IS held (also accept it).
-  if (e.ctrlKey && !e.altKey && (e.key === '=' || e.key === '+')) {
-    e.preventDefault()
-    if (applyFontSize(currentFontSize.value + 1)) persistFontSize()
-    return false
-  }
-  // Ctrl+- → font size down
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === '-') {
-    e.preventDefault()
-    if (applyFontSize(currentFontSize.value - 1)) persistFontSize()
-    return false
-  }
-  // Ctrl+0 → reset font size
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === '0') {
-    e.preventDefault()
-    if (applyFontSize(DEFAULT_FONT_SIZE)) persistFontSize()
-    return false
-  }
-  // Ctrl+C → copy if there's a selection; otherwise pass through (send \x03 to pty)
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
-    if (terminal.hasSelection()) {
-      e.preventDefault()
-      copySelection()
-      return false
+  const effective = { ...DEFAULT_SHORTCUTS, ...props.shortcuts }
+
+  for (const [action, keys] of Object.entries(effective)) {
+    if (!shortcutMatches(keys, e)) continue
+
+    switch (action as ShortcutAction) {
+      case 'splitRight':
+        e.preventDefault()
+        emit('split', props.paneId, 'row')
+        return false
+      case 'splitDown':
+        e.preventDefault()
+        emit('split', props.paneId, 'column')
+        return false
+      case 'closePane':
+        e.preventDefault()
+        requestClose()
+        return false
+      case 'search':
+        e.preventDefault()
+        openSearch()
+        return false
+      case 'fontSizeUp':
+        e.preventDefault()
+        if (applyFontSize(currentFontSize.value + 1)) persistFontSize()
+        return false
+      case 'fontSizeDown':
+        e.preventDefault()
+        if (applyFontSize(currentFontSize.value - 1)) persistFontSize()
+        return false
+      case 'fontSizeReset':
+        e.preventDefault()
+        if (applyFontSize(DEFAULT_FONT_SIZE)) persistFontSize()
+        return false
+      case 'copy':
+        if (terminal.hasSelection()) {
+          e.preventDefault()
+          copySelection()
+          return false
+        }
+        return true
+      case 'paste':
+        e.preventDefault()
+        pasteFromClipboard()
+        return false
     }
-    return true
-  }
-  // Ctrl+V → paste
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'V' || e.key === 'v')) {
-    e.preventDefault()
-    pasteFromClipboard()
-    return false
   }
   return true
 })

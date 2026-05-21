@@ -26,6 +26,7 @@ import {
   abortMergeOp,
   continueMergeOp,
   getFileDiff,
+  gitShowFile,
   getCommitLog,
   getCommitDetail,
   gitMerge,
@@ -189,6 +190,9 @@ app.whenReady().then(() => {
       continueMergeOp(cwd, kind)
   )
   ipcMain.handle('git-file-diff', (_event, cwd: string, file: string) => getFileDiff(cwd, file))
+  ipcMain.handle('git-show-file', (_event, cwd: string, ref: string | null, path: string) =>
+    gitShowFile(cwd, ref, path)
+  )
 
   // Commit history
   ipcMain.handle(

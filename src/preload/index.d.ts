@@ -60,6 +60,7 @@ declare global {
       ) => Promise<{ success: boolean; error?: string }>
       gitDiff: (cwd: string) => Promise<{ diff: string; truncated: boolean }>
       gitFileDiff: (cwd: string, file: string) => Promise<{ diff: string; truncated: boolean }>
+      gitShowFile: (cwd: string, ref: string | null, path: string) => Promise<string | null>
       gitMergeStatus: (cwd: string) => Promise<{
         inProgress: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
         target: string | null
@@ -143,6 +144,7 @@ declare global {
         tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
         defaultIde?: string
+        shortcutOverrides?: Record<string, string>
       }>
       settingsSet: (patch: {
         fontSize?: number
@@ -152,6 +154,7 @@ declare global {
         tasksDrawerWidth?: number
         theme?: 'system' | 'dark' | 'light'
         defaultIde?: string
+        shortcutOverrides?: Record<string, string>
       }) => void
       themeSetSource: (src: 'system' | 'dark' | 'light') => void
       themeShouldUseDark: () => Promise<boolean>

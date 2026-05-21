@@ -116,6 +116,12 @@ function toggleRemote(checked: boolean | string | number): void {
   showRemote.value = v
 }
 
+// DiffViewer 拉取整文件做语法高亮。working diff：左侧 = HEAD，右侧 = working tree。
+function fetchDiffContent(side: 'old' | 'new', path: string): Promise<string | null> {
+  if (!props.cwd) return Promise.resolve(null)
+  return window.api.gitShowFile(props.cwd, side === 'old' ? 'HEAD' : null, path)
+}
+
 // Generation counter: every refresh captures the current gen; a later refresh
 // or a checkout bumps the counter so the in-flight one knows to bail before
 // overwriting fresher state.
@@ -1405,7 +1411,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
     <!-- Read-only diff viewer -->
     <el-dialog
       v-model="showDiff"
-      title="改动（相对 HEAD）"
+      title="改动"
       width="92%"
       align-center
       class="diff-dialog"
@@ -1416,7 +1422,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
       <div v-else-if="diffEmpty" class="diff-state">没有改动</div>
       <template v-else>
         <div v-if="diffTruncated" class="diff-trunc">改动过大，仅显示前 10 MB</div>
-        <DiffViewer :diff="diffText" />
+        <DiffViewer :diff="diffText" :fetch-content="fetchDiffContent" />
       </template>
       <template #footer>
         <el-button size="small" @click="showDiff = false">关闭</el-button>

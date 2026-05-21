@@ -18,6 +18,11 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
+    // worker bundle 用 ES 输出 —— shiki worker 内部走动态 import 按需加载语言 grammar，
+    // 默认的 iife format 不支持 code-splitting。
+    worker: {
+      format: 'es'
+    },
     css: {
       preprocessorOptions: {
         scss: {

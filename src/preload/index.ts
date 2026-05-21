@@ -68,6 +68,8 @@ const api = {
       diff: string
       truncated: boolean
     }>,
+  gitShowFile: (cwd: string, ref: string | null, path: string) =>
+    ipcRenderer.invoke('git-show-file', cwd, ref, path) as Promise<string | null>,
   // Merge / rebase / cherry-pick / revert state
   gitMergeStatus: (cwd: string) =>
     ipcRenderer.invoke('git-merge-status', cwd) as Promise<{
@@ -168,6 +170,7 @@ const api = {
       tasksDrawerWidth?: number
       theme?: 'system' | 'dark' | 'light'
       defaultIde?: string
+      shortcutOverrides?: Record<string, string>
     }>,
   settingsSet: (patch: {
     fontSize?: number
@@ -177,6 +180,7 @@ const api = {
     tasksDrawerWidth?: number
     theme?: 'system' | 'dark' | 'light'
     defaultIde?: string
+    shortcutOverrides?: Record<string, string>
   }) => ipcRenderer.send('settings-set', patch),
   themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
   themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,

@@ -42,6 +42,31 @@ const items = ref<EditItem[]>([])
 const selectedKey = ref<string | null>(null)
 const pkgScripts = ref<Record<string, string>>({})
 
+const MIN_LIST_WIDTH = 120
+const MAX_LIST_WIDTH = 500
+const listWidth = ref(210)
+
+function startResize(e: MouseEvent): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const startWidth = listWidth.value
+
+  function move(ev: MouseEvent): void {
+    const dx = ev.clientX - startX
+    listWidth.value = Math.max(MIN_LIST_WIDTH, Math.min(MAX_LIST_WIDTH, startWidth + dx))
+  }
+  function up(): void {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+}
+
 let keySeq = 0
 const nextKey = (): string => `k${++keySeq}`
 
@@ -209,7 +234,7 @@ async function save(): Promise<void> {
   >
     <div class="tm-body">
       <!-- Left: command list -->
-      <aside class="tm-list">
+      <aside class="tm-list" :style="{ width: listWidth + 'px' }">
         <div class="tm-list-head">
           <span class="tm-list-title">命令</span>
           <button class="tm-add" title="新建命令" @click="addDraft()">
@@ -234,6 +259,8 @@ async function save(): Promise<void> {
           </div>
         </div>
       </aside>
+
+      <div class="tm-resizer" @mousedown="startResize"></div>
 
       <!-- Right: detail -->
       <section class="tm-detail">
@@ -301,11 +328,9 @@ async function save(): Promise<void> {
 }
 
 .tm-list {
-  width: 210px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--el-border-color);
 }
 
 .tm-list-head {
@@ -416,6 +441,20 @@ async function save(): Promise<void> {
 .tm-del:hover {
   background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
   color: var(--el-color-danger);
+}
+
+.tm-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+  user-select: none;
+}
+
+.tm-resizer:hover,
+.tm-resizer:active {
+  background: var(--el-color-primary);
 }
 
 .tm-detail {

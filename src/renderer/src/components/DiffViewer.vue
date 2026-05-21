@@ -1,16 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { parse } from 'diff2html'
 import { LineType } from 'diff2html/lib-esm/types'
+import ShikiWorker from '../workers/shiki.worker?worker'
 
 const props = defineProps<{
   diff: string
   /**
    * Hide the built-in file list. Used when the parent (e.g. GitLogViewer) owns
    * its own file-picker and only wants the right-hand diff grid rendered.
-   * Defaults to false to preserve existing call sites.
    */
   hideSidebar?: boolean
+  /**
+   * 拉取某一侧文件的完整内容用于整文件级语法高亮。
+   *   - `side`: 'old' 对应 diff 左侧（删除前），'new' 对应右侧（修改后）
+   *   - `path`: diff 解析出的对应文件路径（oldName / newName）
+   *   - 返回 null 表示该侧不可用（二进制 / 删除 / 找不到），DiffViewer 自动 fallback 到无高亮
+   *
+   * 缺省时整个 DiffViewer 走无高亮纯文本（仍可读，只是没颜色）。
+   */
+  fetchContent?: (side: 'old' | 'new', path: string) => Promise<string | null>
 }>()
 
 type CellKind = 'ctx' | 'del' | 'ins' | 'empty'
@@ -20,17 +29,127 @@ type Row = { kind: 'hunk'; text: string } | { kind: 'pair'; left: Cell; right: C
 type FileView = {
   id: string
   name: string
+  oldName: string | null
+  newName: string | null
   status: string
   statusClass: string
   added: number
   deleted: number
   rows: Row[]
   binary: boolean
+  lang: string | null
 }
 
 const DEV_NULL = new Set(['dev/null', '/dev/null'])
 
-// diff2html keeps the leading +/-/space marker on each line's content.
+// 文件扩展名 → shiki 语言 id。shiki 不识别的会在 tokenize 时 fallback。
+const LANG_MAP: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'tsx',
+  js: 'javascript',
+  jsx: 'jsx',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  json: 'json',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  html: 'html',
+  htm: 'html',
+  vue: 'vue',
+  svelte: 'svelte',
+  py: 'python',
+  pyw: 'python',
+  rb: 'ruby',
+  rs: 'rust',
+  go: 'go',
+  java: 'java',
+  kt: 'kotlin',
+  swift: 'swift',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  fish: 'fish',
+  yml: 'yaml',
+  yaml: 'yaml',
+  xml: 'xml',
+  svg: 'xml',
+  md: 'markdown',
+  mdx: 'mdx',
+  sql: 'sql',
+  Dockerfile: 'dockerfile',
+  dockerfile: 'dockerfile',
+  toml: 'toml',
+  ini: 'ini',
+  cfg: 'ini',
+  conf: 'ini',
+  lua: 'lua',
+  php: 'php',
+  r: 'r',
+  Makefile: 'makefile',
+  cmake: 'cmake',
+  graphql: 'graphql',
+  gql: 'graphql',
+  proto: 'proto'
+}
+
+// shiki 在 Web Worker 里跑（src/renderer/src/workers/shiki.worker.ts），主线程
+// 零阻塞 —— codeToHtml 是同步 CPU 密集操作，放在主线程会让 el-dialog 的进入
+// 动画掉帧（用户感受就是"打开 diff 弹窗卡一下"）。
+//
+// 单例 worker 跨所有 DiffViewer 实例复用。模块加载即 spawn，让 shiki 在 worker
+// 里后台预热。请求按自增 id 路由，pending 表收 resolver。
+const worker = new ShikiWorker()
+let nextReqId = 0
+const pending = new Map<number, (lines: string[] | null) => void>()
+
+worker.addEventListener('message', (e: MessageEvent<{ id: number; lines: string[] | null }>) => {
+  const { id, lines } = e.data
+  const resolve = pending.get(id)
+  if (resolve) {
+    pending.delete(id)
+    resolve(lines)
+  }
+})
+
+function workerTokenize(content: string, lang: string): Promise<string[] | null> {
+  return new Promise((resolve) => {
+    const id = ++nextReqId
+    pending.set(id, resolve)
+    worker.postMessage({ id, content, lang })
+  })
+}
+
+function detectLang(filename: string): string | null {
+  const base = filename.replace(/\\/g, '/').split('/').pop() || filename
+  const lower = base.toLowerCase()
+  if (LANG_MAP[lower]) return LANG_MAP[lower]
+  const dot = base.lastIndexOf('.')
+  if (dot < 0) return null
+  const ext = base.slice(dot + 1).toLowerCase()
+  return LANG_MAP[ext] || null
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// 整文件 → 按行 HTML 数组。worker 直接返回每行的 token span 字符串，
+// 主线程拿到就能 v-html，零 DOM 解析开销。
+//
+// 每个 token <span> 同时带 dark 颜色（inline color）和 light 颜色（--shiki-light
+// CSS 变量），主题切换走全局 CSS 不再回 worker。
+function tokenizeFile(content: string, lang: string): Promise<string[] | null> {
+  return workerTokenize(content, lang)
+}
+
+// diff2html 把 +/-/space 前缀放在每行 content 第一个字符。
 function stripPrefix(s: string): string {
   return s.length ? s.slice(1) : s
 }
@@ -102,15 +221,67 @@ const files = computed<FileView[]>(() => {
     return {
       id: `dvf-${idx}`,
       name,
+      oldName: oldN || null,
+      newName: newN || null,
       status,
       statusClass,
       added: f.addedLines,
       deleted: f.deletedLines,
       rows,
-      binary: !!f.isBinary
+      binary: !!f.isBinary,
+      lang: detectLang(name)
     }
   })
 })
+
+// 每个文件的整文件高亮结果（按行 HTML）。fetchContent 没提供 / 拉取失败 / 文件为二进制时
+// 对应侧为 null，渲染时 fallback 到 escape 后的原文。
+const highlighted = ref(new Map<string, { old: string[] | null; new: string[] | null }>())
+
+// 每次 files 变化（即 props.diff 变化）都启动新一轮高亮。
+// gen 用来在 async 完成时丢弃过期结果，避免快速切换 diff 时旧结果污染新视图。
+let gen = 0
+watch(
+  files,
+  (fs) => {
+    gen++
+    const myGen = gen
+    highlighted.value = new Map()
+    if (!props.fetchContent) return
+    for (const f of fs) {
+      if (!f.lang || f.binary) continue
+      const fetch = props.fetchContent
+      void (async () => {
+        const [oldText, newText] = await Promise.all([
+          f.oldName ? fetch('old', f.oldName).catch(() => null) : Promise.resolve(null),
+          f.newName ? fetch('new', f.newName).catch(() => null) : Promise.resolve(null)
+        ])
+        if (myGen !== gen) return
+        const [oldHtml, newHtml] = await Promise.all([
+          oldText != null ? tokenizeFile(oldText, f.lang!) : Promise.resolve(null),
+          newText != null ? tokenizeFile(newText, f.lang!) : Promise.resolve(null)
+        ])
+        if (myGen !== gen) return
+        const next = new Map(highlighted.value)
+        next.set(f.id, { old: oldHtml, new: newHtml })
+        highlighted.value = next
+      })()
+    }
+  },
+  { immediate: true }
+)
+
+// 给单元格找它在整文件高亮中的对应行 HTML。
+// num 是 1-based 行号。找不到（行号越界 / 没拉到内容）就 fallback 到 escape 后的原文，
+// 保证显示不空。
+function lineHtml(side: 'old' | 'new', f: FileView, num: number | null, text: string): string {
+  if (num == null) return escapeHtml(text)
+  const hl = highlighted.value.get(f.id)
+  if (!hl) return escapeHtml(text)
+  const arr = side === 'old' ? hl.old : hl.new
+  if (!arr) return escapeHtml(text)
+  return arr[num - 1] ?? escapeHtml(text)
+}
 
 const mainRef = ref<HTMLElement>()
 const activeId = ref<string | null>(null)
@@ -131,13 +302,36 @@ function jumpTo(id: string): void {
 // across every file in this DiffViewer instance.
 const midRatio = ref(0.5)
 
+// Sidebar drag-to-resize
+const MIN_SIDEBAR = 140
+const MAX_SIDEBAR = 500
+const sidebarWidth = ref(250)
+
+function startSidebarDrag(e: MouseEvent): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+
+  function move(ev: MouseEvent): void {
+    const dx = ev.clientX - startX
+    sidebarWidth.value = Math.max(MIN_SIDEBAR, Math.min(MAX_SIDEBAR, startWidth + dx))
+  }
+  function up(): void {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+}
+
 const gridStyle = computed(() => ({
   gridTemplateColumns: `3.2em ${midRatio.value * 100}fr 3.2em ${(1 - midRatio.value) * 100}fr`
 }))
 
-// Splitter X position inside the wrap element. The two `*-num` columns
-// together span 6.4em from the wrap's left edge before the usable code area
-// begins, so position = leftNumCol(3.2em) + usable * ratio.
 const splitterStyle = computed(() => ({
   left: `calc(3.2em + (100% - 6.4em) * ${midRatio.value})`
 }))
@@ -147,9 +341,6 @@ function startMidDrag(e: MouseEvent): void {
   const wrap = (e.currentTarget as HTMLElement).parentElement
   if (!wrap) return
   const rect = wrap.getBoundingClientRect()
-  // Read the actual font-size in case the host changed it (settings drawer
-  // adjusts terminal font but the diff viewer is fixed — still cheap and
-  // safer than hard-coding 14px).
   const fontSize = parseFloat(getComputedStyle(wrap).fontSize) || 14
   const numColPx = 3.2 * fontSize
   const usable = Math.max(1, rect.width - numColPx * 2)
@@ -173,7 +364,7 @@ function startMidDrag(e: MouseEvent): void {
 
 <template>
   <div class="dv-root">
-    <aside v-if="!props.hideSidebar" class="dv-sidebar">
+    <aside v-if="!props.hideSidebar" class="dv-sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="dv-sidebar-title">改动文件（{{ files.length }}）</div>
       <button
         v-for="f in files"
@@ -190,6 +381,8 @@ function startMidDrag(e: MouseEvent): void {
         </span>
       </button>
     </aside>
+
+    <div v-if="!props.hideSidebar" class="dv-sidebar-splitter" @mousedown="startSidebarDrag"></div>
 
     <div ref="mainRef" class="dv-main">
       <section v-for="f in files" :id="f.id" :key="f.id" class="dv-file">
@@ -209,9 +402,17 @@ function startMidDrag(e: MouseEvent): void {
               <div v-if="r.kind === 'hunk'" class="dv-hunk">{{ r.text }}</div>
               <template v-if="r.kind === 'pair'">
                 <div class="dv-num" :class="r.left.kind">{{ r.left.num ?? '' }}</div>
-                <div class="dv-code" :class="r.left.kind">{{ r.left.text }}</div>
+                <div
+                  class="dv-code"
+                  :class="r.left.kind"
+                  v-html="lineHtml('old', f, r.left.num, r.left.text)"
+                ></div>
                 <div class="dv-num" :class="r.right.kind">{{ r.right.num ?? '' }}</div>
-                <div class="dv-code" :class="r.right.kind">{{ r.right.text }}</div>
+                <div
+                  class="dv-code"
+                  :class="r.right.kind"
+                  v-html="lineHtml('new', f, r.right.num, r.right.text)"
+                ></div>
               </template>
             </template>
           </div>
@@ -236,14 +437,26 @@ function startMidDrag(e: MouseEvent): void {
 
 /* Left: changed-files list */
 .dv-sidebar {
-  width: 250px;
   flex-shrink: 0;
-  border-right: 1px solid var(--el-border-color);
   overflow-y: auto;
   padding: 8px 6px;
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+.dv-sidebar-splitter {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+  user-select: none;
+}
+
+.dv-sidebar-splitter:hover,
+.dv-sidebar-splitter:active {
+  background: var(--el-color-primary);
 }
 
 .dv-sidebar-title {
@@ -453,5 +666,18 @@ function startMidDrag(e: MouseEvent): void {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   @include ui-font;
+}
+</style>
+
+<style lang="scss">
+/* shiki dual-theme：每个 token <span> inline style 里同时带
+     color:<dark-rgb>          ← defaultColor:'dark' 让 dark 主题颜色直接落到 inline color
+     --shiki-light:<light-rgb> ← light 主题颜色挂在 CSS 变量上
+
+   dark 主题（app 默认 + main.ts 里强制设的 data-theme='dark'）什么都不用做，
+   inline color 直接生效。light 主题时用 var(--shiki-light) 把 inline color 顶掉
+   —— inline style 优先级高于 class，所以这里必须 !important。 */
+[data-theme='light'] .dv-code span {
+  color: var(--shiki-light) !important;
 }
 </style>

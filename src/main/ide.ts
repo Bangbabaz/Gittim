@@ -671,7 +671,26 @@ async function extractIconMac(command: string): Promise<string | undefined> {
   }
 }
 
-async function extractIcon(command: string): Promise<string | undefined> {
+async function extractIcon(command: string, id?: string): Promise<string | undefined> {
+  // Synthetic "open in file manager" entry has no command of its own — point
+  // at the platform's actual file-manager binary so we get its real icon
+  // (explorer.exe glyph on Windows, Finder mark on macOS) instead of the
+  // handwritten folder SVG fallback.
+  if (id === 'os-folder') {
+    if (isMac) return extractIconMac('/System/Library/CoreServices/Finder.app')
+    if (isWindows) {
+      const explorer = join(process.env.WINDIR || 'C:\\Windows', 'explorer.exe')
+      try {
+        const img = await app.getFileIcon(explorer, { size: 'large' })
+        if (img.isEmpty()) return undefined
+        return img.resize({ width: 48, height: 48, quality: 'best' }).toDataURL()
+      } catch {
+        return undefined
+      }
+    }
+    return undefined
+  }
+
   if (isMac) return extractIconMac(command)
 
   try {
@@ -769,19 +788,18 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
     found.push({ id: c.id, name: c.name, command: path })
   }
 
+  // Add the OS file manager BEFORE icon extraction so its icon is fetched in
+  // the same parallel batch (Finder.app / explorer.exe). Always last in the
+  // list so it doesn't outrank a real editor in the picker's default position.
+  found.push(osFolderEntry())
+
   // Extract icons in parallel — getFileIcon is async per-target and we don't
   // want N serial round-trips to the OS shell.
   await Promise.all(
     found.map(async (ide) => {
-      ide.iconDataUrl = await extractIcon(ide.command)
+      ide.iconDataUrl = await extractIcon(ide.command, ide.id)
     })
   )
-
-  // Append the OS file manager as a regular IDE entry rather than treating it
-  // as a "no IDE detected" fallback. Always last so it doesn't outrank a real
-  // editor in the picker's default position. iconDataUrl stays undefined —
-  // the renderer paints it via the ideIcons.ts handwritten folder glyph.
-  found.push(osFolderEntry())
 
   cache = found
   return found
@@ -789,7 +807,9 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
 
 /**
  * Synthetic IDE entry for "open in the OS file manager". `command` stays empty
- * because openIde branches on the id before reaching its launcher resolution.
+ * because openIde branches on the id before reaching its launcher resolution;
+ * `iconDataUrl` is filled in by extractIcon's os-folder branch (real explorer
+ * / Finder mark) rather than left undefined.
  */
 function osFolderEntry(): IdeInfo {
   const name =

@@ -49,6 +49,11 @@ export interface Settings {
    * IDE is no longer detected on disk (the renderer drops stale values).
    */
   defaultIde?: string
+  /**
+   * Non-default keyboard shortcuts keyed by ShortcutAction. Only overrides are
+   * stored; the renderer merges them with DEFAULT_SHORTCUTS at runtime.
+   */
+  shortcutOverrides?: Record<string, string>
 }
 
 const DEFAULTS: Settings = {

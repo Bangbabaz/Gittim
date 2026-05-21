@@ -200,12 +200,16 @@
 // the viewport, and nothing inside it scrolls except the panels we asked to.
 .diff-dialog {
   &.el-dialog {
-    // align-center on the wrapper handles vertical centering; we just need
-    // to reset Element Plus's default top margin and pick a height that
-    // leaves a visible margin from the viewport edges. 82vh → ~9vh on each
-    // side, which reads as "modal" rather than "fullscreen".
-    margin: 0 !important;
-    height: 82vh;
+    // Vertical placement: the `top` prop on each dialog passes through to
+    // --el-dialog-margin-top (EL convention) — we pair it with an explicit
+    // bottom margin and a height that together fit inside the viewport
+    // without overflowing. Crucially we DO NOT touch margin-left/right:
+    // EL's stylesheet sets them to `auto` for horizontal centering, and
+    // overriding them with `margin: 0` (as we did before) collapsed the
+    // dialog into the wrapper's top-left corner — that's why earlier the
+    // dialog looked stuck against both the top AND the left edge.
+    margin-bottom: 8vh !important;
+    height: 84vh;
     display: flex;
     flex-direction: column;
   }

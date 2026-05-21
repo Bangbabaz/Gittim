@@ -1,10 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw } from 'lucide-vue-next'
+import {
+  Settings as SettingsIcon,
+  Type,
+  Layout,
+  Info,
+  RotateCcw,
+  Keyboard
+} from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
+import {
+  DEFAULT_SHORTCUTS,
+  SHORTCUT_DEFS,
+  eventToShortcut
+} from './shortcuts'
 
 type Pane = { type: 'pane'; id: string }
 type Split = {
@@ -66,7 +78,7 @@ const MAX_SCROLLBACK = 200000
 const appScrollback = ref(DEFAULT_SCROLLBACK)
 
 const showSettings = ref(false)
-const settingsTab = ref<'general' | 'about'>('general')
+const settingsTab = ref<'general' | 'shortcuts' | 'about'>('general')
 const electronVersion = ref('')
 const appVersion = ref('')
 
@@ -80,6 +92,91 @@ const taskMgrFocusId = ref<string | null>(null)
 const taskMgrScopeCwd = ref<string | null>(null)
 const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
+
+// Shortcut overrides — only non-default bindings are stored. Passed to every
+// TerminalView as a prop; merged with DEFAULT_SHORTCUTS inside the key handler.
+const shortcutOverrides = ref<Record<string, string>>({})
+const recordingAction = ref<string | null>(null)
+
+// Effective shortcuts (defaults merged with user overrides)
+const effectiveShortcuts = computed(() => ({
+  ...DEFAULT_SHORTCUTS,
+  ...shortcutOverrides.value
+}))
+
+const startRecording = (action: string): void => {
+  recordingAction.value = action
+}
+
+const resetShortcut = (action: string): void => {
+  const next = { ...shortcutOverrides.value }
+  delete next[action]
+  shortcutOverrides.value = next
+  window.api.settingsSet({ shortcutOverrides: next })
+}
+
+const onRecordingKeydown = (e: KeyboardEvent): void => {
+  if (!recordingAction.value) return
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (e.key === 'Escape') {
+    recordingAction.value = null
+    return
+  }
+
+  // Ignore standalone modifier presses
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return
+
+  // Require at least Ctrl or Alt
+  if (!e.ctrlKey && !e.altKey) return
+
+  const shortcut = eventToShortcut(e)
+  const targetAction = recordingAction.value
+  recordingAction.value = null
+
+  // Check for conflicts — if another action already uses this combo, swap.
+  const conflict = SHORTCUT_DEFS.find(
+    (d) => d.action !== targetAction && effectiveShortcuts.value[d.action] === shortcut
+  )
+
+  const next = { ...shortcutOverrides.value }
+
+  if (conflict) {
+    // Swap: the conflicting action gets this one's old binding
+    next[conflict.action] = effectiveShortcuts.value[targetAction]
+  }
+
+  if (shortcut === DEFAULT_SHORTCUTS[targetAction]) {
+    delete next[targetAction]
+  } else {
+    next[targetAction] = shortcut
+  }
+
+  // Clean up any that became default
+  for (const a of Object.keys(next)) {
+    if (next[a] === DEFAULT_SHORTCUTS[a]) delete next[a]
+  }
+
+  shortcutOverrides.value = next
+  window.api.settingsSet({ shortcutOverrides: next })
+}
+
+// Watch recording state to attach/remove the global keydown listener
+const watchRecording = (): void => {
+  if (recordingAction.value) {
+    window.addEventListener('keydown', onRecordingKeydown, true)
+  } else {
+    window.removeEventListener('keydown', onRecordingKeydown, true)
+  }
+}
+
+// Cancel recording when settings drawer closes
+watch(showSettings, (open) => {
+  if (!open) recordingAction.value = null
+})
+
+watch(recordingAction, watchRecording)
 
 // Tasks drawer width (drag-to-resize, persisted). Clamp keeps it usable: the
 // task list is a fixed 320px, so a too-narrow drawer leaves no log space.
@@ -641,6 +738,9 @@ onMounted(async () => {
   if (typeof settings.tasksDrawerWidth === 'number') {
     tasksDrawerWidth.value = clampDrawerWidth(settings.tasksDrawerWidth)
   }
+  if (settings.shortcutOverrides && typeof settings.shortcutOverrides === 'object') {
+    shortcutOverrides.value = settings.shortcutOverrides as Record<string, string>
+  }
   if (settings.paneLayout) {
     const restoredPaneCwd: Record<string, string> = {}
     const restored = deserializeLayout(settings.paneLayout, restoredPaneCwd)
@@ -699,6 +799,7 @@ onUnmounted(() => {
   window.removeEventListener('mousemove', onPaneDragMove)
   window.removeEventListener('mouseup', onPaneDragUp)
   window.removeEventListener('keydown', onPaneDragKey)
+  window.removeEventListener('keydown', onRecordingKeydown, true)
   window.removeEventListener('beforeunload', flushSaveOnUnload)
 })
 </script>
@@ -758,6 +859,14 @@ onUnmounted(() => {
           >
             <Layout :size="14" class="settings-nav-icon" />
             <span>通用</span>
+          </button>
+          <button
+            class="settings-nav-item"
+            :class="{ active: settingsTab === 'shortcuts' }"
+            @click="settingsTab = 'shortcuts'"
+          >
+            <Keyboard :size="14" class="settings-nav-icon" />
+            <span>快捷键</span>
           </button>
           <button
             class="settings-nav-item"
@@ -871,6 +980,53 @@ onUnmounted(() => {
           </section>
         </template>
 
+        <template v-if="settingsTab === 'shortcuts'">
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <Keyboard :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">快捷键</h3>
+            </header>
+            <p class="settings-item-desc" style="margin-top: -8px">
+              点击快捷键进入录制模式，按下组合键即可更改。录制时按 Esc 取消。
+            </p>
+            <div class="shortcut-list">
+              <div v-for="def in SHORTCUT_DEFS" :key="def.action" class="shortcut-row">
+                <span class="shortcut-label">{{ def.label }}</span>
+                <div class="shortcut-keys">
+                  <template v-if="recordingAction === def.action">
+                    <span class="shortcut-recording">按下组合键...</span>
+                  </template>
+                  <template v-else>
+                    <span
+                      class="shortcut-kbd"
+                      :class="{
+                        modified: effectiveShortcuts[def.action] !== def.defaultKeys
+                      }"
+                      @click="startRecording(def.action)"
+                    >
+                      <span
+                        v-for="(part, i) in effectiveShortcuts[def.action].split('+')"
+                        :key="i"
+                        class="shortcut-key-chip"
+                      >
+                        {{ part }}
+                      </span>
+                    </span>
+                  </template>
+                  <button
+                    v-if="effectiveShortcuts[def.action] !== def.defaultKeys"
+                    class="shortcut-reset"
+                    title="恢复默认"
+                    @click="resetShortcut(def.action)"
+                  >
+                    <RotateCcw :size="12" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
         <template v-else>
           <section class="settings-section">
             <header class="settings-section-header">
@@ -933,6 +1089,7 @@ onUnmounted(() => {
           :cwd="paneCwd[pane.id] ?? cwd"
           :font-size="appFontSize"
           :scrollback="appScrollback"
+          :shortcuts="shortcutOverrides"
           @focus="setActive"
           @split="onSplit"
           @close="onClose"
@@ -1346,5 +1503,105 @@ onUnmounted(() => {
 .about-row .mono {
   font-family: $font-mono;
   font-size: 11px;
+}
+
+/* Shortcut list */
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  min-height: 32px;
+}
+
+.shortcut-row + .shortcut-row {
+  border-top: 1px solid var(--el-border-color-light);
+}
+
+.shortcut-label {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  flex-shrink: 0;
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shortcut-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.shortcut-kbd:hover {
+  border-color: var(--el-border-color);
+  background: var(--el-fill-color);
+}
+
+.shortcut-kbd.modified .shortcut-key-chip {
+  border-color: var(--el-color-primary);
+}
+
+.shortcut-key-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-family: $font-mono;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 3px;
+  padding: 1px 6px;
+  color: var(--el-text-color-primary);
+}
+
+.shortcut-recording {
+  font-size: 12px;
+  color: var(--el-color-primary);
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes shortcut-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.shortcut-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.shortcut-reset:hover {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 </style>

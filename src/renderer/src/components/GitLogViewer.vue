@@ -379,6 +379,15 @@ const filePatches = computed<FilePatch[]>(() => splitDiffByFile(detail.value?.di
 const selectedFileIdx = ref(0)
 const selectedPatch = computed(() => filePatches.value[selectedFileIdx.value]?.body || '')
 
+// DiffViewer 拉取整文件做语法高亮。commit diff：
+// 左侧 = commit~（父 commit 版本），右侧 = commit 版本。
+// 父 commit 不存在（root commit）时 git show 失败，gitShowFile 返回 null，DiffViewer 自动 fallback。
+function fetchDiffContent(side: 'old' | 'new', path: string): Promise<string | null> {
+  const d = detail.value
+  if (!d) return Promise.resolve(null)
+  return window.api.gitShowFile(props.cwd, side === 'old' ? `${d.hash}^` : d.hash, path)
+}
+
 // --- display helpers -----------------------------------------------------
 
 function formatDate(iso: string): string {
@@ -573,7 +582,12 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
           <div class="gl-splitter-h" @mousedown="(e) => startDrag(e, 'files')" />
 
           <div class="gl-diff">
-            <DiffViewer v-if="selectedPatch" :diff="selectedPatch" hide-sidebar />
+            <DiffViewer
+              v-if="selectedPatch && detail"
+              :diff="selectedPatch"
+              hide-sidebar
+              :fetch-content="fetchDiffContent"
+            />
             <div v-else-if="detail && !filePatches.length" class="gl-state">该提交无文本改动</div>
           </div>
         </div>

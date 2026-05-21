@@ -149,6 +149,12 @@ const fileDiffs = ref<Map<string, { diff: string; truncated: boolean; loading: b
   new Map()
 )
 
+// DiffViewer 拉取整文件做语法高亮。冲突文件 diff 同 working diff：
+// 左侧 = HEAD，右侧 = working tree（含 conflict markers）。
+function fetchDiffContent(side: 'old' | 'new', path: string): Promise<string | null> {
+  return window.api.gitShowFile(props.cwd, side === 'old' ? 'HEAD' : null, path)
+}
+
 async function toggleDiff(file: ConflictedFile): Promise<void> {
   const set = new Set(expanded.value)
   if (set.has(file.path)) {
@@ -300,7 +306,11 @@ const canContinue = computed(() => {
               <div v-if="fileDiffs.get(f.path)!.truncated" class="ms-diff-trunc">
                 差异过大，仅显示前 4 MB
               </div>
-              <DiffViewer v-if="fileDiffs.get(f.path)!.diff" :diff="fileDiffs.get(f.path)!.diff" />
+              <DiffViewer
+                v-if="fileDiffs.get(f.path)!.diff"
+                :diff="fileDiffs.get(f.path)!.diff"
+                :fetch-content="fetchDiffContent"
+              />
               <div v-else class="ms-diff-state">无文本差异</div>
             </template>
           </div>
