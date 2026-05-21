@@ -27,7 +27,12 @@ import {
   continueMergeOp,
   getFileDiff,
   getCommitLog,
-  getCommitDetail
+  getCommitDetail,
+  gitMerge,
+  gitRebase,
+  gitPush,
+  gitPull,
+  gitDeleteBranch
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
 import { readFileSync, existsSync } from 'fs'
@@ -188,11 +193,23 @@ app.whenReady().then(() => {
   // Commit history
   ipcMain.handle(
     'git-log',
-    (_event, cwd: string, opts: { skip?: number; limit?: number; all?: boolean }) =>
-      getCommitLog(cwd, opts || {})
+    (
+      _event,
+      cwd: string,
+      opts: { skip?: number; limit?: number; ref?: string; grep?: string; author?: string }
+    ) => getCommitLog(cwd, opts || {})
   )
   ipcMain.handle('git-commit-detail', (_event, cwd: string, hash: string) =>
     getCommitDetail(cwd, hash)
+  )
+
+  // Branch operations (from the branch context menu)
+  ipcMain.handle('git-merge', (_event, cwd: string, ref: string) => gitMerge(cwd, ref))
+  ipcMain.handle('git-rebase', (_event, cwd: string, ref: string) => gitRebase(cwd, ref))
+  ipcMain.handle('git-push', (_event, cwd: string, branch: string) => gitPush(cwd, branch))
+  ipcMain.handle('git-pull', (_event, cwd: string) => gitPull(cwd))
+  ipcMain.handle('git-branch-delete', (_event, cwd: string, branch: string, force?: boolean) =>
+    gitDeleteBranch(cwd, branch, force)
   )
 
   ipcMain.handle(

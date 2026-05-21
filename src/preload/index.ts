@@ -97,7 +97,10 @@ const api = {
       error?: string
     }>,
   // Commit history
-  gitLog: (cwd: string, opts: { skip?: number; limit?: number; all?: boolean }) =>
+  gitLog: (
+    cwd: string,
+    opts: { skip?: number; limit?: number; ref?: string; grep?: string; author?: string }
+  ) =>
     ipcRenderer.invoke('git-log', cwd, opts) as Promise<
       {
         hash: string
@@ -124,6 +127,20 @@ const api = {
       diff: string
       truncated: boolean
     } | null>,
+  // Branch ops (context menu)
+  gitMerge: (cwd: string, ref: string) =>
+    ipcRenderer.invoke('git-merge', cwd, ref) as Promise<{ success: boolean; error?: string }>,
+  gitRebase: (cwd: string, ref: string) =>
+    ipcRenderer.invoke('git-rebase', cwd, ref) as Promise<{ success: boolean; error?: string }>,
+  gitPush: (cwd: string, branch: string) =>
+    ipcRenderer.invoke('git-push', cwd, branch) as Promise<{ success: boolean; error?: string }>,
+  gitPull: (cwd: string) =>
+    ipcRenderer.invoke('git-pull', cwd) as Promise<{ success: boolean; error?: string }>,
+  gitBranchDelete: (cwd: string, branch: string, force?: boolean) =>
+    ipcRenderer.invoke('git-branch-delete', cwd, branch, force) as Promise<{
+      success: boolean
+      error?: string
+    }>,
   gitWorktreeAdd: (cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) =>
     ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
       success: boolean

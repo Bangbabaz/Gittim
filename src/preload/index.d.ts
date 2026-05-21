@@ -85,7 +85,7 @@ declare global {
       ) => Promise<{ success: boolean; error?: string }>
       gitLog: (
         cwd: string,
-        opts: { skip?: number; limit?: number; all?: boolean }
+        opts: { skip?: number; limit?: number; ref?: string; grep?: string; author?: string }
       ) => Promise<
         {
           hash: string
@@ -114,6 +114,15 @@ declare global {
         diff: string
         truncated: boolean
       } | null>
+      gitMerge: (cwd: string, ref: string) => Promise<{ success: boolean; error?: string }>
+      gitRebase: (cwd: string, ref: string) => Promise<{ success: boolean; error?: string }>
+      gitPush: (cwd: string, branch: string) => Promise<{ success: boolean; error?: string }>
+      gitPull: (cwd: string) => Promise<{ success: boolean; error?: string }>
+      gitBranchDelete: (
+        cwd: string,
+        branch: string,
+        force?: boolean
+      ) => Promise<{ success: boolean; error?: string }>
       gitWorktreeAdd: (
         cwd: string,
         opts: { path: string; newBranch?: string; fromBranch?: string }

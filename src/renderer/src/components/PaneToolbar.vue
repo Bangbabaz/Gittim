@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import {
   GitBranch,
   GitMerge,
+  GitBranchPlus,
   History,
   Play,
   RotateCw,
@@ -12,7 +13,10 @@ import {
   FolderGit2,
   Trash2,
   FolderClosed,
-  RefreshCw
+  RefreshCw,
+  ArrowUpFromLine,
+  ArrowDownToLine,
+  CornerDownRight
 } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DiffViewer from './DiffViewer.vue'
@@ -153,6 +157,178 @@ const refresh = async (): Promise<void> => {
 type SwitchTarget = { branch: string; isRemote: boolean; remoteName?: string }
 const showSwitchConfirm = ref(false)
 const pendingSwitch = ref<SwitchTarget | null>(null)
+
+// --- Branch right-click menu ---------------------------------------------
+// One menu instance shared by every branch row in the el-select dropdown.
+// `target` stores the right-clicked branch so the action handlers don't have
+// to thread it through closures. Closed on outside-click or after running an
+// action; the el-select popper is also closed when the menu opens to avoid
+// two overlapping floats.
+type BranchRow = {
+  name: string
+  local: boolean
+  remote: boolean
+  remoteName?: string
+  worktree?: boolean
+}
+const branchSelectRef = ref<{ blur: () => void } | null>(null)
+const branchMenuOpen = ref(false)
+const branchMenuPos = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+const branchMenuTarget = ref<BranchRow | null>(null)
+const branchActionLoading = ref(false)
+
+// `worktree` action just opens the existing worktree dialog with the picked
+// branch prefilled — encoded the same way as the dialog's internal form
+// (`local:foo` / `remote:bar`).
+function ctxFromBranchValue(b: BranchRow): string {
+  return b.local ? `local:${b.name}` : `remote:${b.name}`
+}
+
+// Remote refs need the `<remote>/<name>` shape so git resolves the tracking
+// ref, not a (non-existent) local branch of the same short name.
+function ctxResolveRef(b: BranchRow): string {
+  return b.local ? b.name : `${b.remoteName || 'origin'}/${b.name}`
+}
+
+function openBranchMenu(e: MouseEvent, b: BranchRow): void {
+  e.preventDefault()
+  e.stopPropagation()
+  branchMenuTarget.value = b
+  branchMenuPos.value = { x: e.clientX, y: e.clientY }
+  branchMenuOpen.value = true
+  // Close the select popper so the context menu doesn't overlap it.
+  branchSelectRef.value?.blur?.()
+}
+
+function closeBranchMenu(): void {
+  branchMenuOpen.value = false
+  branchMenuTarget.value = null
+}
+
+// Outside-click closes the menu. Mounted at script level so it runs once for
+// the lifetime of the component instance.
+function onGlobalMouseDown(e: MouseEvent): void {
+  if (!branchMenuOpen.value) return
+  const t = e.target as HTMLElement | null
+  // Inside the menu itself? Let the click bubble to the menu's own handler.
+  if (t?.closest('.branch-ctx-menu')) return
+  closeBranchMenu()
+}
+onMounted(() => window.addEventListener('mousedown', onGlobalMouseDown, true))
+onUnmounted(() => window.removeEventListener('mousedown', onGlobalMouseDown, true))
+
+async function ctxMergeInto(): Promise<void> {
+  const b = branchMenuTarget.value
+  if (!props.cwd || !b) return
+  const ref = ctxResolveRef(b)
+  closeBranchMenu()
+  branchActionLoading.value = true
+  try {
+    const r = await window.api.gitMerge(props.cwd, ref)
+    if (r.success) ElMessage.success(`已合并 ${ref} 到 ${currentBranch.value}`)
+    else ElMessage.error(r.error || '合并失败（可能产生冲突，请查看冲突面板）')
+  } finally {
+    branchActionLoading.value = false
+    refresh()
+  }
+}
+
+async function ctxRebaseOnto(): Promise<void> {
+  const b = branchMenuTarget.value
+  if (!props.cwd || !b) return
+  const ref = ctxResolveRef(b)
+  closeBranchMenu()
+  branchActionLoading.value = true
+  try {
+    const r = await window.api.gitRebase(props.cwd, ref)
+    if (r.success) ElMessage.success(`已将 ${currentBranch.value} 变基到 ${ref}`)
+    else ElMessage.error(r.error || '变基失败（可能产生冲突，请查看冲突面板）')
+  } finally {
+    branchActionLoading.value = false
+    refresh()
+  }
+}
+
+function ctxWorktreeFrom(): void {
+  const b = branchMenuTarget.value
+  if (!b) return
+  const prefill = ctxFromBranchValue(b)
+  closeBranchMenu()
+  openWorktreeDialog(prefill)
+}
+
+async function ctxPush(): Promise<void> {
+  const b = branchMenuTarget.value
+  if (!props.cwd || !b) return
+  closeBranchMenu()
+  branchActionLoading.value = true
+  try {
+    const r = await window.api.gitPush(props.cwd, b.name)
+    if (r.success) ElMessage.success(`已推送 ${b.name}`)
+    else ElMessage.error(r.error || '推送失败')
+  } finally {
+    branchActionLoading.value = false
+    refresh()
+  }
+}
+
+async function ctxPull(): Promise<void> {
+  if (!props.cwd) return
+  closeBranchMenu()
+  branchActionLoading.value = true
+  try {
+    const r = await window.api.gitPull(props.cwd)
+    if (r.success) ElMessage.success('已更新（fast-forward）')
+    else ElMessage.error(r.error || '更新失败（可能需要先合并或变基）')
+  } finally {
+    branchActionLoading.value = false
+    refresh()
+  }
+}
+
+async function ctxDeleteBranch(): Promise<void> {
+  const b = branchMenuTarget.value
+  if (!props.cwd || !b) return
+  closeBranchMenu()
+  try {
+    await ElMessageBox.confirm(`确定删除本地分支 "${b.name}"？`, '删除分支', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  branchActionLoading.value = true
+  try {
+    let r = await window.api.gitBranchDelete(props.cwd, b.name, false)
+    if (!r.success) {
+      try {
+        await ElMessageBox.confirm(
+          `删除失败：${r.error || '该分支可能未合并'}\n是否强制删除？`,
+          '强制删除分支',
+          { confirmButtonText: '强制删除', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return
+      }
+      r = await window.api.gitBranchDelete(props.cwd, b.name, true)
+    }
+    if (r.success) {
+      ElMessage.success(`已删除分支 "${b.name}"`)
+      refresh()
+    } else {
+      ElMessage.error(r.error || '删除失败')
+    }
+  } finally {
+    branchActionLoading.value = false
+  }
+}
+
+// Disabled when target == current branch (can't delete the branch you're on,
+// merging/rebasing it into itself is a no-op).
+const ctxIsCurrent = computed(() => branchMenuTarget.value?.name === currentBranch.value)
+const ctxIsLocal = computed(() => !!branchMenuTarget.value?.local)
 
 // `:model-value` is one-way bound, so currentBranch is the single source of
 // truth. The dropdown's picked option doesn't stick until we set it here.
@@ -356,16 +532,18 @@ function onProjectNameInput(): void {
   wtNameEdited.value = true
 }
 
-async function openWorktreeDialog(): Promise<void> {
+async function openWorktreeDialog(prefillFrom?: string): Promise<void> {
   // Reset repo name first so the computed defaultProjectName falls back to
   // folderName-from-cwd if the IPC call lags. The fetched value below then
   // re-triggers the watcher and the project-name field updates.
   repoName.value = null
-  // currentBranch is always a local branch (HEAD), so seed with the local
-  // source — and assign it BEFORE wtNewBranch is reset so the watch on
+  // `prefillFrom` (used by the branch context menu's "新工作树" action) takes
+  // precedence over HEAD. Encoded the same way as the form's internal value
+  // (`local:foo` / `remote:bar`) so the watcher logic doesn't need a special
+  // case. Assignment happens BEFORE wtNewBranch is reset so the watch on
   // wtFromBranch (which auto-checks 新分支 for `remote:` picks) doesn't
   // misfire and flip wtNewBranch back to true.
-  wtFromBranch.value = currentBranch.value ? `local:${currentBranch.value}` : ''
+  wtFromBranch.value = prefillFrom || (currentBranch.value ? `local:${currentBranch.value}` : '')
   wtNewBranch.value = false
   wtNewBranchName.value = ''
   wtNameEdited.value = false
@@ -725,6 +903,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
   <div v-if="isRepo" class="pane-toolbar" @click.stop>
     <GitBranch class="git-icon" :size="14" />
     <el-select
+      ref="branchSelectRef"
       :model-value="currentBranch"
       class="branch-select"
       popper-class="branch-select-dropdown"
@@ -747,7 +926,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
       </template>
       <el-option-group v-if="showLocal" label="本地分支">
         <el-option v-for="b in localBranches" :key="b.name" :label="b.name" :value="b.name">
-          <span class="br-opt">
+          <span class="br-opt" @contextmenu="(e) => openBranchMenu(e, b)">
             <span class="br-name">{{ b.name }}</span>
             <span v-if="b.worktree" class="br-tag worktree" title="该分支已在其他工作树检出"
               >工作树</span
@@ -759,15 +938,80 @@ const onPickIde = async (cmd: string): Promise<void> => {
       </el-option-group>
       <el-option-group v-if="showRemote && remoteBranches.length" label="远程分支">
         <el-option v-for="b in remoteBranches" :key="b.name" :label="b.name" :value="b.name">
-          <span class="br-opt">
+          <span class="br-opt" @contextmenu="(e) => openBranchMenu(e, b)">
             <span class="br-name">{{ b.name }}</span>
             <span class="br-tag remote">远程</span>
           </span>
         </el-option>
       </el-option-group>
     </el-select>
+
+    <!-- Floating branch context menu. Teleport-to-body so the el-select
+         popper's stacking context can't bury it; closes on outside click via
+         the global mousedown listener installed in the script. -->
+    <Teleport to="body">
+      <div
+        v-if="branchMenuOpen && branchMenuTarget"
+        class="branch-ctx-menu"
+        :style="{ left: branchMenuPos.x + 'px', top: branchMenuPos.y + 'px' }"
+      >
+        <button
+          class="bm-item"
+          :disabled="ctxIsCurrent || branchActionLoading"
+          @click="ctxMergeInto"
+        >
+          <GitMerge :size="13" />
+          <span
+            >将 <b>{{ branchMenuTarget.name }}</b> 合并到 <b>{{ currentBranch }}</b></span
+          >
+        </button>
+        <button
+          class="bm-item"
+          :disabled="ctxIsCurrent || branchActionLoading"
+          @click="ctxRebaseOnto"
+        >
+          <CornerDownRight :size="13" />
+          <span
+            >将 <b>{{ currentBranch }}</b> 变基到 <b>{{ branchMenuTarget.name }}</b></span
+          >
+        </button>
+        <button class="bm-item" :disabled="branchActionLoading" @click="ctxWorktreeFrom">
+          <GitBranchPlus :size="13" />
+          <span
+            >来自 <b>{{ branchMenuTarget.name }}</b> 的新工作树…</span
+          >
+        </button>
+        <div v-if="ctxIsLocal" class="bm-sep" />
+        <button v-if="ctxIsLocal" class="bm-item" :disabled="branchActionLoading" @click="ctxPush">
+          <ArrowUpFromLine :size="13" />
+          <span
+            >推送 <b>{{ branchMenuTarget.name }}</b></span
+          >
+        </button>
+        <button
+          v-if="ctxIsLocal && ctxIsCurrent"
+          class="bm-item"
+          :disabled="branchActionLoading"
+          @click="ctxPull"
+        >
+          <ArrowDownToLine :size="13" />
+          <span>更新（fast-forward）</span>
+        </button>
+        <button
+          v-if="ctxIsLocal && !ctxIsCurrent"
+          class="bm-item danger"
+          :disabled="branchActionLoading"
+          @click="ctxDeleteBranch"
+        >
+          <Trash2 :size="13" />
+          <span
+            >删除 <b>{{ branchMenuTarget.name }}</b></span
+          >
+        </button>
+      </div>
+    </Teleport>
     <el-tooltip content="新建工作树" placement="bottom" :show-after="300">
-      <button class="wt-btn" @click="openWorktreeDialog">+</button>
+      <button class="wt-btn" @click="openWorktreeDialog()">+</button>
     </el-tooltip>
     <el-tooltip content="管理工作树" placement="bottom" :show-after="300">
       <button class="wt-btn icon" @click="openWtManage">
@@ -1425,6 +1669,72 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .merge-badge-count {
   font-family: $font-mono;
+}
+
+/* Branch context menu — teleported, but the scoped attribute still travels
+   with it so these selectors hit. Sits above the el-select popper (z=3000+
+   in Element Plus) and the dialog mask (z=2000), so an open dialog won't
+   bury it either. */
+.branch-ctx-menu {
+  position: fixed;
+  z-index: 3500;
+  min-width: 260px;
+  max-width: 380px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: $radius;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  user-select: none;
+}
+
+.bm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: $font-ui;
+  line-height: 1.4;
+}
+
+.bm-item:hover:not(:disabled) {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.bm-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bm-item.danger {
+  color: var(--el-color-danger);
+}
+
+.bm-item.danger:hover:not(:disabled) {
+  background: var(--el-color-danger);
+  color: #fff;
+}
+
+.bm-item b {
+  font-weight: 600;
+}
+
+.bm-sep {
+  height: 1px;
+  background: var(--el-border-color);
+  margin: 4px 0;
 }
 
 /* Open-in-IDE control: a connected pair (brand chip + small caret) that

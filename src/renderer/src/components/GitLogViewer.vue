@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { RefreshCw, GitCommit, User, Calendar, ChevronDown } from 'lucide-vue-next'
+import { RefreshCw, GitCommit, User, Calendar, Search } from 'lucide-vue-next'
 import DiffViewer from './DiffViewer.vue'
 
 interface CommitInfo {
@@ -21,25 +21,180 @@ interface CommitDetail extends CommitInfo {
   truncated: boolean
 }
 
+interface BranchInfo {
+  name: string
+  local: boolean
+  remote: boolean
+  remoteName?: string
+  worktree?: boolean
+}
+
 const props = defineProps<{ cwd: string }>()
 
 const PAGE = 200
 
+// --- list / detail state -------------------------------------------------
 const commits = ref<CommitInfo[]>([])
 const selectedHash = ref<string | null>(null)
 const detail = ref<CommitDetail | null>(null)
 const loadingList = ref(false)
 const loadingMore = ref(false)
 const loadingDetail = ref(false)
-const showAll = ref(false)
-// Once a page returns fewer than PAGE rows we've hit the bottom; sticky flag
-// so the "加载更多" button hides even after the user toggles --all back off
-// (which resets it).
 const hasMore = ref(true)
 
-// Generation guard for list refreshes (page reload / branch filter toggle).
-// A second one for commit-detail loads (clicks happen fast and we must not
-// let an older detail land on a newer selection).
+// --- filters -------------------------------------------------------------
+const branches = ref<BranchInfo[]>([])
+const branchFilter = ref<string>('') // empty = HEAD
+const grepFilter = ref('')
+const authorFilter = ref('')
+// Debounced copies that actually drive the IPC call so each keystroke
+// doesn't kick off a fresh git log.
+const grepDebounced = ref('')
+const authorDebounced = ref('')
+let grepTimer: ReturnType<typeof setTimeout> | null = null
+let authorTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(grepFilter, (v) => {
+  if (grepTimer) clearTimeout(grepTimer)
+  grepTimer = setTimeout(() => {
+    grepDebounced.value = v
+  }, 280)
+})
+watch(authorFilter, (v) => {
+  if (authorTimer) clearTimeout(authorTimer)
+  authorTimer = setTimeout(() => {
+    authorDebounced.value = v
+  }, 280)
+})
+
+// --- splitter sizes ------------------------------------------------------
+// Stored as px so resize math is independent of the surrounding layout. The
+// ResizeObserver below clamps them back into the container's actual bounds
+// whenever the dialog itself is resized.
+const sidebarW = ref(360)
+const metaH = ref(180)
+const filesW = ref(260)
+
+const bodyRef = ref<HTMLElement>()
+const rightRef = ref<HTMLElement>()
+const filesDiffRef = ref<HTMLElement>()
+
+// Min/max constants — tight enough that the user can't make a pane unusably
+// small but loose enough that a small dialog still leaves a useful diff area.
+const MIN_SIDEBAR = 220
+const MAX_SIDEBAR_FRAC = 0.65
+const MIN_META = 100
+const MAX_META_FRAC = 0.7
+const MIN_FILES = 160
+const MAX_FILES_FRAC = 0.6
+
+interface DragState {
+  axis: 'x' | 'y'
+  startCoord: number
+  startVal: number
+  target: 'sidebar' | 'meta' | 'files'
+  containerSize: number
+}
+let drag: DragState | null = null
+
+function startDrag(e: MouseEvent, target: DragState['target']): void {
+  e.preventDefault()
+  const axis: 'x' | 'y' = target === 'meta' ? 'y' : 'x'
+  let containerEl: HTMLElement | undefined
+  let startVal = 0
+  if (target === 'sidebar') {
+    containerEl = bodyRef.value
+    startVal = sidebarW.value
+  } else if (target === 'meta') {
+    containerEl = rightRef.value
+    startVal = metaH.value
+  } else {
+    containerEl = filesDiffRef.value
+    startVal = filesW.value
+  }
+  if (!containerEl) return
+  const rect = containerEl.getBoundingClientRect()
+  drag = {
+    axis,
+    startCoord: axis === 'x' ? e.clientX : e.clientY,
+    startVal,
+    target,
+    containerSize: axis === 'x' ? rect.width : rect.height
+  }
+  document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
+}
+
+function clampSplitter(target: DragState['target'], val: number, container: number): number {
+  if (target === 'sidebar') {
+    return Math.max(MIN_SIDEBAR, Math.min(container * MAX_SIDEBAR_FRAC, val))
+  }
+  if (target === 'meta') {
+    return Math.max(MIN_META, Math.min(container * MAX_META_FRAC, val))
+  }
+  return Math.max(MIN_FILES, Math.min(container * MAX_FILES_FRAC, val))
+}
+
+function onDragMove(e: MouseEvent): void {
+  if (!drag) return
+  const delta = (drag.axis === 'x' ? e.clientX : e.clientY) - drag.startCoord
+  const next = clampSplitter(drag.target, drag.startVal + delta, drag.containerSize)
+  if (drag.target === 'sidebar') sidebarW.value = next
+  else if (drag.target === 'meta') metaH.value = next
+  else filesW.value = next
+}
+
+function onDragEnd(): void {
+  drag = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
+}
+
+// Keep splitter sizes valid when the dialog itself is resized (or the layout
+// initialises before its parent had a real height).
+let bodyRo: ResizeObserver | null = null
+let rightRo: ResizeObserver | null = null
+let filesDiffRo: ResizeObserver | null = null
+
+onMounted(async () => {
+  await nextTick()
+  if (bodyRef.value) {
+    bodyRo = new ResizeObserver(() => {
+      const w = bodyRef.value!.getBoundingClientRect().width
+      sidebarW.value = clampSplitter('sidebar', sidebarW.value, w)
+    })
+    bodyRo.observe(bodyRef.value)
+  }
+  if (rightRef.value) {
+    rightRo = new ResizeObserver(() => {
+      const h = rightRef.value!.getBoundingClientRect().height
+      metaH.value = clampSplitter('meta', metaH.value, h)
+    })
+    rightRo.observe(rightRef.value)
+  }
+  if (filesDiffRef.value) {
+    filesDiffRo = new ResizeObserver(() => {
+      const w = filesDiffRef.value!.getBoundingClientRect().width
+      filesW.value = clampSplitter('files', filesW.value, w)
+    })
+    filesDiffRo.observe(filesDiffRef.value)
+  }
+})
+
+onUnmounted(() => {
+  bodyRo?.disconnect()
+  rightRo?.disconnect()
+  filesDiffRo?.disconnect()
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
+})
+
+// --- data fetching -------------------------------------------------------
+
 let listGen = 0
 let detailGen = 0
 
@@ -55,7 +210,9 @@ async function loadInitial(): Promise<void> {
     const list = await window.api.gitLog(props.cwd, {
       skip: 0,
       limit: PAGE,
-      all: showAll.value
+      ref: branchFilter.value || undefined,
+      grep: grepDebounced.value || undefined,
+      author: authorDebounced.value || undefined
     })
     if (myGen !== listGen) return
     commits.value = list
@@ -78,7 +235,9 @@ async function loadMore(): Promise<void> {
     const list = await window.api.gitLog(props.cwd, {
       skip: commits.value.length,
       limit: PAGE,
-      all: showAll.value
+      ref: branchFilter.value || undefined,
+      grep: grepDebounced.value || undefined,
+      author: authorDebounced.value || undefined
     })
     commits.value = [...commits.value, ...list]
     if (list.length < PAGE) hasMore.value = false
@@ -91,6 +250,7 @@ async function loadDetail(hash: string): Promise<void> {
   if (!props.cwd) return
   loadingDetail.value = true
   detail.value = null
+  selectedFileIdx.value = 0
   const myGen = ++detailGen
   try {
     const d = await window.api.gitCommitDetail(props.cwd, hash)
@@ -105,6 +265,15 @@ async function loadDetail(hash: string): Promise<void> {
   }
 }
 
+async function loadBranches(): Promise<void> {
+  if (!props.cwd) return
+  try {
+    branches.value = await window.api.getGitBranches(props.cwd)
+  } catch {
+    branches.value = []
+  }
+}
+
 function selectCommit(c: CommitInfo): void {
   if (c.hash === selectedHash.value) return
   selectedHash.value = c.hash
@@ -113,18 +282,91 @@ function selectCommit(c: CommitInfo): void {
 
 watch(
   () => props.cwd,
-  () => loadInitial(),
+  () => {
+    loadBranches()
+    loadInitial()
+  },
   { immediate: true }
 )
 
-// `--all` toggle = full reload, but the cwd watcher above already handles the
-// "user switched panes" reload, so no need to guard against the dual-trigger.
-watch(showAll, () => loadInitial())
+// Re-fetch when any of the three filters changes (debounced ones via their
+// `*Debounced` ref so we don't kick on every keystroke).
+watch([branchFilter, grepDebounced, authorDebounced], () => loadInitial())
 
 defineExpose({ refresh: loadInitial })
 
-// Friendly relative date (just for the list — detail panel shows the full
-// timestamp). All within the last 24h → "3 小时前"; otherwise the ISO date.
+// --- file splitting ------------------------------------------------------
+// Slice the unified patch into per-file pieces by walking line by line and
+// breaking on `diff --git a/... b/...` headers. Cheaper than re-parsing
+// diff2html's output back into a string, and keeps the original git format
+// (with /dev/null markers, mode lines, binary deltas) intact for the
+// right-side DiffViewer.
+interface FilePatch {
+  path: string
+  status: 'new' | 'deleted' | 'renamed' | 'modified' | 'binary'
+  added: number
+  deleted: number
+  body: string
+}
+
+function splitDiffByFile(rawDiff: string): FilePatch[] {
+  if (!rawDiff) return []
+  const result: FilePatch[] = []
+  const lines = rawDiff.split('\n')
+  let current: string[] = []
+  let started = false
+  const flush = (): void => {
+    if (!started || !current.length) return
+    const body = current.join('\n')
+    const header = current[0]
+    const m = header.match(/^diff --git a\/(\S+) b\/(\S+)/)
+    const oldPath = m ? m[1] : ''
+    const newPath = m ? m[2] : ''
+    // Inspect the small header window for new/deleted/renamed/binary cues.
+    let status: FilePatch['status'] = 'modified'
+    let renamed = false
+    let isBinary = false
+    for (let i = 0; i < Math.min(current.length, 12); i++) {
+      const l = current[i]
+      if (l.startsWith('new file mode')) status = 'new'
+      else if (l.startsWith('deleted file mode')) status = 'deleted'
+      else if (l.startsWith('rename from ') || l.startsWith('rename to ')) renamed = true
+      else if (l.startsWith('Binary files ')) isBinary = true
+    }
+    if (renamed) status = 'renamed'
+    if (isBinary && status === 'modified') status = 'binary'
+    // Count added/deleted lines (skip the +++/--- headers themselves).
+    let added = 0
+    let deleted = 0
+    for (const l of current) {
+      if (l.startsWith('+') && !l.startsWith('+++')) added++
+      else if (l.startsWith('-') && !l.startsWith('---')) deleted++
+    }
+    const path =
+      renamed && oldPath && newPath && oldPath !== newPath
+        ? `${oldPath} → ${newPath}`
+        : newPath || oldPath || '(unknown)'
+    result.push({ path, status, added, deleted, body })
+  }
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      flush()
+      current = [line]
+      started = true
+    } else {
+      current.push(line)
+    }
+  }
+  flush()
+  return result
+}
+
+const filePatches = computed<FilePatch[]>(() => splitDiffByFile(detail.value?.diff || ''))
+const selectedFileIdx = ref(0)
+const selectedPatch = computed(() => filePatches.value[selectedFileIdx.value]?.body || '')
+
+// --- display helpers -----------------------------------------------------
+
 function formatDate(iso: string): string {
   if (!iso) return ''
   const t = Date.parse(iso)
@@ -139,13 +381,9 @@ function formatDate(iso: string): string {
 
 function formatFullDate(iso: string): string {
   if (!iso) return ''
-  // Keep the timezone (helpful for distributed teams). Trim seconds-precision
-  // for a less noisy line: `2026-05-21T14:32+08:00`.
   return iso.replace(/:\d{2}([+-]\d{2}:\d{2}|Z)$/, '$1')
 }
 
-// Ref-decorator chips: `HEAD -> main` becomes the HEAD pointer + branch;
-// `tag: v1.0` becomes a tag pill; remote refs (`origin/main`) get a 3rd colour.
 type Decoration = { kind: 'head' | 'branch' | 'remote' | 'tag'; label: string }
 
 function decorate(refs: string[]): Decoration[] {
@@ -159,10 +397,6 @@ function decorate(refs: string[]): Decoration[] {
     } else if (r.startsWith('tag: ')) {
       out.push({ kind: 'tag', label: r.slice('tag: '.length) })
     } else if (r.includes('/')) {
-      // origin/main, upstream/feat — treat anything containing `/` as a
-      // remote-tracking ref. Local branches with slashes (`feat/foo`) get
-      // decorated as branches by the `HEAD -> ` path above; if such a branch
-      // is NOT current, it shows up as a plain branch token without slash here.
       out.push({ kind: 'remote', label: r })
     } else {
       out.push({ kind: 'branch', label: r })
@@ -170,22 +404,93 @@ function decorate(refs: string[]): Decoration[] {
   }
   return out
 }
+
+const branchOptions = computed(() => {
+  const opts: { value: string; label: string; group: 'local' | 'remote' }[] = []
+  for (const b of branches.value) {
+    if (b.local) opts.push({ value: b.name, label: b.name, group: 'local' })
+  }
+  for (const b of branches.value) {
+    if (b.remote && !b.local) {
+      const ref = `${b.remoteName || 'origin'}/${b.name}`
+      opts.push({ value: ref, label: ref, group: 'remote' })
+    }
+  }
+  return opts
+})
+
+const fileStatusLabel = (s: FilePatch['status']): string =>
+  s === 'new'
+    ? '新增'
+    : s === 'deleted'
+      ? '删除'
+      : s === 'renamed'
+        ? '重命名'
+        : s === 'binary'
+          ? '二进制'
+          : '修改'
 </script>
 
 <template>
   <div class="gl-root">
     <header class="gl-header">
-      <span class="gl-count">{{ commits.length }} 个提交</span>
-      <el-checkbox v-model="showAll" size="small">显示所有分支</el-checkbox>
+      <el-select
+        v-model="branchFilter"
+        size="small"
+        filterable
+        clearable
+        class="gl-branch-select"
+        placeholder="所有分支（HEAD）"
+      >
+        <el-option value="" label="所有分支（HEAD）" />
+        <el-option-group label="本地分支">
+          <el-option
+            v-for="o in branchOptions.filter((x) => x.group === 'local')"
+            :key="`l:${o.value}`"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-option-group>
+        <el-option-group label="远程分支">
+          <el-option
+            v-for="o in branchOptions.filter((x) => x.group === 'remote')"
+            :key="`r:${o.value}`"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-option-group>
+      </el-select>
+      <el-input
+        v-model="grepFilter"
+        size="small"
+        clearable
+        class="gl-filter-input"
+        placeholder="提交信息过滤"
+      >
+        <template #prefix>
+          <Search :size="12" />
+        </template>
+      </el-input>
+      <el-input
+        v-model="authorFilter"
+        size="small"
+        clearable
+        class="gl-filter-input"
+        placeholder="作者过滤"
+      >
+        <template #prefix>
+          <User :size="12" />
+        </template>
+      </el-input>
       <button class="gl-refresh" :disabled="loadingList" title="刷新" @click="loadInitial">
         <RefreshCw :size="13" />
       </button>
     </header>
 
-    <div class="gl-body">
-      <aside class="gl-sidebar">
+    <div ref="bodyRef" class="gl-body">
+      <aside class="gl-sidebar" :style="{ width: sidebarW + 'px' }">
         <div v-if="loadingList && !commits.length" class="gl-state">加载中…</div>
-        <div v-else-if="!commits.length" class="gl-state">没有提交</div>
+        <div v-else-if="!commits.length" class="gl-state">没有匹配的提交</div>
         <template v-else>
           <button
             v-for="c in commits"
@@ -214,16 +519,17 @@ function decorate(refs: string[]): Decoration[] {
             </div>
           </button>
           <button v-if="hasMore" class="gl-load-more" :disabled="loadingMore" @click="loadMore">
-            <ChevronDown :size="13" />
-            {{ loadingMore ? '加载中…' : '加载更多' }}
+            {{ loadingMore ? '加载中…' : `加载更多（已加载 ${commits.length}）` }}
           </button>
         </template>
       </aside>
 
-      <section class="gl-detail">
-        <div v-if="loadingDetail" class="gl-state">加载提交详情…</div>
-        <template v-else-if="detail">
-          <div class="gl-detail-head">
+      <div class="gl-splitter-h" @mousedown="(e) => startDrag(e, 'sidebar')" />
+
+      <section ref="rightRef" class="gl-right">
+        <div class="gl-meta" :style="{ height: metaH + 'px' }">
+          <div v-if="loadingDetail" class="gl-state">加载提交详情…</div>
+          <template v-else-if="detail">
             <div class="gl-detail-subject">{{ detail.subject }}</div>
             <div class="gl-detail-meta">
               <span class="gl-detail-row">
@@ -255,11 +561,45 @@ function decorate(refs: string[]): Decoration[] {
                 >{{ d.label }}</span
               >
             </div>
+          </template>
+        </div>
+
+        <div class="gl-splitter-v" @mousedown="(e) => startDrag(e, 'meta')" />
+
+        <div ref="filesDiffRef" class="gl-files-diff">
+          <aside class="gl-files" :style="{ width: filesW + 'px' }">
+            <div class="gl-files-title">
+              改动文件（{{ filePatches.length }}）
+              <span v-if="detail?.truncated" class="gl-trunc-inline">（截断）</span>
+            </div>
+            <button
+              v-for="(f, i) in filePatches"
+              :key="i"
+              class="gl-file-item"
+              :class="{ active: i === selectedFileIdx }"
+              @click="selectedFileIdx = i"
+            >
+              <span class="gl-file-badge" :class="`fs-${f.status}`">{{
+                fileStatusLabel(f.status)
+              }}</span>
+              <span class="gl-file-name" :title="f.path">{{ f.path }}</span>
+              <span class="gl-file-counts">
+                <span v-if="f.added" class="gl-add">+{{ f.added }}</span>
+                <span v-if="f.deleted" class="gl-del">−{{ f.deleted }}</span>
+              </span>
+            </button>
+            <div v-if="!filePatches.length && detail && !loadingDetail" class="gl-state">
+              该提交无文本改动
+            </div>
+          </aside>
+
+          <div class="gl-splitter-h" @mousedown="(e) => startDrag(e, 'files')" />
+
+          <div class="gl-diff">
+            <DiffViewer v-if="selectedPatch" :diff="selectedPatch" hide-sidebar />
+            <div v-else-if="detail && !filePatches.length" class="gl-state">该提交无文本改动</div>
           </div>
-          <div v-if="detail.truncated" class="gl-trunc">改动过大，仅显示前 10 MB</div>
-          <DiffViewer v-if="detail.diff" :diff="detail.diff" />
-          <div v-else class="gl-state">该提交无文本改动</div>
-        </template>
+        </div>
       </section>
     </div>
   </div>
@@ -269,35 +609,46 @@ function decorate(refs: string[]): Decoration[] {
 .gl-root {
   display: flex;
   flex-direction: column;
-  height: 80vh;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 16px;
   font-family: $font-ui;
+  overflow: hidden;
 }
 
 .gl-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 4px 10px;
+  gap: 8px;
+  padding: 0 0 10px;
   border-bottom: 1px solid var(--el-border-color);
+  flex-shrink: 0;
 }
 
-.gl-count {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+.gl-branch-select {
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.gl-filter-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 280px;
 }
 
 .gl-refresh {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   background: transparent;
   border: 1px solid var(--el-border-color);
   border-radius: $radius-sm;
   color: var(--el-text-color-regular);
   cursor: pointer;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .gl-refresh:hover:not(:disabled) {
@@ -316,17 +667,6 @@ function decorate(refs: string[]): Decoration[] {
   display: flex;
   min-height: 0;
   margin-top: 10px;
-  gap: 12px;
-}
-
-.gl-sidebar {
-  width: 360px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-right: 4px;
 }
 
 .gl-state {
@@ -334,6 +674,16 @@ function decorate(refs: string[]): Decoration[] {
   color: var(--el-text-color-placeholder);
   font-size: 12px;
   text-align: center;
+}
+
+.gl-sidebar {
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+  min-width: 0;
 }
 
 .gl-row {
@@ -459,28 +809,67 @@ function decorate(refs: string[]): Decoration[] {
   cursor: not-allowed;
 }
 
-.gl-detail {
+/* Vertical splitter (between left list and right pane / between file list and diff). */
+.gl-splitter-h {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+  position: relative;
+}
+
+.gl-splitter-h::after {
+  content: '';
+  position: absolute;
+  inset: 0 1px;
+  background: var(--el-border-color);
+}
+
+.gl-splitter-h:hover::after {
+  background: var(--el-color-primary);
+}
+
+/* Horizontal splitter (between meta and files+diff). */
+.gl-splitter-v {
+  height: 4px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  position: relative;
+}
+
+.gl-splitter-v::after {
+  content: '';
+  position: absolute;
+  inset: 1px 0;
+  background: var(--el-border-color);
+}
+
+.gl-splitter-v:hover::after {
+  background: var(--el-color-primary);
+}
+
+.gl-right {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--el-border-color);
-  padding-left: 12px;
   overflow: hidden;
 }
 
-.gl-detail-head {
+.gl-meta {
   flex-shrink: 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--el-border-color);
-  margin-bottom: 10px;
+  overflow-y: auto;
+  padding: 0 12px 8px;
+  min-height: 0;
 }
 
 .gl-detail-subject {
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
-  margin-bottom: 8px;
+  margin: 4px 0 8px;
 }
 
 .gl-detail-meta {
@@ -495,6 +884,7 @@ function decorate(refs: string[]): Decoration[] {
   gap: 6px;
   font-size: 12px;
   color: var(--el-text-color-regular);
+  flex-wrap: wrap;
 }
 
 .gl-detail-row code {
@@ -539,12 +929,118 @@ function decorate(refs: string[]): Decoration[] {
   margin-top: 8px;
 }
 
-.gl-trunc {
-  font-size: 12px;
+.gl-files-diff {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.gl-files {
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 4px 8px 8px;
+  min-width: 0;
+}
+
+.gl-files-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--el-text-color-secondary);
+  padding: 0 8px 6px;
+}
+
+.gl-trunc-inline {
   color: var(--el-color-warning);
-  background: color-mix(in srgb, var(--el-color-warning) 10%, transparent);
-  padding: 6px 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.gl-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: $radius-sm;
-  margin-bottom: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gl-file-item:hover {
+  background: var(--el-fill-color);
+}
+
+.gl-file-item.active {
+  background: var(--el-color-primary-light-9);
+  border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+}
+
+.gl-file-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: $radius-sm;
+  flex-shrink: 0;
+}
+
+.fs-new {
+  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
+  background: var(--el-color-success-light-8);
+}
+
+.fs-deleted {
+  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
+  background: var(--el-color-danger-light-8);
+}
+
+.fs-renamed {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-8);
+}
+
+.fs-modified {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.fs-binary {
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+}
+
+.gl-file-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-family: $font-mono;
+  color: var(--el-text-color-primary);
+  @include ellipsis;
+}
+
+.gl-file-counts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.gl-add {
+  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
+}
+
+.gl-del {
+  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
+}
+
+.gl-diff {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
 }
 </style>

@@ -193,10 +193,33 @@
 }
 
 // --- Diff viewer dialog (el-dialog body → body) --------------------------
-// DiffViewer manages its own internal scroll, so the dialog body must not.
-.diff-dialog .el-dialog__body {
-  padding: 0;
-  overflow: hidden;
+// Diff/log/merge viewers all manage their own internal scroll. We lock the
+// dialog itself to a fixed 90vh height (margin-top: 0 lets the `top` prop
+// fully control vertical placement instead of compounding with the default
+// 15vh margin) and let the body flex to fill — so the dialog never overflows
+// the viewport, and nothing inside it scrolls except the panels we asked to.
+.diff-dialog {
+  &.el-dialog {
+    margin-top: 0 !important;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .el-dialog__body {
+    padding: 0;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+
+  // Some hosts (log/merge) provide their own footer-less layouts; the
+  // built-in footer slot still gets a non-zero baseline padding from EL,
+  // so neutralise it for these dialogs.
+  .el-dialog__footer {
+    padding: 8px 16px;
+    border-top: 1px solid var(--el-border-color);
+  }
 }
 
 // --- Tasks drawer (el-drawer → body) -------------------------------------

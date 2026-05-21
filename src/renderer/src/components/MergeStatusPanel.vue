@@ -331,8 +331,9 @@ const canContinue = computed(() => {
 .ms-root {
   display: flex;
   flex-direction: column;
-  min-height: 240px;
-  max-height: 78vh;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 16px;
   font-family: $font-ui;
 }
 

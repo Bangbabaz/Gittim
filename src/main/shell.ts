@@ -978,7 +978,16 @@ function parseRefs(raw: string): string[] {
  */
 export async function getCommitLog(
   cwd: string,
-  opts: { skip?: number; limit?: number; all?: boolean }
+  opts: {
+    skip?: number
+    limit?: number
+    /** Branch / tag / arbitrary ref to walk from. Empty → HEAD. */
+    ref?: string
+    /** Filter `git log --grep` (case-insensitive regex on subject + body). */
+    grep?: string
+    /** Filter `git log --author` (case-insensitive regex on name + email). */
+    author?: string
+  }
 ): Promise<CommitInfo[]> {
   const args = [
     'log',
@@ -986,7 +995,19 @@ export async function getCommitLog(
     `--max-count=${Math.max(1, Math.min(opts.limit ?? 200, 1000))}`,
     `--skip=${Math.max(0, opts.skip ?? 0)}`
   ]
-  if (opts.all) args.push('--all')
+  if (opts.grep) {
+    args.push('-i', `--grep=${opts.grep}`)
+  }
+  if (opts.author) {
+    // --author also accepts a regex; -i is shared with --grep above.
+    if (!opts.grep) args.push('-i')
+    args.push(`--author=${opts.author}`)
+  }
+  // Refs that look like flags can't be valid git refs, but reject them
+  // defensively so a malformed UI state can't slip a flag past argv.
+  if (opts.ref && !opts.ref.startsWith('-')) {
+    args.push(opts.ref)
+  }
   try {
     const { stdout } = await execFileP('git', args, {
       ...GIT_OPTS,
@@ -1073,6 +1094,131 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<Commit
     }
   } catch {
     return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Branch operations (merge / rebase / push / pull / delete)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GIT_EDITOR=true` makes any editor invocation succeed silently so merge
+ * commit messages, rebase todo lists, etc. don't block on an absent TTY.
+ * Shared env for every long-running ref-mutating command below.
+ */
+function nonInteractiveEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_EDITOR: 'true' }
+}
+
+/** Reject obvious flag-shaped strings before passing user-picked refs to git. */
+function isSafeRef(ref: string): boolean {
+  return !!ref && !ref.startsWith('-')
+}
+
+/**
+ * Merge `ref` into the current branch (`git merge --no-edit <ref>`). Conflicts
+ * leave the worktree in a merging state — the PaneToolbar refresh that follows
+ * picks that up via getMergeStatus and the badge appears automatically.
+ */
+export async function gitMerge(
+  cwd: string,
+  ref: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSafeRef(ref)) return { success: false, error: '无效的分支引用' }
+  try {
+    await execFileP('git', ['merge', '--no-edit', ref], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 60_000,
+      env: nonInteractiveEnv()
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Rebase the current branch onto `ref`. Same conflict-recovery story as
+ * gitMerge — leaves a rebase-in-progress state on conflict.
+ */
+export async function gitRebase(
+  cwd: string,
+  ref: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSafeRef(ref)) return { success: false, error: '无效的分支引用' }
+  try {
+    await execFileP('git', ['rebase', ref], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 60_000,
+      env: nonInteractiveEnv()
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Push a branch to its default remote. Uses `-u` unconditionally — git accepts
+ * it as a no-op if the upstream is already set. No `--force` exposure: a
+ * dedicated UI affordance is safer than smuggling it through a context-menu
+ * "推送" entry.
+ */
+export async function gitPush(
+  cwd: string,
+  branch: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSafeRef(branch)) return { success: false, error: '无效的分支名' }
+  try {
+    const remote = await getDefaultRemote(cwd)
+    if (!remote) return { success: false, error: '仓库未配置远程' }
+    await execFileP('git', ['push', '-u', remote, branch], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 60_000
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Fast-forward only `git pull` on the current branch. We never auto-merge or
+ * auto-rebase a divergent pull — the user should make that call explicitly via
+ * the merge/rebase entries.
+ */
+export async function gitPull(cwd: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execFileP('git', ['pull', '--ff-only'], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 60_000,
+      env: nonInteractiveEnv()
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Delete a local branch. Tries `-d` first (refuses unmerged); the caller can
+ * retry with `force=true` (`-D`) after confirming.
+ */
+export async function gitDeleteBranch(
+  cwd: string,
+  branch: string,
+  force?: boolean
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSafeRef(branch)) return { success: false, error: '无效的分支名' }
+  try {
+    await execFileP('git', ['branch', force ? '-D' : '-d', branch], { ...GIT_OPTS, cwd })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
   }
 }
 

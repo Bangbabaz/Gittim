@@ -3,7 +3,15 @@ import { computed, ref } from 'vue'
 import { parse } from 'diff2html'
 import { LineType } from 'diff2html/lib-esm/types'
 
-const props = defineProps<{ diff: string }>()
+const props = defineProps<{
+  diff: string
+  /**
+   * Hide the built-in file list. Used when the parent (e.g. GitLogViewer) owns
+   * its own file-picker and only wants the right-hand diff grid rendered.
+   * Defaults to false to preserve existing call sites.
+   */
+  hideSidebar?: boolean
+}>()
 
 type CellKind = 'ctx' | 'del' | 'ins' | 'empty'
 type Cell = { num: number | null; text: string; kind: CellKind }
@@ -120,7 +128,7 @@ function jumpTo(id: string): void {
 
 <template>
   <div class="dv-root">
-    <aside class="dv-sidebar">
+    <aside v-if="!props.hideSidebar" class="dv-sidebar">
       <div class="dv-sidebar-title">改动文件（{{ files.length }}）</div>
       <button
         v-for="f in files"
@@ -169,7 +177,8 @@ function jumpTo(id: string): void {
 <style scoped lang="scss">
 .dv-root {
   display: flex;
-  height: 78vh;
+  height: 100%;
+  min-height: 0;
   font-family: $font-mono;
 }
 
