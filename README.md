@@ -25,19 +25,19 @@ Git + tmux 风格的终端模拟器，支持分屏、分支切换、工作树管
 
 ### 键盘快捷键
 
-| 快捷键 | 功能 |
-| --- | --- |
-| `Ctrl+Shift+D` | 向右分割窗格 |
-| `Ctrl+Shift+S` | 向下分割窗格 |
-| `Ctrl+Shift+W` | 关闭当前窗格 |
-| `Ctrl+Shift+C` | 复制选中文本 |
-| `Ctrl+Shift+V` | 粘贴 |
-| `Ctrl+F` | 打开终端搜索 |
-| `Ctrl+=` / `Ctrl++` | 增大字号 |
-| `Ctrl+-` | 减小字号 |
-| `Ctrl+0` | 重置字号 |
-| `Ctrl+C` | 有选中时复制，否则正常传递 |
-| `Ctrl+V` | 粘贴 |
+| 快捷键              | 功能                       |
+| ------------------- | -------------------------- |
+| `Ctrl+Shift+D`      | 向右分割窗格               |
+| `Ctrl+Shift+S`      | 向下分割窗格               |
+| `Ctrl+Shift+W`      | 关闭当前窗格               |
+| `Ctrl+Shift+C`      | 复制选中文本               |
+| `Ctrl+Shift+V`      | 粘贴                       |
+| `Ctrl+F`            | 打开终端搜索               |
+| `Ctrl+=` / `Ctrl++` | 增大字号                   |
+| `Ctrl+-`            | 减小字号                   |
+| `Ctrl+0`            | 重置字号                   |
+| `Ctrl+C`            | 有选中时复制，否则正常传递 |
+| `Ctrl+V`            | 粘贴                       |
 
 右键菜单提供相同操作入口。
 
@@ -69,12 +69,12 @@ Git + tmux 风格的终端模拟器，支持分屏、分支切换、工作树管
 
 自动向用户 Shell 注入 OSC 7 hook，使终端能实时感知当前工作目录：
 
-| Shell | 注入方式 |
-| --- | --- |
-| Bash | `--rcfile` 指向生成文件，`PROMPT_COMMAND` 追加 |
-| Zsh | `ZDOTDIR` 指向生成目录，`precmd_functions` 追加 |
+| Shell             | 注入方式                                        |
+| ----------------- | ----------------------------------------------- |
+| Bash              | `--rcfile` 指向生成文件，`PROMPT_COMMAND` 追加  |
+| Zsh               | `ZDOTDIR` 指向生成目录，`precmd_functions` 追加 |
 | PowerShell / pwsh | `-NoLogo -NoExit -Command` 自定义 `prompt` 函数 |
-| Cmd | 设置 `PROMPT` 环境变量，前缀带 OSC 7 |
+| Cmd               | 设置 `PROMPT` 环境变量，前缀带 OSC 7            |
 
 未知 Shell 回退到 PID 查询方式（Linux 读 `/proc/<pid>/cwd`，macOS 用 `lsof`）。
 

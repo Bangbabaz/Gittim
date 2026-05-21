@@ -658,11 +658,9 @@ async function extractIconMac(command: string): Promise<string | undefined> {
   const dir = await mkdtemp(join(tmpdir(), 'gittim-icon-'))
   const pngPath = join(dir, 'icon.png')
   try {
-    await execFileP(
-      'sips',
-      ['-s', 'format', 'png', '-Z', '96', icnsPath, '--out', pngPath],
-      { timeout: 5000 }
-    )
+    await execFileP('sips', ['-s', 'format', 'png', '-Z', '96', icnsPath, '--out', pngPath], {
+      timeout: 5000
+    })
     const buf = await readFile(pngPath)
     return `data:image/png;base64,${buf.toString('base64')}`
   } catch {
