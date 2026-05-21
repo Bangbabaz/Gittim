@@ -199,12 +199,21 @@ function spawnPty(t: Task): void {
   t.startedAt = Date.now()
   broadcast('task-status', toMeta(t))
 
+  // Capture `pty` in the closures and guard against stale callbacks. On
+  // restart, `killTaskTree` triggers the old pty's exit asynchronously — it
+  // can arrive AFTER spawnPty has set t.pty to the new instance and
+  // broadcast 'running'. Without this guard the stale onExit overwrites the
+  // fresh status, leaving the UI showing 'exited'/'failed' on a task that
+  // is in fact running. Same hazard for onData: a kill()'d pty can still
+  // flush buffered output that would otherwise pollute the new buffer.
   pty.onData((data) => {
+    if (t.pty !== pty) return
     appendOutput(t, data)
     broadcast('task-data', { id: t.id, chunk: data })
   })
 
   pty.onExit(({ exitCode }) => {
+    if (t.pty !== pty) return
     t.pty = null
     t.exitCode = exitCode
     t.status = exitCode === 0 ? 'exited' : 'failed'

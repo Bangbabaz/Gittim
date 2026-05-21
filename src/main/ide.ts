@@ -1,6 +1,8 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, readFileSync, readdirSync } from 'fs'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
 import { join, dirname, basename } from 'path'
 import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -592,27 +594,93 @@ function resolveShimToExe(shim: string, candidateId: string): string | null {
   return exeFromBatchFile(shim)
 }
 
-async function extractIcon(command: string): Promise<string | undefined> {
+/**
+ * Resolve a launcher path back to the enclosing .app bundle root. Inputs we
+ * may see on macOS:
+ *   - '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'
+ *   - '/Applications/Visual Studio Code.app'
+ *   - '/opt/homebrew/bin/zed'  (brew shim — no bundle, returns undefined)
+ */
+async function resolveAppBundle(command: string): Promise<string | undefined> {
+  const idx = command.indexOf('.app/')
+  if (idx >= 0) {
+    const bundle = command.slice(0, idx + 4)
+    return existsSync(bundle) ? bundle : undefined
+  }
+  if (/\.app\/?$/i.test(command)) {
+    const bundle = command.replace(/\/$/, '')
+    return existsSync(bundle) ? bundle : undefined
+  }
+  return undefined
+}
+
+/**
+ * macOS icon extraction via out-of-process tools.
+ *
+ * `app.getFileIcon` on a .app bundle traps a V8 worker thread (EXC_BREAKPOINT)
+ * on macOS 26 (Tahoe) — the AppKit/IconServices round-trip is the trigger,
+ * not signing or JIT. Anything that pulls those frameworks into our isolate
+ * (incl. `nativeImage.createFromPath` on a .icns + resize) risks the same
+ * crash. So we keep image work entirely outside our process:
+ *
+ *   1. `defaults read <Info.plist> CFBundleIconFile`  → icon resource name
+ *   2. `sips -s format png -Z 96 <icns> --out <png>`  → decode + resize
+ *   3. read the PNG, base64-encode it as a data URL
+ *
+ * Both tools ship with every macOS. Each invocation is a fresh process so
+ * failures stay isolated to the IDE that triggered them.
+ */
+async function extractIconMac(command: string): Promise<string | undefined> {
+  const bundle = await resolveAppBundle(command)
+  if (!bundle) return undefined
+
+  let iconName: string
   try {
-    // Resolve the path whose icon we actually want. Letting `getFileIcon`
-    // see a shim (Windows extensionless `bin\code`, or a bundle-internal
-    // POSIX script on macOS) yields a generic file-type glyph, not the
-    // app's real icon.
-    let target: string | null
-    if (isMac) {
-      // For anything inside a .app bundle, hand back the bundle root — that's
-      // where .icns lives and where getFileIcon does its best work.
-      const appIdx = command.indexOf('.app/')
-      target = appIdx >= 0 ? command.slice(0, appIdx + 4) : command
-    } else if (isWindows) {
-      target = exeForShim(command)
-    } else {
-      target = command
-    }
+    const { stdout } = await execFileP(
+      'defaults',
+      ['read', join(bundle, 'Contents/Info'), 'CFBundleIconFile'],
+      { timeout: 2000 }
+    )
+    // `defaults` wraps values containing spaces in double quotes; strip them.
+    iconName = stdout.trim().replace(/^"|"$/g, '')
+  } catch {
+    return undefined
+  }
+  if (!iconName) return undefined
+  // CFBundleIconFile sometimes includes the extension ('Code.icns'),
+  // sometimes not ('idea'). Normalise.
+  if (!/\.icns$/i.test(iconName)) iconName += '.icns'
+  const icnsPath = join(bundle, 'Contents/Resources', iconName)
+  if (!existsSync(icnsPath)) return undefined
+
+  // mkdtemp + rm rather than a static name so parallel detect calls (the
+  // Promise.all in detectIdes) don't clobber each other.
+  const dir = await mkdtemp(join(tmpdir(), 'gittim-icon-'))
+  const pngPath = join(dir, 'icon.png')
+  try {
+    await execFileP(
+      'sips',
+      ['-s', 'format', 'png', '-Z', '96', icnsPath, '--out', pngPath],
+      { timeout: 5000 }
+    )
+    const buf = await readFile(pngPath)
+    return `data:image/png;base64,${buf.toString('base64')}`
+  } catch {
+    return undefined
+  } finally {
+    // Best-effort cleanup — leftover tmp dirs are reaped by the OS anyway.
+    rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+async function extractIcon(command: string): Promise<string | undefined> {
+  if (isMac) return extractIconMac(command)
+
+  try {
+    const target = isWindows ? exeForShim(command) : command
     if (!target || !existsSync(target)) return undefined
-    // 'large' gives us 48×48 on Windows / 256×256 on macOS — better at 2× DPI
-    // than the 32×32 'normal' size used previously. The resize below caps the
-    // renderer payload regardless of the source size.
+    // 'large' gives us 48×48 on Windows — better at 2× DPI than the 32×32
+    // 'normal' size used previously. The resize below caps payload size.
     const img = await app.getFileIcon(target, { size: 'large' })
     if (img.isEmpty()) return undefined
     const resized = img.resize({ width: 48, height: 48, quality: 'best' })

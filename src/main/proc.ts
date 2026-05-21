@@ -8,11 +8,15 @@ const isWindows = process.platform === 'win32'
  * Kill a process and every descendant it spawned. `pty.kill()` alone only
  * signals the shell, so long-running grandchildren (dev servers, watchers,
  * `npm`→`node`→`vite`/`esbuild`/`nx-executor`) get reparented and linger
- * after the task is stopped. node-pty starts the shell as a session/group
- * leader on POSIX, so signalling the negative PID hits the whole group;
- * on Windows we snapshot the descendant tree *before* killing — once the
- * root dies, Windows reparents the grandchildren to the system, breaking
- * the parent chain so a plain `taskkill /T` can no longer find them.
+ * after the task is stopped.
+ *
+ * Both platforms use the same three-step shape: snapshot the descendant
+ * tree, kill from the root, then SIGKILL/taskkill each snapshotted PID
+ * individually. The snapshot has to happen *before* the root dies — once
+ * it's gone, detached grandchildren (nx fork.js with setsid, pnpm/bash
+ * job-control PGs on POSIX; anything detached on Windows) get reparented
+ * to PID 1 / the system, and the parent chain that lets `process.kill(-pg)`
+ * or `taskkill /T` find them is lost forever.
  *
  * Shared by shell.ts (pane PTYs) and tasks.ts (background tasks) so the
  * tree-reaping behaviour can't drift between the two.
@@ -21,33 +25,52 @@ const isWindows = process.platform === 'win32'
  * Callers may fire-and-forget; awaiting is only useful when you need a
  * (best-effort) guarantee the descendants were signalled.
  */
-export function killProcessTree(pid: number | undefined | null): Promise<void> {
-  if (!pid) return Promise.resolve()
+export async function killProcessTree(pid: number | undefined | null): Promise<void> {
+  if (!pid) return
   if (isWindows) {
     return killTreeWindows(pid)
   }
+
+  // POSIX：进程组信号只能杀"乖"的后代。nx 的 tasks-runner/fork.js 用
+  // detached:true 自带 setsid，pnpm/bash job control 也会把命令塞进新 PG，
+  // 这些后代收不到 -pid 信号。对齐 Windows 分支：先快照、再发 SIGTERM、
+  // 升级 SIGKILL 时再快照一次抓住缓刑期内新派生的孙子。
+  const initial = await snapshotDescendantsPosix(pid)
+
   try {
-    // Negative pid → the whole process group (node-pty calls setsid).
     process.kill(-pid, 'SIGTERM')
-    // Escalate to SIGKILL only if the group is still alive after 2 s. Probing
-    // with signal 0 first avoids racing against PID reuse: if the original
-    // group is gone, we don't try to kill whatever process took its PID.
-    setTimeout(() => {
-      try {
-        process.kill(-pid, 0)
-      } catch {
-        return // group already exited; nothing to escalate
-      }
+  } catch {
+    // 进程组已经没了
+  }
+  for (const d of initial) {
+    try {
+      process.kill(d, 'SIGTERM')
+    } catch {
+      // 已退出
+    }
+  }
+
+  setTimeout(async () => {
+    const late = await snapshotDescendantsPosix(pid)
+    const all = new Set<number>([...initial, ...late])
+
+    // 进程组兜底（带 signal 0 探测，避免 PID 复用打错人）
+    try {
+      process.kill(-pid, 0)
       try {
         process.kill(-pid, 'SIGKILL')
-      } catch {
-        // group exited between the probe and the kill
-      }
-    }, 2000).unref()
-  } catch {
-    // group already gone, or pid invalid
-  }
-  return Promise.resolve()
+      } catch {}
+    } catch {}
+
+    for (const d of all) {
+      try {
+        process.kill(d, 0)
+        try {
+          process.kill(d, 'SIGKILL')
+        } catch {}
+      } catch {}
+    }
+  }, 2000).unref()
 }
 
 /**
@@ -141,5 +164,51 @@ async function killTreeWindows(pid: number): Promise<void> {
           })
       )
     )
+  }
+}
+
+/**
+ * POSIX 版的进程后代快照：一次 `ps -axo pid=,ppid=` 拉整张进程表（末尾 `=`
+ * 抑制表头，BSD/GNU ps 都支持），BFS 出全部后代。比递归 pgrep -P 快，更关键的
+ * 是必须在 SIGKILL 前调用一次 —— 一旦 root 死了 setsid 出去的孙子会被 init
+ * (PID 1) 收养，ppid 链就断了。
+ */
+async function snapshotDescendantsPosix(rootPid: number): Promise<number[]> {
+  try {
+    const { stdout } = await execFileP('ps', ['-axo', 'pid=,ppid='], {
+      timeout: 5_000,
+      maxBuffer: 8 * 1024 * 1024
+    })
+    const children = new Map<number, number[]>()
+    for (const line of stdout.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)$/)
+      if (!m) continue
+      const child = parseInt(m[1], 10)
+      const parent = parseInt(m[2], 10)
+      if (!Number.isFinite(child) || !Number.isFinite(parent)) continue
+      let arr = children.get(parent)
+      if (!arr) {
+        arr = []
+        children.set(parent, arr)
+      }
+      arr.push(child)
+    }
+    const result: number[] = []
+    const seen = new Set<number>([rootPid])
+    const queue: number[] = [rootPid]
+    while (queue.length) {
+      const cur = queue.shift()!
+      const kids = children.get(cur)
+      if (!kids) continue
+      for (const k of kids) {
+        if (seen.has(k)) continue
+        seen.add(k)
+        result.push(k)
+        queue.push(k)
+      }
+    }
+    return result
+  } catch {
+    return []
   }
 }
