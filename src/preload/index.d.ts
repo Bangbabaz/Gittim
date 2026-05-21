@@ -59,6 +59,61 @@ declare global {
         force?: boolean
       ) => Promise<{ success: boolean; error?: string }>
       gitDiff: (cwd: string) => Promise<{ diff: string; truncated: boolean }>
+      gitFileDiff: (cwd: string, file: string) => Promise<{ diff: string; truncated: boolean }>
+      gitMergeStatus: (cwd: string) => Promise<{
+        inProgress: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
+        target: string | null
+        onto: string | null
+        conflicts: { path: string; status: string; description: string }[]
+      }>
+      gitConflictResolve: (
+        cwd: string,
+        file: string,
+        side: 'ours' | 'theirs'
+      ) => Promise<{ success: boolean; error?: string }>
+      gitConflictMarkResolved: (
+        cwd: string,
+        file: string
+      ) => Promise<{ success: boolean; error?: string }>
+      gitMergeAbort: (
+        cwd: string,
+        kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+      ) => Promise<{ success: boolean; error?: string }>
+      gitMergeContinue: (
+        cwd: string,
+        kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+      ) => Promise<{ success: boolean; error?: string }>
+      gitLog: (
+        cwd: string,
+        opts: { skip?: number; limit?: number; all?: boolean }
+      ) => Promise<
+        {
+          hash: string
+          shortHash: string
+          author: string
+          email: string
+          date: string
+          parents: string[]
+          refs: string[]
+          subject: string
+        }[]
+      >
+      gitCommitDetail: (
+        cwd: string,
+        hash: string
+      ) => Promise<{
+        hash: string
+        shortHash: string
+        author: string
+        email: string
+        date: string
+        parents: string[]
+        refs: string[]
+        subject: string
+        body: string
+        diff: string
+        truncated: boolean
+      } | null>
       gitWorktreeAdd: (
         cwd: string,
         opts: { path: string; newBranch?: string; fromBranch?: string }

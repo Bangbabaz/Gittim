@@ -63,6 +63,67 @@ const api = {
     }>,
   gitDiff: (cwd: string) =>
     ipcRenderer.invoke('git-diff', cwd) as Promise<{ diff: string; truncated: boolean }>,
+  gitFileDiff: (cwd: string, file: string) =>
+    ipcRenderer.invoke('git-file-diff', cwd, file) as Promise<{
+      diff: string
+      truncated: boolean
+    }>,
+  // Merge / rebase / cherry-pick / revert state
+  gitMergeStatus: (cwd: string) =>
+    ipcRenderer.invoke('git-merge-status', cwd) as Promise<{
+      inProgress: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
+      target: string | null
+      onto: string | null
+      conflicts: { path: string; status: string; description: string }[]
+    }>,
+  gitConflictResolve: (cwd: string, file: string, side: 'ours' | 'theirs') =>
+    ipcRenderer.invoke('git-conflict-resolve', cwd, file, side) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  gitConflictMarkResolved: (cwd: string, file: string) =>
+    ipcRenderer.invoke('git-conflict-mark-resolved', cwd, file) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  gitMergeAbort: (cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
+    ipcRenderer.invoke('git-merge-abort', cwd, kind) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  gitMergeContinue: (cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
+    ipcRenderer.invoke('git-merge-continue', cwd, kind) as Promise<{
+      success: boolean
+      error?: string
+    }>,
+  // Commit history
+  gitLog: (cwd: string, opts: { skip?: number; limit?: number; all?: boolean }) =>
+    ipcRenderer.invoke('git-log', cwd, opts) as Promise<
+      {
+        hash: string
+        shortHash: string
+        author: string
+        email: string
+        date: string
+        parents: string[]
+        refs: string[]
+        subject: string
+      }[]
+    >,
+  gitCommitDetail: (cwd: string, hash: string) =>
+    ipcRenderer.invoke('git-commit-detail', cwd, hash) as Promise<{
+      hash: string
+      shortHash: string
+      author: string
+      email: string
+      date: string
+      parents: string[]
+      refs: string[]
+      subject: string
+      body: string
+      diff: string
+      truncated: boolean
+    } | null>,
   gitWorktreeAdd: (cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) =>
     ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
       success: boolean

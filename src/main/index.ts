@@ -19,7 +19,15 @@ import {
   gitStash,
   getGitWorktrees,
   gitRemoveWorktree,
-  getGitDiff
+  getGitDiff,
+  getMergeStatus,
+  resolveConflictBySide,
+  markConflictResolved,
+  abortMergeOp,
+  continueMergeOp,
+  getFileDiff,
+  getCommitLog,
+  getCommitDetail
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
 import { readFileSync, existsSync } from 'fs'
@@ -154,6 +162,38 @@ app.whenReady().then(() => {
     }
   )
   ipcMain.handle('git-diff', (_event, cwd: string) => getGitDiff(cwd))
+
+  // Merge / rebase / cherry-pick / revert conflict state
+  ipcMain.handle('git-merge-status', (_event, cwd: string) => getMergeStatus(cwd))
+  ipcMain.handle(
+    'git-conflict-resolve',
+    (_event, cwd: string, file: string, side: 'ours' | 'theirs') =>
+      resolveConflictBySide(cwd, file, side)
+  )
+  ipcMain.handle('git-conflict-mark-resolved', (_event, cwd: string, file: string) =>
+    markConflictResolved(cwd, file)
+  )
+  ipcMain.handle(
+    'git-merge-abort',
+    (_event, cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
+      abortMergeOp(cwd, kind)
+  )
+  ipcMain.handle(
+    'git-merge-continue',
+    (_event, cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
+      continueMergeOp(cwd, kind)
+  )
+  ipcMain.handle('git-file-diff', (_event, cwd: string, file: string) => getFileDiff(cwd, file))
+
+  // Commit history
+  ipcMain.handle(
+    'git-log',
+    (_event, cwd: string, opts: { skip?: number; limit?: number; all?: boolean }) =>
+      getCommitLog(cwd, opts || {})
+  )
+  ipcMain.handle('git-commit-detail', (_event, cwd: string, hash: string) =>
+    getCommitDetail(cwd, hash)
+  )
 
   ipcMain.handle(
     'git-worktree-add',

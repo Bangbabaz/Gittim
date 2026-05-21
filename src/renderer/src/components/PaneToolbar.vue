@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import {
   GitBranch,
+  GitMerge,
+  History,
   Play,
   RotateCw,
   Square,
@@ -14,6 +16,8 @@ import {
 } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DiffViewer from './DiffViewer.vue'
+import MergeStatusPanel from './MergeStatusPanel.vue'
+import GitLogViewer from './GitLogViewer.vue'
 import { iconFor } from './ideIcons'
 
 type WorktreeInfo = {
@@ -59,6 +63,41 @@ const diffStats = ref({ added: 0, deleted: 0 })
 const showLocal = ref(true)
 const showRemote = ref(true)
 
+type MergeOpKind = 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
+const mergeStatus = ref<{
+  inProgress: MergeOpKind
+  target: string | null
+  onto: string | null
+  conflicts: { path: string; status: string; description: string }[]
+} | null>(null)
+const showMerge = ref(false)
+const showLog = ref(false)
+
+// Banner shown ON the toolbar when an op is in progress. The dialog body
+// repeats the same info — this one's the at-a-glance hint that something
+// needs attention. Empty string when nothing's in progress (template hides it).
+const mergeBadgeLabel = computed(() => {
+  const s = mergeStatus.value
+  if (!s || (!s.inProgress && !s.conflicts.length)) return ''
+  const opText =
+    s.inProgress === 'merge'
+      ? '合并'
+      : s.inProgress === 'rebase'
+        ? '变基'
+        : s.inProgress === 'cherry-pick'
+          ? 'cherry-pick'
+          : s.inProgress === 'revert'
+            ? 'revert'
+            : '冲突'
+  const target = s.target ? `（${s.target}）` : ''
+  return `${opText}进行中${target} — ${s.conflicts.length} 个冲突`
+})
+
+const mergeBadgeVisible = computed(() => {
+  const s = mergeStatus.value
+  return !!s && (!!s.inProgress || s.conflicts.length > 0)
+})
+
 const localBranches = computed(() => branches.value.filter((b) => b.local))
 const remoteBranches = computed(() => branches.value.filter((b) => b.remote))
 
@@ -88,22 +127,26 @@ const refresh = async (): Promise<void> => {
       isRepo.value = false
       currentBranch.value = null
       branches.value = []
+      mergeStatus.value = null
       return
     }
-    const [list, stats] = await Promise.all([
+    const [list, stats, merge] = await Promise.all([
       window.api.getGitBranches(props.cwd),
-      window.api.getGitDiffStats(props.cwd)
+      window.api.getGitDiffStats(props.cwd),
+      window.api.gitMergeStatus(props.cwd)
     ])
     if (myGen !== refreshGen) return
     isRepo.value = true
     currentBranch.value = info.branch
     branches.value = list
     diffStats.value = stats
+    mergeStatus.value = merge
   } catch {
     if (myGen !== refreshGen) return
     isRepo.value = false
     currentBranch.value = null
     branches.value = []
+    mergeStatus.value = null
   }
 }
 
@@ -731,6 +774,22 @@ const onPickIde = async (cmd: string): Promise<void> => {
         <FolderGit2 :size="13" />
       </button>
     </el-tooltip>
+    <el-tooltip content="提交历史" placement="bottom" :show-after="300">
+      <button class="wt-btn icon" @click="showLog = true">
+        <History :size="13" />
+      </button>
+    </el-tooltip>
+    <el-tooltip
+      v-if="mergeBadgeVisible"
+      :content="mergeBadgeLabel"
+      placement="bottom"
+      :show-after="300"
+    >
+      <button class="merge-badge" @click="showMerge = true">
+        <GitMerge :size="12" />
+        <span class="merge-badge-count">{{ mergeStatus?.conflicts.length || 0 }}</span>
+      </button>
+    </el-tooltip>
 
     <!-- Command picker -->
     <el-dropdown
@@ -1121,6 +1180,44 @@ const onPickIde = async (cmd: string): Promise<void> => {
         <el-button size="small" @click="showDiff = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- Merge / conflict resolver. v-if so the panel re-fetches state on each
+         open instead of stale state from a previous merge that's since landed. -->
+    <el-dialog
+      v-model="showMerge"
+      title="合并 / 冲突"
+      width="92%"
+      top="4vh"
+      class="diff-dialog"
+      :lock-scroll="true"
+      :close-on-click-modal="false"
+    >
+      <MergeStatusPanel
+        v-if="showMerge && props.cwd"
+        :cwd="props.cwd"
+        @changed="refresh"
+        @request-close="showMerge = false"
+      />
+      <template #footer>
+        <el-button size="small" @click="showMerge = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Commit history viewer -->
+    <el-dialog
+      v-model="showLog"
+      title="提交历史"
+      width="92%"
+      top="4vh"
+      class="diff-dialog"
+      :lock-scroll="true"
+      :close-on-click-modal="false"
+    >
+      <GitLogViewer v-if="showLog && props.cwd" :cwd="props.cwd" />
+      <template #footer>
+        <el-button size="small" @click="showLog = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1300,6 +1397,34 @@ const onPickIde = async (cmd: string): Promise<void> => {
 
 .wt-btn.icon {
   font-size: 0;
+}
+
+/* Merge/conflict in-progress chip — only rendered when an op is active. Uses
+   the danger palette so it stands out against neutral toolbar siblings. */
+.merge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  background: color-mix(in srgb, var(--el-color-danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-danger) 45%, transparent);
+  color: var(--el-color-danger);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: $font-ui;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.merge-badge:hover {
+  background: color-mix(in srgb, var(--el-color-danger) 22%, transparent);
+}
+
+.merge-badge-count {
+  font-family: $font-mono;
 }
 
 /* Open-in-IDE control: a connected pair (brand chip + small caret) that

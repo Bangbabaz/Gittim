@@ -59,16 +59,24 @@ export async function killProcessTree(pid: number | undefined | null): Promise<v
       process.kill(-pid, 0)
       try {
         process.kill(-pid, 'SIGKILL')
-      } catch {}
-    } catch {}
+      } catch {
+        // group exited between the probe and the kill
+      }
+    } catch {
+      // group already exited; nothing to escalate
+    }
 
     for (const d of all) {
       try {
         process.kill(d, 0)
         try {
           process.kill(d, 'SIGKILL')
-        } catch {}
-      } catch {}
+        } catch {
+          // descendant exited between probe and kill
+        }
+      } catch {
+        // descendant already exited
+      }
     }
   }, 2000).unref()
 }

@@ -2,7 +2,7 @@ import { spawn, IPty } from 'node-pty'
 import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readlinkSync, statSync, readFileSync } from 'fs'
+import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
 import { basename, dirname } from 'path'
 import { shellIntegration } from './shell-integration'
 import { killProcessTree } from './proc'
@@ -607,6 +607,472 @@ export async function getGitDiff(cwd: string): Promise<{ diff: string; truncated
     } catch {
       return { diff: '', truncated: false }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Merge / rebase / cherry-pick / revert conflict state
+// ---------------------------------------------------------------------------
+
+export type MergeOpKind = 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
+
+export interface ConflictedFile {
+  /** Repo-relative path. */
+  path: string
+  /** Two-char index/worktree status from `git status -z --porcelain=v2 -u` for unmerged rows. */
+  status: string
+  /** Human-readable Chinese description of `status`. */
+  description: string
+}
+
+export interface MergeStatus {
+  /** null = no operation in progress. */
+  inProgress: MergeOpKind
+  /**
+   * For merge: the branch or ref being merged in (decoded from MERGE_MSG).
+   * For rebase: the source branch (head-name without refs/heads/ prefix).
+   * For cherry-pick / revert: short hash of the commit being applied.
+   */
+  target: string | null
+  /**
+   * For rebase: short hash of the commit we're replaying onto (rebase-merge/onto).
+   * Null for other operation kinds.
+   */
+  onto: string | null
+  conflicts: ConflictedFile[]
+}
+
+/**
+ * Resolve a git-internal path (e.g. `MERGE_HEAD`, `rebase-merge`) to an
+ * absolute filesystem path. `git rev-parse --git-path` handles worktrees (where
+ * the per-worktree state lives under `<main>/.git/worktrees/<name>/`) correctly,
+ * whereas naively joining `<cwd>/.git/...` does not.
+ */
+async function gitInternalPath(cwd: string, internal: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP('git', ['rev-parse', '--git-path', internal], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 3000
+    })
+    return stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Two-char status from porcelain v2 → Chinese description. Same vocabulary as
+ * Git's own documentation, just translated. Unrecognised codes fall back to
+ * the raw code so the UI still shows something.
+ */
+function describeConflictStatus(xy: string): string {
+  switch (xy) {
+    case 'DD':
+      return '双方删除'
+    case 'AU':
+      return '我方新增'
+    case 'UD':
+      return '对方删除'
+    case 'UA':
+      return '对方新增'
+    case 'DU':
+      return '我方删除'
+    case 'AA':
+      return '双方新增'
+    case 'UU':
+      return '双方修改'
+    default:
+      return xy
+  }
+}
+
+/**
+ * Detect any in-progress merge/rebase/cherry-pick/revert and list every
+ * unmerged path. Strategy:
+ *
+ *   1. Probe the per-worktree state files (MERGE_HEAD, rebase-merge/,
+ *      rebase-apply/, CHERRY_PICK_HEAD, REVERT_HEAD) via `git rev-parse
+ *      --git-path` so worktrees work correctly.
+ *   2. Decode the "target" of the operation from the most useful source for
+ *      each kind — MERGE_MSG's first line for merge, head-name for rebase,
+ *      the head hash for cherry-pick/revert.
+ *   3. Parse `git status -z --porcelain=v2 -u` for `u ` rows (unmerged) — the
+ *      -z form is NUL-separated, so paths with spaces / quotes / newlines
+ *      pass through intact.
+ */
+export async function getMergeStatus(cwd: string): Promise<MergeStatus> {
+  const empty: MergeStatus = { inProgress: null, target: null, onto: null, conflicts: [] }
+
+  // Cheap up-front check — if git can't even tell us this is a repo, bail.
+  try {
+    const { stdout: inside } = await execFileP('git', ['rev-parse', '--is-inside-work-tree'], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 3000
+    })
+    if (inside.trim() !== 'true') return empty
+  } catch {
+    return empty
+  }
+
+  // --- detect operation kind --------------------------------------------
+  const [mergeHead, rebaseMerge, rebaseApply, cherryHead, revertHead] = await Promise.all([
+    gitInternalPath(cwd, 'MERGE_HEAD'),
+    gitInternalPath(cwd, 'rebase-merge'),
+    gitInternalPath(cwd, 'rebase-apply'),
+    gitInternalPath(cwd, 'CHERRY_PICK_HEAD'),
+    gitInternalPath(cwd, 'REVERT_HEAD')
+  ])
+
+  let kind: MergeOpKind = null
+  let target: string | null = null
+  let onto: string | null = null
+
+  const readFirstLine = (p: string | null): string | null => {
+    if (!p) return null
+    try {
+      const raw = readFileSync(p, 'utf8')
+      const first = raw.split(/\r?\n/, 1)[0]
+      return first.trim() || null
+    } catch {
+      return null
+    }
+  }
+
+  if (mergeHead && existsSync(mergeHead)) {
+    kind = 'merge'
+    // MERGE_MSG first line is conventionally `Merge branch 'feature/x'` or
+    // `Merge remote-tracking branch 'origin/main'`. Strip the boilerplate.
+    const mergeMsg = await gitInternalPath(cwd, 'MERGE_MSG')
+    const firstLine = readFirstLine(mergeMsg)
+    if (firstLine) {
+      const m = firstLine.match(/^Merge (?:remote-tracking )?branch '([^']+)'/)
+      target = m ? m[1] : firstLine
+    } else {
+      target = readFirstLine(mergeHead) // fallback: the SHA
+    }
+  } else if (rebaseMerge && existsSync(rebaseMerge)) {
+    kind = 'rebase'
+    target = readFirstLine(`${rebaseMerge}/head-name`)?.replace(/^refs\/heads\//, '') || null
+    onto = readFirstLine(`${rebaseMerge}/onto`)
+    if (onto) onto = onto.slice(0, 7)
+  } else if (rebaseApply && existsSync(rebaseApply)) {
+    kind = 'rebase'
+    target = readFirstLine(`${rebaseApply}/head-name`)?.replace(/^refs\/heads\//, '') || null
+    onto = readFirstLine(`${rebaseApply}/onto`)
+    if (onto) onto = onto.slice(0, 7)
+  } else if (cherryHead && existsSync(cherryHead)) {
+    kind = 'cherry-pick'
+    const sha = readFirstLine(cherryHead)
+    target = sha ? sha.slice(0, 7) : null
+  } else if (revertHead && existsSync(revertHead)) {
+    kind = 'revert'
+    const sha = readFirstLine(revertHead)
+    target = sha ? sha.slice(0, 7) : null
+  }
+
+  // --- enumerate unmerged paths ----------------------------------------
+  // `git status -z --porcelain=v2 -u` rows are NUL-terminated. Format spec at
+  // https://git-scm.com/docs/git-status#_porcelain_format_version_2 — `u` rows
+  // start with `u ` and the path is the 11th whitespace-separated token.
+  const conflicts: ConflictedFile[] = []
+  try {
+    const { stdout } = await execFileP('git', ['status', '-z', '--porcelain=v2', '-u'], {
+      ...GIT_OPTS,
+      cwd,
+      maxBuffer: 4 * 1024 * 1024
+    })
+    // NUL splits records. The last "record" after a trailing NUL is empty —
+    // filter it out. Rename/copy entries (type `2`) span TWO NUL chunks (new
+    // path, then orig path); we skip them since conflicts can't be renames.
+    const records = stdout.split('\0').filter(Boolean)
+    for (const rec of records) {
+      if (!rec.startsWith('u ')) continue
+      // Layout: `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`.
+      // We split into 11 max so the path's spaces (Windows-style names like
+      // `My Documents/foo.txt` exist) survive intact in the last token.
+      const parts = rec.split(' ')
+      if (parts.length < 11) continue
+      const xy = parts[1]
+      const path = parts.slice(10).join(' ')
+      if (!path) continue
+      conflicts.push({ path, status: xy, description: describeConflictStatus(xy) })
+    }
+  } catch {
+    // status failed for some reason; report op kind without file list.
+  }
+
+  if (!kind && !conflicts.length) return empty
+  return { inProgress: kind, target, onto, conflicts }
+}
+
+/**
+ * Resolve a conflicted file by picking one side and staging it.
+ *   ours   = the branch we were on when the operation started
+ *   theirs = the incoming branch / commit
+ *
+ * Note: during a rebase, "ours" and "theirs" are swapped relative to a merge —
+ * `--ours` in rebase means the commit being replayed (the branch you rebased),
+ * NOT the branch you started on. We pass the flag through verbatim and the UI
+ * labels reflect the operation kind.
+ */
+export async function resolveConflictBySide(
+  cwd: string,
+  file: string,
+  side: 'ours' | 'theirs'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execFileP('git', ['checkout', `--${side}`, '--', file], { ...GIT_OPTS, cwd })
+    await execFileP('git', ['add', '--', file], { ...GIT_OPTS, cwd })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Mark a conflicted file as resolved (user edited it externally — e.g. in
+ * their IDE — and wants Gittim to `git add` it). No checkout, just add.
+ */
+export async function markConflictResolved(
+  cwd: string,
+  file: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execFileP('git', ['add', '--', file], { ...GIT_OPTS, cwd })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Abort the in-progress operation. The caller's `kind` is normally derived
+ * from the most recent `getMergeStatus()` call; we trust it rather than
+ * re-detecting, so a stale UI state doesn't drive the wrong git command.
+ */
+export async function abortMergeOp(
+  cwd: string,
+  kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+): Promise<{ success: boolean; error?: string }> {
+  const subCmd =
+    kind === 'merge'
+      ? ['merge', '--abort']
+      : kind === 'rebase'
+        ? ['rebase', '--abort']
+        : kind === 'cherry-pick'
+          ? ['cherry-pick', '--abort']
+          : ['revert', '--abort']
+  try {
+    await execFileP('git', subCmd, { ...GIT_OPTS, cwd, timeout: 15_000 })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Continue the in-progress operation. Git refuses if conflicts remain — we
+ * surface the error verbatim so the user sees which path still has markers.
+ *
+ * `--no-edit` keeps Git from popping an editor in the middle of the IPC call
+ * (we have no TTY here). For merge/cherry-pick/revert that means "reuse the
+ * default commit message"; for rebase --continue it's a no-op (still safe).
+ */
+export async function continueMergeOp(
+  cwd: string,
+  kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+): Promise<{ success: boolean; error?: string }> {
+  const subCmd =
+    kind === 'merge'
+      ? ['merge', '--continue', '--no-edit']
+      : kind === 'rebase'
+        ? ['rebase', '--continue']
+        : kind === 'cherry-pick'
+          ? ['cherry-pick', '--continue', '--no-edit']
+          : ['revert', '--continue', '--no-edit']
+  // For rebase, GIT_EDITOR=true makes any editor invocation succeed silently
+  // (rebase --continue may want to amend the message on each step). Same trick
+  // git's own `--no-edit` flag uses internally for the other ops.
+  const env = { ...process.env, GIT_EDITOR: 'true' }
+  try {
+    await execFileP('git', subCmd, { ...GIT_OPTS, cwd, timeout: 30_000, env })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/**
+ * Full unified diff of one path against HEAD. Used by the conflict panel's
+ * inline preview so the user can eyeball the marker blocks without opening
+ * their editor. Includes the leading `diff --git` header so diff2html can
+ * parse it.
+ */
+export async function getFileDiff(
+  cwd: string,
+  file: string
+): Promise<{ diff: string; truncated: boolean }> {
+  const opts = { ...GIT_OPTS, cwd, maxBuffer: 4 * 1024 * 1024, timeout: 10_000 }
+  try {
+    const { stdout } = await execFileP('git', ['diff', '--', file], opts)
+    return { diff: stdout, truncated: false }
+  } catch (err) {
+    const e = err as { code?: string; stdout?: string }
+    if (e?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && e.stdout) {
+      return { diff: e.stdout, truncated: true }
+    }
+    return { diff: '', truncated: false }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Commit history (git log + show)
+// ---------------------------------------------------------------------------
+
+export interface CommitInfo {
+  hash: string
+  shortHash: string
+  author: string
+  email: string
+  /** ISO 8601 author date. */
+  date: string
+  parents: string[]
+  /** Decoration refs, e.g. ['HEAD -> main', 'origin/main', 'tag: v1.0']. */
+  refs: string[]
+  subject: string
+}
+
+export interface CommitDetail extends CommitInfo {
+  body: string
+  /** Unified patch (may be huge — caller decides what to render). */
+  diff: string
+  /** True when the patch exceeded the buffer cap and was truncated. */
+  truncated: boolean
+}
+
+// ASCII Unit Separator (0x1F) between fields; Record Separator (0x1E) between
+// commits. Both are extremely rare in real commit messages and immune to
+// quoting issues from arbitrary author names / subjects.
+const LOG_FIELD_SEP = '\x1f'
+const LOG_RECORD_SEP = '\x1e'
+const LOG_FORMAT = ['%H', '%h', '%an', '%ae', '%aI', '%P', '%D', '%s'].join(LOG_FIELD_SEP)
+
+function parseRefs(raw: string): string[] {
+  if (!raw) return []
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * List commits reachable from HEAD (or from every ref when `all` is true),
+ * paginated via `--skip` + `--max-count`. Each commit lands on a single
+ * record separated by 0x1E; fields inside are separated by 0x1F so commit
+ * subjects with commas/quotes/newlines remain intact.
+ *
+ * `--no-decorate` is omitted on purpose so `%D` returns the ref decorations
+ * (HEAD pointer, branch/tag names) we render as chips in the UI.
+ */
+export async function getCommitLog(
+  cwd: string,
+  opts: { skip?: number; limit?: number; all?: boolean }
+): Promise<CommitInfo[]> {
+  const args = [
+    'log',
+    `--pretty=format:${LOG_RECORD_SEP}${LOG_FORMAT}`,
+    `--max-count=${Math.max(1, Math.min(opts.limit ?? 200, 1000))}`,
+    `--skip=${Math.max(0, opts.skip ?? 0)}`
+  ]
+  if (opts.all) args.push('--all')
+  try {
+    const { stdout } = await execFileP('git', args, {
+      ...GIT_OPTS,
+      cwd,
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 15_000
+    })
+    const records = stdout.split(LOG_RECORD_SEP).filter((r) => r.length > 0)
+    const out: CommitInfo[] = []
+    for (const rec of records) {
+      const fields = rec.split(LOG_FIELD_SEP)
+      if (fields.length < 8) continue
+      const [hash, shortHash, author, email, date, parents, refs, subject] = fields
+      out.push({
+        hash,
+        shortHash,
+        author,
+        email,
+        date,
+        parents: parents ? parents.split(' ').filter(Boolean) : [],
+        refs: parseRefs(refs),
+        subject: (subject || '').replace(/\r?\n$/, '')
+      })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Full detail for one commit: same metadata as the list row, plus the body
+ * (lines after the subject) and the unified patch. Capped at 10 MB so a
+ * monster commit (vendored dependency, generated lockfile) can't pin the
+ * IPC channel.
+ */
+export async function getCommitDetail(cwd: string, hash: string): Promise<CommitDetail | null> {
+  // Sanitize: only accept hash-like input. Branch names / refs could end up
+  // here from an out-of-date UI; require hex so we never feed an attacker-
+  // controlled --flag-shaped string into `git show`.
+  if (!/^[0-9a-f]{4,64}$/i.test(hash)) return null
+  try {
+    const headArgs = ['log', '-1', `--pretty=format:${LOG_FORMAT}${LOG_FIELD_SEP}%b`, hash]
+    const { stdout: headOut } = await execFileP('git', headArgs, {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 5_000
+    })
+    const fields = headOut.split(LOG_FIELD_SEP)
+    if (fields.length < 9) return null
+    const [h, shortHash, author, email, date, parents, refs, subject, ...bodyParts] = fields
+    const body = bodyParts.join(LOG_FIELD_SEP).replace(/\r?\n$/, '')
+
+    let diff = ''
+    let truncated = false
+    try {
+      const { stdout } = await execFileP('git', ['show', '--format=', '--patch', hash], {
+        ...GIT_OPTS,
+        cwd,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 15_000
+      })
+      diff = stdout
+    } catch (err) {
+      const e = err as { code?: string; stdout?: string }
+      if (e?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && e.stdout) {
+        diff = e.stdout
+        truncated = true
+      }
+    }
+
+    return {
+      hash: h,
+      shortHash,
+      author,
+      email,
+      date,
+      parents: parents ? parents.split(' ').filter(Boolean) : [],
+      refs: parseRefs(refs),
+      subject: (subject || '').replace(/\r?\n$/, ''),
+      body,
+      diff,
+      truncated
+    }
+  } catch {
+    return null
   }
 }
 
