@@ -19,7 +19,9 @@ import {
 } from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
 import SearchOverlay from './SearchOverlay.vue'
+import RecordingIndicator from './RecordingIndicator.vue'
 import { useTheme } from '../composables/useTheme'
+import { useVoiceInput } from '../composables/useVoiceInput'
 import { DEFAULT_SHORTCUTS, shortcutMatches } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import '@xterm/xterm/css/xterm.css'
@@ -123,6 +125,53 @@ terminal.loadAddon(searchAddon)
 terminal.loadAddon(webLinksAddon)
 terminal.loadAddon(unicode11Addon)
 terminal.unicode.activeVersion = '11'
+
+// ----- 语音输入 -----------------------------------------------------------
+// useVoiceInput 内部封装麦克风采集、AudioContext 重采样到 16kHz、IPC 发到
+// main 进程的 whisper.cpp 识别。这里只负责:
+//   1. 把结果通过 terminal.paste() 走 bracketed-paste —— ptyWrite 会绕过
+//      xterm 的 \e[200~/[201~ 包装,Claude Code 拿不到 [Pasted +N lines] chip,
+//      vim 会触发 auto-indent,bash 会逐行执行多行内容。CLAUDE.md 里专门强调。
+//   2. 把 voice.state 镜像到一个本地 indicatorState,done/error 自动消失。
+const {
+  state: voiceState,
+  level: voiceLevel,
+  message: voiceMessage,
+  start: voiceStart,
+  stop: voiceStop,
+  cancel: voiceCancel
+} = useVoiceInput({
+  language: 'auto',
+  onResult: (text) => {
+    terminal.paste(text)
+  }
+})
+
+type IndicatorState = 'recording' | 'transcribing' | 'done' | 'error'
+const indicatorState = ref<IndicatorState | null>(null)
+let indicatorTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(voiceState, (s) => {
+  if (indicatorTimer) {
+    clearTimeout(indicatorTimer)
+    indicatorTimer = null
+  }
+  if (s === 'idle') {
+    indicatorState.value = null
+    return
+  }
+  indicatorState.value = s
+  if (s === 'done' || s === 'error') {
+    // done 1.2s,error 多停 1s 让用户看清再消失。
+    indicatorTimer = setTimeout(
+      () => {
+        indicatorState.value = null
+        indicatorTimer = null
+      },
+      s === 'error' ? 2500 : 1200
+    )
+  }
+})
 
 // Propagate cwd changes up so App.vue can persist them in paneCwd / settings.
 // Fires for every distinct value, including the initial sync from props.cwd.
@@ -262,6 +311,18 @@ const closeSearch = (): void => {
 // xterm's default handling. Also call preventDefault() on shortcuts that the
 // browser/Electron might otherwise grab (Ctrl+D bookmark, etc).
 terminal.attachCustomKeyEventHandler((e): boolean => {
+  // F2 PTT 录音:不走 DEFAULT_SHORTCUTS / shortcutMatches —— PTT 同时需要
+  // keydown(开始)和 keyup(结束),而 shortcuts 系统只匹配 keydown。e.repeat
+  // 在按住时会持续触发 keydown,我们只接首次 down。
+  if (e.code === 'F2') {
+    e.preventDefault()
+    if (e.type === 'keydown' && !e.repeat) {
+      void voiceStart()
+    } else if (e.type === 'keyup') {
+      void voiceStop()
+    }
+    return false
+  }
   if (e.type !== 'keydown') return true
 
   const effective = { ...DEFAULT_SHORTCUTS, ...props.shortcuts }
@@ -562,6 +623,11 @@ onUnmounted(() => {
   }
   unsubscribeData?.()
   unsubscribeExit?.()
+  void voiceCancel()
+  if (indicatorTimer) {
+    clearTimeout(indicatorTimer)
+    indicatorTimer = null
+  }
   window.api.ptyKill(props.paneId)
   terminal.dispose()
 })
@@ -579,11 +645,20 @@ onUnmounted(() => {
     <PaneToolbar
       ref="toolbarRef"
       :cwd="currentCwd"
+      :voice-active="voiceState === 'recording'"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
+      @voice-press="voiceStart"
+      @voice-release="voiceStop"
     />
     <div ref="terminalRef" class="terminal-container"></div>
+    <RecordingIndicator
+      v-if="indicatorState"
+      :state="indicatorState"
+      :level="voiceLevel"
+      :message="voiceMessage"
+    />
     <div v-if="showSearch" class="search-pos">
       <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
     </div>

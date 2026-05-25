@@ -12,6 +12,12 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**
+  - node_modules/smart-whisper/**
+extraResources:
+  - from: resources/models
+    to: models
+    filter:
+      - '*.bin'
 win:
   executableName: gittim
 nsis:

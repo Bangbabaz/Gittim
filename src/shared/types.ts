@@ -202,6 +202,25 @@ export interface Settings {
 }
 
 // ---------------------------------------------------------------------------
+// Speech-to-Text (whisper.cpp 内置语音输入)
+// ---------------------------------------------------------------------------
+
+export interface SttTranscribeOpts {
+  /** 16kHz mono Float32 PCM,值域 [-1, 1]。 */
+  pcm: Float32Array
+  /** ISO 语言码或 'auto'。默认 'auto'。 */
+  language?: string
+}
+
+export interface SttResult {
+  ok: boolean
+  /** 识别文本(已 trim,空白片段全部合并)。 */
+  text?: string
+  /** 模型未就绪 / native binding 加载失败 / 解码失败时的人类可读信息。 */
+  error?: string
+}
+
+// ---------------------------------------------------------------------------
 // PTY
 // ---------------------------------------------------------------------------
 

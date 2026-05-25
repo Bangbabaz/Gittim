@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, screen, nativeTheme } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, screen, nativeTheme, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -54,6 +54,7 @@ import {
   killAllTasks
 } from './tasks'
 import { detectIdes, openIde, prewarmIdes } from './ide'
+import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
@@ -142,6 +143,13 @@ app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  // 允许 renderer 调用 getUserMedia 拿麦克风(语音输入功能)。Chromium 把
+  // 麦克风 + 摄像头都归为 'media' permission,这里只放行 media,其它请求一律拒绝。
+  // 不放行 mac 上会静默 deny,renderer 端 getUserMedia 报 NotAllowedError。
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'media')
   })
 
   // ----- IPC handlers ------------------------------------------------------
@@ -335,6 +343,21 @@ app.whenReady().then(() => {
   ipcMain.handle('ide-open', (_event, ideId: string, cwd: string) => openIde(ideId, cwd))
   ipcMain.handle('open-folder', (_event, cwd: string) => shell.openPath(cwd).then(() => true))
 
+  // ----- Speech-to-Text ----------------------------------------------------
+  // renderer 录完一段就发完整 PCM(Float32, 16kHz, mono)过来。IPC 走结构化克隆,
+  // typed array 直接传,无需 Base64。返回值即转写结果。
+  ipcMain.handle(
+    'stt-transcribe',
+    async (_event, opts: { pcm: Float32Array; language?: string }) => {
+      const pcm = opts?.pcm
+      if (!(pcm instanceof Float32Array)) {
+        return { ok: false, error: 'PCM 数据无效' }
+      }
+      return transcribePcm(pcm, opts.language || 'auto')
+    }
+  )
+  ipcMain.handle('stt-model-exists', () => sttModelExists())
+
   ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
     try {
       const path = join(cwd, 'package.json')
@@ -379,7 +402,7 @@ async function runCleanup(): Promise<void> {
         // 已在收尾,async killPty 没人 await,killProcessTree 起的 PowerShell
         // snapshot 会被 main 退出打断,detached 的孙子(Nx workers / vite /
         // dev server)随之逃逸。这里两边一起 await 直到全部杀完。
-        await Promise.all([killAllTasks(), killAllPtyTrees()])
+        await Promise.all([killAllTasks(), killAllPtyTrees(), disposeStt()])
       } finally {
         flushSettings()
         cleanupDone = true
