@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GitBranch,
@@ -57,15 +57,37 @@ const branchMenuOpen = ref(false)
 const branchMenuPos = ref({ x: 0, y: 0 })
 const branchMenuTarget = ref<BranchInfo | null>(null)
 const branchActionLoading = ref(false)
+// 边缘 clamp 用:首次显示时 invisible 一帧测真实 size,clamp 完才显示。
+const branchMenuRef = ref<HTMLDivElement>()
+const branchMenuReady = ref(false)
 
-function openBranchMenu(e: MouseEvent, b: BranchInfo): void {
+const MENU_MARGIN = 4
+function clampBranchMenu(): void {
+  const el = branchMenuRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const maxX = window.innerWidth - rect.width - MENU_MARGIN
+  const maxY = window.innerHeight - rect.height - MENU_MARGIN
+  branchMenuPos.value = {
+    x: Math.max(MENU_MARGIN, Math.min(branchMenuPos.value.x, maxX)),
+    y: Math.max(MENU_MARGIN, Math.min(branchMenuPos.value.y, maxY))
+  }
+}
+
+async function openBranchMenu(e: MouseEvent, b: BranchInfo): Promise<void> {
   e.preventDefault()
   e.stopPropagation()
   branchMenuTarget.value = b
   branchMenuPos.value = { x: e.clientX, y: e.clientY }
+  branchMenuReady.value = false
   branchMenuOpen.value = true
   // 这里 **不** 关 el-select popper:之前关了会让 option 在右键时收回。menu
   // teleport 到 body 并加 z-index 3500,在 popper 上方。
+  // 先 invisible 渲染拿真实 rect,clamp 到视口内后再 visible,避免边缘点击时
+  // 菜单被裁掉一半项。
+  await nextTick()
+  clampBranchMenu()
+  branchMenuReady.value = true
 }
 
 function closeBranchMenu(): void {
@@ -342,8 +364,13 @@ const switchWithStash = async (): Promise<void> => {
   <Teleport to="body">
     <div
       v-if="branchMenuOpen && branchMenuTarget"
+      ref="branchMenuRef"
       class="branch-ctx-menu"
-      :style="{ left: branchMenuPos.x + 'px', top: branchMenuPos.y + 'px' }"
+      :style="{
+        left: branchMenuPos.x + 'px',
+        top: branchMenuPos.y + 'px',
+        visibility: branchMenuReady ? 'visible' : 'hidden'
+      }"
     >
       <button class="bm-item" :disabled="ctxIsCurrent || branchActionLoading" @click="ctxMergeInto">
         <GitMerge :size="13" />

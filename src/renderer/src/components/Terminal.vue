@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -79,6 +79,10 @@ const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
+// 用于边缘 clamp:首次打开时 invisible 一帧测量真实 size,clamp 后才显示;
+// backdrop 上重新右键时菜单已显示,nextTick 同帧重新 clamp 即可,无 hide。
+const contextMenuRef = ref<HTMLDivElement>()
+const contextMenuReady = ref(false)
 // Captured when the menu opens so "复制" can be enabled/disabled correctly
 // (the selection is cleared the moment the menu steals focus otherwise).
 const menuHasSelection = ref(false)
@@ -331,18 +335,42 @@ terminal.onData((data) => {
   window.api.ptyWrite(props.paneId, data)
 })
 
-const onContextMenu = (e: MouseEvent): void => {
+// 把 (x, y) 钉到视口内 —— 右键发生在右/下边缘附近时,菜单会被视口裁掉,常见
+// 体验是部分项不可点。clamp 完保留 4px 安全 gutter,且永远不会落到负值左上角
+// (极小视口 / 巨大菜单时取 margin)。要求菜单已经在 DOM 中(测量需要 rect.width)。
+const MENU_MARGIN = 4
+function clampContextMenu(): void {
+  const el = contextMenuRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const maxX = window.innerWidth - rect.width - MENU_MARGIN
+  const maxY = window.innerHeight - rect.height - MENU_MARGIN
+  contextMenuX.value = Math.max(MENU_MARGIN, Math.min(contextMenuX.value, maxX))
+  contextMenuY.value = Math.max(MENU_MARGIN, Math.min(contextMenuY.value, maxY))
+}
+
+const onContextMenu = async (e: MouseEvent): Promise<void> => {
   e.preventDefault()
   contextMenuX.value = e.clientX
   contextMenuY.value = e.clientY
   menuHasSelection.value = terminal.hasSelection()
+  contextMenuReady.value = false
   contextMenuVisible.value = true
+  // 先用 visibility:hidden 渲染一次让 measure 拿到真实 size,clamp 后才 visible
+  // —— 避免用户看到菜单先在原始位置闪一下再跳到 clamp 后位置。
+  await nextTick()
+  clampContextMenu()
+  contextMenuReady.value = true
 }
 
-const onBackdropContextMenu = (e: MouseEvent): void => {
+const onBackdropContextMenu = async (e: MouseEvent): Promise<void> => {
   e.preventDefault()
   contextMenuX.value = e.clientX
   contextMenuY.value = e.clientY
+  // 菜单已经显示,不 hide,nextTick 后同帧 clamp 完成 —— 可能有一帧"未 clamp"
+  // 位置闪现,但单帧用户基本感知不到。这里如果再 hide 一次反而更刺眼。
+  await nextTick()
+  clampContextMenu()
 }
 
 const onCopy = async (): Promise<void> => {
@@ -567,8 +595,13 @@ onUnmounted(() => {
         @contextmenu="onBackdropContextMenu"
       >
         <div
+          ref="contextMenuRef"
           class="context-menu"
-          :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
+          :style="{
+            left: contextMenuX + 'px',
+            top: contextMenuY + 'px',
+            visibility: contextMenuReady ? 'visible' : 'hidden'
+          }"
           @click.stop
         >
           <div class="cm-item" :class="{ disabled: !menuHasSelection }" @click="onCopy">
