@@ -37,13 +37,21 @@ const props = withDefaults(
     fontSize?: number
     scrollback?: number
     shortcuts?: Record<string, string>
+    /**
+     * 父级 layout 中本 pane 是否为 active。activeId 变化(Alt+方向键切焦、点击其它
+     * pane、新建 worktree 自动 active 新 pane)会让这个 prop 翻转 —— 翻 true 时
+     * 我们补一次 terminal.focus() 把 DOM 焦点真正切过来,否则视觉 active 了但
+     * 键盘事件还在原 pane。首次 mount 不依赖这条:onMounted 末尾已经 focus 过一次。
+     */
+    isActive?: boolean
   }>(),
   {
     options: () => ({}),
     cwd: '',
     fontSize: DEFAULT_FONT_SIZE,
     scrollback: DEFAULT_SCROLLBACK,
-    shortcuts: () => ({})
+    shortcuts: () => ({}),
+    isActive: false
   }
 )
 
@@ -60,6 +68,7 @@ const emit = defineEmits<{
   (e: 'cwdChange', paneId: string, cwd: string): void
   (e: 'fontSizeChange', size: number): void
   (e: 'paneDragStart', paneId: string): void
+  (e: 'focusNeighbor', dir: 'up' | 'down' | 'left' | 'right'): void
   (e: 'openSettings'): void
   (e: 'openTasks'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
@@ -138,12 +147,19 @@ terminal.parser.registerOscHandler(7, (data) => {
   return true
 })
 
-// OSC 9;9 — Windows Terminal / PowerShell-style cwd notification.
-// xterm hands us the raw OSC body. Sub-code "9;<path>" → cwd; anything else
-// (e.g. ConEmu/iTerm2 "9;<message>" desktop notification) is left alone so
-// xterm's default handlers can still see it.
+// OSC 9 has several conflicting sub-protocols sharing the same identifier:
+//   - `OSC 9 ; <message>`            ConEmu / iTerm2 desktop notification
+//   - `OSC 9 ; 1 ; <state> ; <pct>`  Windows Terminal progress
+//   - `OSC 9 ; 9 ; <path>`           Windows Terminal / ConEmu cwd notification
+// Only the third one is what we want; the old `^9;"?([^"]+)"?$` pattern was
+// too permissive — a notification like `9;Build complete` would be parsed as
+// cwd and jump the toolbar branch indicator to a nonexistent path. Lock the
+// regex to the `9;9;` sub-code and let xterm's default handlers see anything
+// else (notifications, progress) untouched.
 terminal.parser.registerOscHandler(9, (data) => {
-  const m = data.match(/^9;"?([^"]+)"?\s*$/)
+  // 严格匹配 `9;9;<path>`(允许可选引号包裹路径)。其它子代码(`9;<msg>`、
+  // `9;1;<state>;<pct>`、`9;4;…`)一律 return false 让 xterm 默认处理。
+  const m = data.match(/^9;9;"?([^"]+?)"?\s*$/)
   if (m) {
     currentCwd.value = m[1]
     return true
@@ -214,6 +230,20 @@ watch(xtermTheme, (t) => {
   terminal.options.theme = t
 })
 
+// active 翻 true → 把 DOM 焦点真正切到本 pane 的 xterm。这是 Alt+方向键切焦 +
+// 编程式 setActive(新建 worktree / drag-drop) 共同的尾巴 —— activeId 改了视觉
+// 高亮,但浏览器键盘事件去向只有 .focus() 才会变。下一帧 focus 是为了避开
+// xterm 本身可能正在处理上一次按键 emit 的同步流。
+watch(
+  () => props.isActive,
+  (now) => {
+    if (now) {
+      // 多个 pane 同时翻 true 不会出现(activeId 是单值);这里直接 focus 不需要去重。
+      requestAnimationFrame(() => terminal.focus())
+    }
+  }
+)
+
 const openSearch = (): void => {
   showSearch.value = true
 }
@@ -274,6 +304,22 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
       case 'paste':
         e.preventDefault()
         pasteFromClipboard()
+        return false
+      case 'focusUp':
+        e.preventDefault()
+        emit('focusNeighbor', 'up')
+        return false
+      case 'focusDown':
+        e.preventDefault()
+        emit('focusNeighbor', 'down')
+        return false
+      case 'focusLeft':
+        e.preventDefault()
+        emit('focusNeighbor', 'left')
+        return false
+      case 'focusRight':
+        e.preventDefault()
+        emit('focusNeighbor', 'right')
         return false
     }
   }
@@ -418,6 +464,18 @@ const sendResize = (): void => {
   }
 }
 
+// 拖 divider / 窗口边缘时 ResizeObserver 每帧会触发,fit() 内部要扫整张测量
+// canvas,连续 IPC 也会让 main 一直在 ptyResize。把多次回调合并到下一帧执行 —
+// 用户拖动结束后只跑一次 sendResize,体感无差别但 CPU 大幅下降。
+let resizeRafId: number | null = null
+const scheduleResize = (): void => {
+  if (resizeRafId !== null) return
+  resizeRafId = requestAnimationFrame(() => {
+    resizeRafId = null
+    sendResize()
+  })
+}
+
 onMounted(async () => {
   if (!terminalRef.value) return
 
@@ -454,7 +512,8 @@ onMounted(async () => {
   })
 
   // Watch the container — splits/window resizes/drags all change its size.
-  resizeObserver = new ResizeObserver(() => sendResize())
+  // 通过 rAF 合并连续触发,避免拖拽时高频 fit() + ptyResize IPC。
+  resizeObserver = new ResizeObserver(() => scheduleResize())
   resizeObserver.observe(terminalRef.value)
 
   terminal.focus()
@@ -469,6 +528,10 @@ onUnmounted(() => {
   termElement = null
   termTextarea = null
   resizeObserver?.disconnect()
+  if (resizeRafId !== null) {
+    cancelAnimationFrame(resizeRafId)
+    resizeRafId = null
+  }
   unsubscribeData?.()
   unsubscribeExit?.()
   window.api.ptyKill(props.paneId)

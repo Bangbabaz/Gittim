@@ -14,23 +14,16 @@ import {
   Settings2,
   X,
   FolderOpen,
-  Terminal as TerminalIcon
+  Terminal as TerminalIcon,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-vue-next'
 import SearchOverlay from './SearchOverlay.vue'
 import { useTheme } from '../composables/useTheme'
+import type { TaskMeta } from '@shared/types'
 import '@xterm/xterm/css/xterm.css'
 
 const { xtermTheme } = useTheme()
-
-type TaskMeta = {
-  id: string
-  name: string
-  command: string
-  cwd: string
-  status: 'idle' | 'running' | 'exited' | 'failed'
-  exitCode: number | null
-  startedAt: number | null
-}
 
 const props = defineProps<{
   modelValue: boolean
@@ -56,6 +49,71 @@ const tasks = ref<TaskMeta[]>([])
 const selectedId = ref<string | null>(null)
 
 const selectedTask = computed(() => tasks.value.find((t) => t.id === selectedId.value) || null)
+
+// --- 任务按 cwd 分组 -----------------------------------------------------
+// TasksDrawer 是"统一管理"入口 —— 全部任务都在这里。按 cwd 分组让用户一眼区分
+// 同名命令在不同项目里(`npm run dev` in projectA vs projectB)。分组头只显示
+// 文件夹尾段名,完整路径放 title;task row 内部不再重复显示 cwd,避免文本拥挤。
+interface TaskGroup {
+  key: string // normalize 过的 cwd,空 = 未指定
+  display: string // 尾段文件夹名,展示用
+  fullPath: string // hover title
+  tasks: TaskMeta[]
+}
+
+const normPath = (p: string | undefined | null): string => {
+  if (!p) return ''
+  let s = p.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (/^[a-zA-Z]:/.test(s)) s = s.toLowerCase()
+  return s
+}
+
+const lastSegment = (p: string): string => {
+  const parts = p.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || p
+}
+
+const taskGroups = computed<TaskGroup[]>(() => {
+  const map = new Map<string, TaskGroup>()
+  for (const t of tasks.value) {
+    const k = normPath(t.cwd)
+    let g = map.get(k)
+    if (!g) {
+      g = {
+        key: k,
+        display: k ? lastSegment(t.cwd) : '未指定工作目录',
+        fullPath: t.cwd || '未指定工作目录',
+        tasks: []
+      }
+      map.set(k, g)
+    }
+    g.tasks.push(t)
+  }
+  const out = Array.from(map.values())
+  // 排序:尾段文件夹名字典序;未指定 cwd 的分组排最末
+  out.sort((a, b) => {
+    if (a.key === '' && b.key !== '') return 1
+    if (b.key === '' && a.key !== '') return -1
+    return a.display.localeCompare(b.display)
+  })
+  return out
+})
+
+// 折叠集合 —— normalize 过的 cwd 作 key,集合内即折叠。默认全部展开。
+// 当前 selected task 所在分组不允许折叠(否则用户看不见选中行)。
+const collapsedGroups = ref<Set<string>>(new Set())
+
+function toggleGroup(g: TaskGroup): void {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(g.key)) next.delete(g.key)
+  else next.add(g.key)
+  collapsedGroups.value = next
+}
+
+function isGroupCollapsed(g: TaskGroup): boolean {
+  if (selectedTask.value && normPath(selectedTask.value.cwd) === g.key) return false
+  return collapsedGroups.value.has(g.key)
+}
 
 const statusText: Record<TaskMeta['status'], string> = {
   idle: '未运行',
@@ -341,50 +399,59 @@ function closeLogSearch(): void {
               <Settings2 :size="12" style="vertical-align: -2px" />
               新建
             </div>
-            <div
-              v-for="t in tasks"
-              :key="t.id"
-              class="task-row"
-              :class="{ active: t.id === selectedId }"
-              @click="selectTask(t.id)"
-            >
-              <span class="status-dot" :class="t.status" :title="statusText[t.status]" />
-              <div class="task-meta">
-                <div class="task-name">{{ t.name }}</div>
-                <div class="task-cmd">{{ t.command }}</div>
-                <div class="task-cwd" :title="t.cwd || '未指定工作目录'">
-                  <FolderOpen :size="11" class="task-cwd-icon" />
-                  <span class="task-cwd-text"
-                    ><bdi>{{ t.cwd || '未指定工作目录' }}</bdi></span
-                  >
+            <template v-for="g in taskGroups" :key="g.key">
+              <!-- 分组头:只展示尾段文件夹名;hover 看完整路径。可折叠/展开。 -->
+              <div class="task-group-head" :title="g.fullPath" @click="toggleGroup(g)">
+                <component
+                  :is="isGroupCollapsed(g) ? ChevronRight : ChevronDown"
+                  :size="12"
+                  class="task-group-caret"
+                />
+                <FolderOpen :size="12" class="task-group-folder" />
+                <span class="task-group-name">{{ g.display }}</span>
+                <span class="task-group-count">{{ g.tasks.length }}</span>
+              </div>
+              <template v-if="!isGroupCollapsed(g)">
+                <div
+                  v-for="t in g.tasks"
+                  :key="t.id"
+                  class="task-row"
+                  :class="{ active: t.id === selectedId }"
+                  @click="selectTask(t.id)"
+                >
+                  <span class="status-dot" :class="t.status" :title="statusText[t.status]" />
+                  <div class="task-meta">
+                    <div class="task-name">{{ t.name }}</div>
+                    <div class="task-cmd">{{ t.command }}</div>
+                  </div>
+                  <div class="task-ops" @click.stop>
+                    <button
+                      class="op-btn"
+                      :class="t.status === 'running' ? 'stop' : 'run'"
+                      :title="t.status === 'running' ? '停止' : '运行'"
+                      @click="toggleTask(t)"
+                    >
+                      <Square v-if="t.status === 'running'" :size="13" />
+                      <Play v-else :size="13" />
+                    </button>
+                    <button
+                      v-if="t.status === 'running'"
+                      class="op-btn run"
+                      title="重新运行"
+                      @click="restartTask(t)"
+                    >
+                      <RotateCw :size="13" />
+                    </button>
+                    <button class="op-btn edit" title="编辑" @click="editTask(t)">
+                      <Pencil :size="13" />
+                    </button>
+                    <button class="op-btn danger" title="删除" @click="removeTask(t)">
+                      <Trash2 :size="13" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div class="task-ops" @click.stop>
-                <button
-                  class="op-btn"
-                  :class="t.status === 'running' ? 'stop' : 'run'"
-                  :title="t.status === 'running' ? '停止' : '运行'"
-                  @click="toggleTask(t)"
-                >
-                  <Square v-if="t.status === 'running'" :size="13" />
-                  <Play v-else :size="13" />
-                </button>
-                <button
-                  v-if="t.status === 'running'"
-                  class="op-btn run"
-                  title="重新运行"
-                  @click="restartTask(t)"
-                >
-                  <RotateCw :size="13" />
-                </button>
-                <button class="op-btn edit" title="编辑" @click="editTask(t)">
-                  <Pencil :size="13" />
-                </button>
-                <button class="op-btn danger" title="删除" @click="removeTask(t)">
-                  <Trash2 :size="13" />
-                </button>
-              </div>
-            </div>
+              </template>
+            </template>
           </div>
         </aside>
 
@@ -521,7 +588,8 @@ function closeLogSearch(): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px;
+  // 多一点左 padding,让 row 内容相对分组头的 caret + folder icon 有视觉缩进
+  padding: 8px 8px 8px 22px;
   border-radius: 5px;
   cursor: pointer;
 }
@@ -573,40 +641,43 @@ function closeLogSearch(): void {
   font-family: $font-mono;
 }
 
-.task-cwd {
+/* 分组头:可点击折叠/展开。caret + folder icon + 尾段文件夹名 + 数量。
+   完整 cwd 作 element title,用户 hover 看完整路径,平时只展示文件夹名。 */
+.task-group-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  color: var(--el-text-color-placeholder);
-  min-width: 0;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  margin-top: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 
-.task-cwd-icon {
+.task-group-head:first-child {
+  margin-top: 0;
+}
+
+.task-group-head:hover {
+  color: var(--el-text-color-primary);
+}
+
+.task-group-caret,
+.task-group-folder {
   flex-shrink: 0;
 }
 
-/* Left-truncate the path so the project folder (the part at the tail) stays
-   visible — that's what tells two tasks with `D:/long/shared/prefix/projectA`
-   and `D:/long/shared/prefix/projectB` apart. `direction: rtl` flips the
-   ellipsis to the start; the inner span pulls direction back to `ltr` so the
-   text itself (path separators, latin/CJK chars) doesn't render reversed. */
-.task-cwd-text {
-  font-size: 10.5px;
-  font-family: $font-mono;
+.task-group-name {
   flex: 1;
   min-width: 0;
-  direction: rtl;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-family: $font-mono;
+  @include ellipsis;
+}
 
-  // Inner content stays LTR so the path reads correctly.
-  > * {
-    direction: ltr;
-    unicode-bidi: bidi-override;
-  }
+.task-group-count {
+  flex-shrink: 0;
+  color: var(--el-text-color-placeholder);
 }
 
 .task-ops {

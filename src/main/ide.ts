@@ -6,23 +6,13 @@ import { tmpdir } from 'os'
 import { join, dirname, basename } from 'path'
 import { app, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import type { IdeInfo } from '@shared/types'
+
+export type { IdeInfo }
 
 const execFileP = promisify(execFile)
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
-
-export interface IdeInfo {
-  id: string
-  name: string
-  /** Full path to the launcher (resolved via PATH, registry, or a known install dir). */
-  command: string
-  /**
-   * Real icon extracted from the executable / .app bundle, as a base64 PNG
-   * data URL ready to drop into an <img src>. Undefined when extraction
-   * failed (e.g. a .cmd script with no associated .exe we can find).
-   */
-  iconDataUrl?: string
-}
 
 interface IdeCandidate {
   id: string
@@ -712,12 +702,35 @@ async function extractIcon(command: string, id?: string): Promise<string | undef
 // ---------------------------------------------------------------------------
 
 let cache: IdeInfo[] | null = null
+let prewarming: Promise<IdeInfo[]> | null = null
+
+/**
+ * 在 app ready 后异步触发首次 IDE 扫描。macOS 上 `system_profiler -json` 第一次跑
+ * 1–2 秒,Windows 注册表 sweep ~300 ms;放到启动期跑就不再卡用户首次点击 IDE
+ * 按钮的瞬间。fire-and-forget,失败也无所谓 —— 用户真去点的时候会再触发一次。
+ */
+export function prewarmIdes(): void {
+  if (cache || prewarming) return
+  prewarming = detectIdes(false).catch(() => [])
+}
 
 export async function detectIdes(force = false): Promise<IdeInfo[]> {
   if (cache && !force) return cache
+  // 命中预热正在进行的扫描,避免连续两次 system_profiler。force 模式强制重扫,
+  // 仍然 await prewarming 一下保证旧的扫描进程不会和新的 race。
+  if (!force && prewarming) {
+    try {
+      const result = await prewarming
+      if (cache) return cache
+      return result
+    } catch {
+      // 预热失败 —— 走下面真正的检测流程
+    }
+  }
   if (force) {
     registryCache = null
     macAppsCache = null
+    prewarming = null
   }
 
   // Fire both platform-wide enumerations in parallel with PATH lookup so the

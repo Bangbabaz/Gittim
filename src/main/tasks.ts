@@ -1,19 +1,13 @@
 import { spawn, IPty } from 'node-pty'
 import { WebContents } from 'electron'
 import { statSync } from 'fs'
-import { readSettings, updateSettings, TaskDef } from './settings'
+import { readSettings, updateSettings } from './settings'
 import { killProcessTree } from './proc'
+import type { TaskDef, TaskMeta, TaskStatus } from '@shared/types'
+
+export type { TaskDef, TaskMeta, TaskStatus }
 
 const isWindows = process.platform === 'win32'
-
-export type TaskStatus = 'idle' | 'running' | 'exited' | 'failed'
-
-/** Sent to the renderer — definition + runtime status, never the pty handle. */
-export interface TaskMeta extends TaskDef {
-  status: TaskStatus
-  exitCode: number | null
-  startedAt: number | null
-}
 
 interface Task extends TaskMeta {
   pty: IPty | null
@@ -31,7 +25,18 @@ interface Task extends TaskMeta {
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 30
 
-const OUTPUT_BYTE_CAP = 512 * 1024
+// 默认输出缓存上限(单位:字节)。用户可在设置里调到 1 MB–32 MB,这里给一个
+// 较大的默认值 4 MB —— dev server 跑半天后用户希望能回看冷启动日志。原始
+// 512 KB 太小,一次 install 就被冲掉。
+const DEFAULT_OUTPUT_BYTE_CAP = 4 * 1024 * 1024
+const MIN_OUTPUT_BYTE_CAP = 1024 * 1024
+const MAX_OUTPUT_BYTE_CAP = 32 * 1024 * 1024
+
+function outputByteCap(): number {
+  const kb = readSettings().taskOutputCapKB
+  if (typeof kb !== 'number' || !Number.isFinite(kb)) return DEFAULT_OUTPUT_BYTE_CAP
+  return Math.max(MIN_OUTPUT_BYTE_CAP, Math.min(MAX_OUTPUT_BYTE_CAP, Math.floor(kb * 1024)))
+}
 
 const tasks = new Map<string, Task>()
 // Renderers that want task stream/status events. Tasks outlive any single
@@ -151,18 +156,19 @@ async function killTaskTree(t: Task): Promise<void> {
 }
 
 function appendOutput(t: Task, chunk: string): void {
+  const cap = outputByteCap()
   t.output.push(chunk)
   t.outputBytes += chunk.length
-  while (t.outputBytes > OUTPUT_BYTE_CAP && t.output.length > 1) {
+  while (t.outputBytes > cap && t.output.length > 1) {
     const dropped = t.output.shift()!
     t.outputBytes -= dropped.length
   }
   // A single chunk larger than the cap (e.g. a giant console.log dump) would
   // otherwise stay in memory forever — the loop above never drops the last
   // chunk. Tail-trim it to fit so the cap is a real bound, not a soft hint.
-  if (t.outputBytes > OUTPUT_BYTE_CAP && t.output.length === 1) {
+  if (t.outputBytes > cap && t.output.length === 1) {
     const only = t.output[0]
-    const tail = only.slice(only.length - OUTPUT_BYTE_CAP)
+    const tail = only.slice(only.length - cap)
     t.output[0] = tail
     t.outputBytes = tail.length
   }

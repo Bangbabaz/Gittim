@@ -36,7 +36,7 @@ import {
   gitDeleteBranch
 } from './shell'
 import { readSettings, updateSettings, flushSettings } from './settings'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import {
   registerTaskSubscriber,
   loadPersistedTasks,
@@ -52,8 +52,9 @@ import {
   resizeTask,
   killAllTasks
 } from './tasks'
-import { detectIdes, openIde } from './ide'
+import { detectIdes, openIde, prewarmIdes } from './ide'
 import icon from '../../resources/icon.png?asset'
+import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -142,13 +143,23 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC handlers
-  ipcMain.handle('get-cwd', () => getCurrentDir())
-  ipcMain.handle('get-platform', () => process.platform)
-  ipcMain.handle('get-app-version', () => app.getVersion())
-  ipcMain.handle('get-git-info', (_event, cwd: string) => getGitInfo(cwd))
-  ipcMain.handle('get-git-branches', (_event, cwd: string) => getGitBranches(cwd))
-  ipcMain.handle('get-repo-name', (_event, cwd: string) => getRepoName(cwd))
+  // ----- IPC handlers ------------------------------------------------------
+  //
+  // 通道命名约定:
+  //   - sys-*    系统信息(cwd / platform / app version)
+  //   - git-*    git 操作和查询(全部带前缀,无 get- 双前缀)
+  //   - pty-*    PTY 终端会话
+  //   - task-*   后台任务
+  //   - settings-* / theme-* / win-* / ide-*    各自模块名空间
+  //   - 其它独立 channel:select-directory / path-exists / read-package-scripts
+  //
+  // 之前 git 相关 channel 混用了 `get-git-*` 与 `git-*` 两种前缀,统一改为 git-*。
+  ipcMain.handle('sys-cwd', () => getCurrentDir())
+  ipcMain.handle('sys-platform', () => process.platform)
+  ipcMain.handle('sys-app-version', () => app.getVersion())
+  ipcMain.handle('git-info', (_event, cwd: string) => getGitInfo(cwd))
+  ipcMain.handle('git-branches', (_event, cwd: string) => getGitBranches(cwd))
+  ipcMain.handle('git-repo-name', (_event, cwd: string) => getRepoName(cwd))
   ipcMain.handle('git-diff-stats', (_event, cwd: string) => getGitDiffStats(cwd))
   ipcMain.handle('git-has-changes', (_event, cwd: string) => gitHasUncommittedChanges(cwd))
 
@@ -195,13 +206,8 @@ app.whenReady().then(() => {
   )
 
   // Commit history
-  ipcMain.handle(
-    'git-log',
-    (
-      _event,
-      cwd: string,
-      opts: { skip?: number; limit?: number; ref?: string; grep?: string; author?: string }
-    ) => getCommitLog(cwd, opts || {})
+  ipcMain.handle('git-log', (_event, cwd: string, opts: CommitLogOpts) =>
+    getCommitLog(cwd, opts || {})
   )
   ipcMain.handle('git-commit-detail', (_event, cwd: string, hash: string) =>
     getCommitDetail(cwd, hash)
@@ -216,12 +222,9 @@ app.whenReady().then(() => {
     gitDeleteBranch(cwd, branch, force)
   )
 
-  ipcMain.handle(
-    'git-worktree-add',
-    (_event, cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) => {
-      return gitAddWorktree(cwd, opts)
-    }
-  )
+  ipcMain.handle('git-worktree-add', (_event, cwd: string, opts: WorktreeAddOpts) => {
+    return gitAddWorktree(cwd, opts)
+  })
 
   ipcMain.handle('select-directory', async (): Promise<string | null> => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
@@ -238,7 +241,7 @@ app.whenReady().then(() => {
 
   // Settings IPC
   ipcMain.handle('settings-get', () => readSettings())
-  ipcMain.on('settings-set', (_event, patch: Record<string, unknown>) => {
+  ipcMain.on('settings-set', (_event, patch: Partial<Settings>) => {
     updateSettings(patch)
   })
 
@@ -262,12 +265,9 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle(
-    'pty-start',
-    (event, opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) => {
-      startPty(event.sender, opts)
-    }
-  )
+  ipcMain.handle('pty-start', (event, opts: PtyStartOpts) => {
+    startPty(event.sender, opts)
+  })
 
   ipcMain.on('pty-write', (_event, paneId: string, data: string) => {
     writePty(paneId, data)
@@ -336,7 +336,13 @@ app.whenReady().then(() => {
 
   ipcMain.handle('read-package-scripts', (_event, cwd: string): Record<string, string> => {
     try {
-      const raw = readFileSync(join(cwd, 'package.json'), 'utf8')
+      const path = join(cwd, 'package.json')
+      // 防御性大小检查 —— 一个 10 MB 的伪 package.json 不会让 main process 拿
+      // 整个文件 readFile + JSON.parse,而是直接当成"无 scripts"返回。realistic
+      // package.json 远不及 1 MB,大于阈值的多半是攻击或者垃圾文件。
+      const size = statSync(path).size
+      if (size > 1024 * 1024) return {}
+      const raw = readFileSync(path, 'utf8')
       const pkg = JSON.parse(raw)
       return pkg && typeof pkg.scripts === 'object' ? pkg.scripts : {}
     } catch {
@@ -345,6 +351,10 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  // IDE 检测要 ~300 ms（Windows 注册表）/ 1-2 s（macOS system_profiler）。
+  // 在窗口已经显示后异步预扫,首次点击 IDE 按钮时就是缓存命中。失败也无所谓 ——
+  // detectIdes(true) 会按需重试。
+  prewarmIdes()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

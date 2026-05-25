@@ -3,35 +3,14 @@ import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { RefreshCw, GitCommit, User, Calendar, Search } from 'lucide-vue-next'
 import DiffViewer from './DiffViewer.vue'
-
-interface CommitInfo {
-  hash: string
-  shortHash: string
-  author: string
-  email: string
-  date: string
-  parents: string[]
-  refs: string[]
-  subject: string
-}
-
-interface CommitDetail extends CommitInfo {
-  body: string
-  diff: string
-  truncated: boolean
-}
-
-interface BranchInfo {
-  name: string
-  local: boolean
-  remote: boolean
-  remoteName?: string
-  worktree?: boolean
-}
+import { computeGraph, GRAPH, laneCenterX } from '../lib/commitGraph'
+import type { CommitInfo, CommitDetail, BranchInfo } from '@shared/types'
 
 const props = defineProps<{ cwd: string }>()
 
-const PAGE = 200
+// 默认页大小 50 —— 主进程那边的默认也是 50,这里再写一遍是因为加载更多也走
+// 同一个常量,保持本组件的滚动节奏与首次加载一致。
+const PAGE = 50
 
 // --- list / detail state -------------------------------------------------
 const commits = ref<CommitInfo[]>([])
@@ -294,6 +273,24 @@ function selectCommit(c: CommitInfo): void {
   loadDetail(c.hash)
 }
 
+// --- 提交图 -------------------------------------------------------------
+// commits 变化 → 重算 graph 数据;每行的圆点 + 上下连线由 GRAPH 常量统一控制。
+const graphRows = computed(() => computeGraph(commits.value))
+
+// 所有行共用相同 graph 列宽 —— 否则 commit subject 列的左边缘会摇摆。
+// width = max(laneCount across all rows) * laneStep + 2 * leftPad,设置一个
+// 上限避免极端 lane 数(merge 频繁的仓库)把内容挤没。
+const MAX_LANE_RENDER = 6
+const graphWidth = computed(() => {
+  let maxLanes = 1
+  for (const r of graphRows.value) {
+    if (r.laneCount > maxLanes) maxLanes = r.laneCount
+  }
+  maxLanes = Math.min(maxLanes, MAX_LANE_RENDER)
+  return GRAPH.leftPad * 2 + (maxLanes - 1) * GRAPH.laneStep
+})
+const graphHeight = GRAPH.rowHeight
+
 watch(
   () => props.cwd,
   () => {
@@ -516,33 +513,75 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
         <div v-else-if="!commits.length" class="gl-state">没有匹配的提交</div>
         <template v-else>
           <button
-            v-for="c in commits"
+            v-for="(c, idx) in commits"
             :key="c.hash"
             class="gl-row"
             :class="{ active: c.hash === selectedHash }"
             @click="selectCommit(c)"
           >
-            <div class="gl-row-top">
-              <span class="gl-subject" :title="c.subject">{{ c.subject }}</span>
-            </div>
-            <div class="gl-row-meta">
-              <span class="gl-hash">{{ c.shortHash }}</span>
-              <span class="gl-author">{{ c.author }}</span>
-              <span class="gl-date" :title="c.date">{{ formatDate(c.date) }}</span>
-            </div>
-            <div v-if="c.refs.length" class="gl-row-refs">
-              <span
-                v-for="(d, i) in decorate(c.refs)"
-                :key="i"
-                class="gl-ref"
-                :class="`gl-ref-${d.kind}`"
-                :title="d.label"
-                >{{ d.label }}</span
-              >
+            <!-- graph 单元:lane 圆点 + 上下连线。同行所有 SVG 宽度都用
+                 graphWidth(max over rows),保证 commit 内容列对齐。 -->
+            <svg
+              v-if="graphRows[idx]"
+              class="gl-graph"
+              :width="graphWidth"
+              :height="graphHeight"
+              :viewBox="`0 0 ${graphWidth} ${graphHeight}`"
+            >
+              <line
+                v-for="(s, si) in graphRows[idx].topSegments"
+                :key="`t${si}`"
+                :x1="laneCenterX(s.fromLane)"
+                :y1="0"
+                :x2="laneCenterX(s.toLane)"
+                :y2="graphHeight / 2"
+                :stroke="s.color"
+                stroke-width="1.5"
+              />
+              <line
+                v-for="(s, si) in graphRows[idx].bottomSegments"
+                :key="`b${si}`"
+                :x1="laneCenterX(s.fromLane)"
+                :y1="graphHeight / 2"
+                :x2="laneCenterX(s.toLane)"
+                :y2="graphHeight"
+                :stroke="s.color"
+                stroke-width="1.5"
+              />
+              <!-- merge commit:空心圆 + 加粗描边表达"合并节点";普通 commit
+                   实心圆 —— 一眼区分 merge / 普通。 -->
+              <circle
+                :cx="laneCenterX(graphRows[idx].ownLane)"
+                :cy="graphHeight / 2"
+                :r="GRAPH.dotRadius"
+                :fill="graphRows[idx].isMerge ? 'var(--el-bg-color)' : graphRows[idx].dotColor"
+                :stroke="graphRows[idx].dotColor"
+                :stroke-width="graphRows[idx].isMerge ? 2 : 1"
+              />
+            </svg>
+            <div class="gl-row-body">
+              <div class="gl-row-top">
+                <span class="gl-subject" :title="c.subject">{{ c.subject }}</span>
+              </div>
+              <div class="gl-row-meta">
+                <span class="gl-hash">{{ c.shortHash }}</span>
+                <span class="gl-author">{{ c.author }}</span>
+                <span class="gl-date" :title="c.date">{{ formatDate(c.date) }}</span>
+              </div>
+              <div v-if="c.refs.length" class="gl-row-refs">
+                <span
+                  v-for="(d, i) in decorate(c.refs)"
+                  :key="i"
+                  class="gl-ref"
+                  :class="`gl-ref-${d.kind}`"
+                  :title="d.label"
+                  >{{ d.label }}</span
+                >
+              </div>
             </div>
           </button>
           <button v-if="hasMore" class="gl-load-more" :disabled="loadingMore" @click="loadMore">
-            {{ loadingMore ? '加载中…' : `加载更多（已加载 ${commits.length}）` }}
+            {{ loadingMore ? '加载中…' : `加载更多(已加载 ${commits.length})` }}
           </button>
         </template>
       </aside>
@@ -730,15 +769,34 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 
 .gl-row {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: stretch;
+  gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 0 8px 0 0;
   background: transparent;
   border: 1px solid transparent;
   border-radius: $radius-sm;
   cursor: pointer;
   text-align: left;
+}
+
+// graph SVG 紧贴行左边缘,与上一行的 SVG 自然连接成连续 lane 线。
+// align-self: flex-start —— SVG 高度固定 36px(= GRAPH.rowHeight)对齐 row 顶部,
+// 圆点 cy=18 正好落在 subject 行中心;commit 有 refs 时 row 扩高,SVG 不跟着拉伸,
+// 避免圆点被拉成椭圆 / 跳出 subject 行视觉中线。
+.gl-graph {
+  flex-shrink: 0;
+  display: block;
+  align-self: flex-start;
+}
+
+.gl-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
 }
 
 .gl-row:hover {

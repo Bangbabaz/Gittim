@@ -1,66 +1,18 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs'
 import { join } from 'path'
+import type { Settings, TaskDef, SavedLayout } from '@shared/types'
 
-/**
- * Saved layout tree. Mirrors the renderer's LayoutNode but stores cwd (not
- * pane IDs, which are regenerated on every launch). Restored on startup by
- * App.vue's deserialize() with fresh IDs.
- */
-export type SavedLayout =
-  | { type: 'pane'; cwd: string }
-  | {
-      type: 'split'
-      direction: 'row' | 'column'
-      ratio: number
-      a: SavedLayout
-      b: SavedLayout
-    }
-
-/**
- * Persisted background-task definition. Lives here (not tasks.ts) so settings.ts
- * has no import cycle with tasks.ts — tasks.ts imports this, not vice-versa.
- */
-export interface TaskDef {
-  id: string
-  name: string
-  command: string
-  cwd: string
-}
-
-export interface Settings {
-  windowBounds?: { x?: number; y?: number; width: number; height: number }
-  windowMaximized?: boolean
-  fontSize?: number
-  /** Terminal scrollback buffer size in lines. */
-  scrollback?: number
-  /** null means "explicitly cleared" — used by the settings drawer's reset action. */
-  paneLayout?: SavedLayout | null
-  tasks?: TaskDef[]
-  /** Auto-open the tasks drawer when a task starts. Default true. */
-  autoOpenTasksOnRun?: boolean
-  /** Tasks drawer width in px (drag-to-resize). Default 860. */
-  tasksDrawerWidth?: number
-  /** UI theme. 'system' follows the OS via Electron nativeTheme. Default 'system'. */
-  theme?: 'system' | 'dark' | 'light'
-  /**
-   * Last-picked IDE id for the toolbar's "open in IDE" button. The main-side
-   * id (e.g. `vscode`, `idea`, `cursor`). Reset to undefined when the picked
-   * IDE is no longer detected on disk (the renderer drops stale values).
-   */
-  defaultIde?: string
-  /**
-   * Non-default keyboard shortcuts keyed by ShortcutAction. Only overrides are
-   * stored; the renderer merges them with DEFAULT_SHORTCUTS at runtime.
-   */
-  shortcutOverrides?: Record<string, string>
-}
+// 共享类型 re-export,方便 main/tasks.ts 这种本来从 settings.ts 拿 TaskDef 的旧
+// import 不必再到处改路径。
+export type { Settings, TaskDef, SavedLayout }
 
 const DEFAULTS: Settings = {
   windowBounds: { width: 1100, height: 720 },
   windowMaximized: false,
   fontSize: 13,
   scrollback: 10000,
+  taskOutputCapKB: 4096,
   autoOpenTasksOnRun: true,
   tasksDrawerWidth: 860,
   theme: 'system'

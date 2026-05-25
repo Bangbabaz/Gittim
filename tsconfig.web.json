@@ -6,15 +6,15 @@
     "src/renderer/src/**/*.vue",
     "src/preload/*.d.ts",
     "src/renderer/auto-imports.d.ts",
-    "src/renderer/components.d.ts"
+    "src/renderer/components.d.ts",
+    "src/shared/**/*"
   ],
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": [
-        "src/renderer/src/*"
-      ]
+      "@renderer/*": ["src/renderer/src/*"],
+      "@shared/*": ["src/shared/*"]
     }
   }
 }

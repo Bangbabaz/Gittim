@@ -2,16 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, X, FolderOpen } from 'lucide-vue-next'
-
-type TaskMeta = {
-  id: string
-  name: string
-  command: string
-  cwd: string
-  status: 'idle' | 'running' | 'exited' | 'failed'
-  exitCode: number | null
-  startedAt: number | null
-}
+import type { TaskMeta } from '@shared/types'
 
 interface EditItem {
   key: string
@@ -23,14 +14,20 @@ interface EditItem {
   dirty: boolean
 }
 
+// 管理命令对话框 —— **只对当前面板/文件夹负责**。scopeCwd 决定列表只显示这个
+// 文件夹的命令,以及新建草稿默认 cwd 也是这里。跨文件夹的"统一管理"在
+// TasksDrawer 里(那里按 cwd 分组列出全部任务)。
+//
+// 列表里仍然可能出现 cwd 不在 scope 的行:当前选中的(actively edited)行,
+// 即使把 cwd 改成了别的目录也不让它消失,否则用户改一半就丢了 selection。
+
 const props = defineProps<{
   modelValue: boolean
   focusId: string | null
   defaultCwd: string
-  // When set, the dialog is scoped to ONE folder: it only lists / creates
-  // commands whose cwd is this folder. Null = legacy flat list (all folders).
+  /** null = 兼容模式:列全部。正常入口都会带 scopeCwd。 */
   scopeCwd: string | null
-  // Auto-start a fresh draft on open (the pane's "为此文件夹新建命令" path).
+  /** 打开时立即起一个 draft,放在 scopeCwd / defaultCwd 文件夹下。 */
   newDraft: boolean
 }>()
 
@@ -80,8 +77,8 @@ const norm = (p: string | null | undefined): string => {
   return s
 }
 
-// Scoped to one folder: show only that folder's commands (plus the row being
-// edited, so a cwd edit doesn't make it vanish mid-typing). Null scope = all.
+// scope 模式:只显示该 cwd 的命令,外加 selected 行(让 cwd 编辑过程中不丢)。
+// 无 scope:全部展示(legacy)。
 const visibleItems = computed(() => {
   if (!props.scopeCwd) return items.value
   const sc = norm(props.scopeCwd)
@@ -117,7 +114,6 @@ watch(
   async (open) => {
     if (!open) return
     await reload()
-    // Opened via a pane's "为此文件夹新建命令" → start a draft for this folder.
     if (props.newDraft) addDraft(props.scopeCwd || undefined)
   }
 )
@@ -170,7 +166,7 @@ async function browseCwd(): Promise<void> {
 async function deleteItem(i: EditItem): Promise<void> {
   if (!i.isNew && i.id) {
     try {
-      await ElMessageBox.confirm(`删除命令 "${itemLabel(i)}"？运行中的进程会被结束。`, '删除命令', {
+      await ElMessageBox.confirm(`删除命令 "${itemLabel(i)}"?运行中的进程会被结束。`, '删除命令', {
         confirmButtonText: '删除',
         cancelButtonText: '取消',
         type: 'warning'
@@ -183,13 +179,7 @@ async function deleteItem(i: EditItem): Promise<void> {
   const idx = items.value.findIndex((x) => x.key === i.key)
   if (idx >= 0) items.value.splice(idx, 1)
   if (selectedKey.value === i.key) {
-    // Promote the first item that's actually in scope, not just items[0].
-    // visibleItems lets the selected row through even if its cwd doesn't
-    // match scopeCwd (so an actively-edited cwd stays visible). If we fell
-    // back to items[0] blindly here, deleting a fresh draft would promote
-    // a different-folder task into selection — and the user would see a
-    // phantom command (e.g. an old `npm run dev` from another folder) that
-    // they never created in this scope.
+    // 选择栏在 scope 内推一项;legacy 模式回退到 items[0]
     const sc = props.scopeCwd ? norm(props.scopeCwd) : null
     const candidates = sc ? items.value.filter((x) => norm(x.cwd) === sc) : items.value
     selectedKey.value = candidates[0]?.key ?? null
@@ -233,7 +223,6 @@ async function save(): Promise<void> {
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <div class="tm-body">
-      <!-- Left: command list -->
       <aside class="tm-list" :style="{ width: listWidth + 'px' }">
         <div class="tm-list-head">
           <span class="tm-list-title">命令</span>
@@ -262,7 +251,6 @@ async function save(): Promise<void> {
 
       <div class="tm-resizer" @mousedown="startResize"></div>
 
-      <!-- Right: detail -->
       <section class="tm-detail">
         <template v-if="selected">
           <label class="tm-field">
@@ -298,7 +286,7 @@ async function save(): Promise<void> {
             </div>
           </label>
           <div v-if="pkgScriptNames.length" class="tm-scripts">
-            <span class="tm-scripts-label">package.json：</span>
+            <span class="tm-scripts-label">package.json:</span>
             <button
               v-for="s in pkgScriptNames"
               :key="s"
@@ -314,7 +302,7 @@ async function save(): Promise<void> {
             <button class="tm-save" :disabled="!selected.command.trim()" @click="save">保存</button>
           </div>
         </template>
-        <div v-else class="tm-placeholder">选择左侧命令，或点 + 新建</div>
+        <div v-else class="tm-placeholder">选择左侧命令,或点 + 新建</div>
       </section>
     </div>
   </el-dialog>
@@ -349,16 +337,15 @@ async function save(): Promise<void> {
 }
 
 .tm-add {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: transparent;
   border: 1px solid var(--el-border-color);
   border-radius: $radius;
   color: var(--el-text-color-regular);
-  cursor: pointer;
 }
 
 .tm-add:hover {
@@ -508,15 +495,14 @@ async function save(): Promise<void> {
 }
 
 .tm-browse {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 34px;
-  background: transparent;
   border: 1px solid var(--el-border-color);
   border-radius: $radius;
   color: var(--el-text-color-regular);
-  cursor: pointer;
 }
 
 .tm-browse:hover {
@@ -537,13 +523,13 @@ async function save(): Promise<void> {
 }
 
 .tm-chip {
+  @include btn-reset;
   background: color-mix(in srgb, var(--el-color-primary) 20%, transparent);
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
   color: var(--el-color-primary);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-  cursor: pointer;
 }
 
 .tm-chip:hover {
@@ -564,17 +550,14 @@ async function save(): Promise<void> {
 }
 
 .tm-save {
+  @include btn-reset;
   background: var(--el-color-primary);
-  border: none;
   color: #fff;
   font-size: 13px;
   padding: 7px 20px;
   border-radius: $radius;
-  cursor: pointer;
 }
 
-/* Hover darkens via filter so we don't drop to light-3 (which is paler in
-   the light theme and tanks white-on-blue contrast). */
 .tm-save:hover:not(:disabled) {
   filter: brightness(1.08);
 }

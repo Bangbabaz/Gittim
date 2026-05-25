@@ -26,29 +26,33 @@ const countText = computed(() => {
   return results.value.count === 0 ? '0' : `${results.value.index + 1}/${results.value.count}`
 })
 
-// `onDidChangeResults` only fires (and matches only get a background) when
-// decorations are enabled, so every search call must carry these options.
-// Requires the terminal to be created with `allowProposedApi: true`.
-// xterm decorations are JS colors (not CSS), so they can't read our tokens —
-// pick a palette per theme so highlights stay readable on a light terminal.
-const searchOpts = computed<ISearchOptions>(() => ({
-  decorations:
-    mode.value === 'dark'
-      ? {
-          matchBackground: '#62331c',
-          matchBorder: '#00000000',
-          matchOverviewRuler: '#cc8033',
-          activeMatchBackground: '#d7a23b',
-          activeMatchColorOverviewRuler: '#ffd700'
-        }
-      : {
-          matchBackground: '#ffe9a8',
-          matchBorder: '#00000000',
-          matchOverviewRuler: '#cc8033',
-          activeMatchBackground: '#ffb300',
-          activeMatchColorOverviewRuler: '#b8860b'
-        }
-}))
+// xterm decorations 直接画到 canvas(JS object 不是 CSS),没法用 var()。但仍然
+// 可以从 EL CSS var 读出真实色,然后按主题加 alpha 通道:
+//   matchBackground       — warning hex + 35% alpha(底色)
+//   activeMatchBackground — warning hex,不透明(高亮当前)
+//   overviewRuler         — warning hex,饱和度高
+// dark 主题上 alpha 偏深,light 主题上 alpha 偏浅 —— 两者基色一样,alpha 不同就够。
+function colorFromCss(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+const searchOpts = computed<ISearchOptions>(() => {
+  // mode 是依赖,主题切换时本 computed 自动重算;getComputedStyle 也会返回新值。
+  const warn = colorFromCss('--el-color-warning', '#e6a23c')
+  const isDark = mode.value === 'dark'
+  return {
+    decorations: {
+      // hex8 alpha:dark 40%(浅显)、light 55%(浅色背景上要更深才看得见)
+      matchBackground: warn + (isDark ? '66' : '8c'),
+      matchBorder: '#00000000',
+      matchOverviewRuler: warn,
+      activeMatchBackground: warn,
+      activeMatchColorOverviewRuler: warn
+    }
+  }
+})
 
 let disposeResults: (() => void) | null = null
 

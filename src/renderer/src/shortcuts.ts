@@ -8,6 +8,10 @@ export type ShortcutAction =
   | 'fontSizeReset'
   | 'copy'
   | 'paste'
+  | 'focusUp'
+  | 'focusDown'
+  | 'focusLeft'
+  | 'focusRight'
 
 export interface ShortcutDef {
   action: ShortcutAction
@@ -24,7 +28,13 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { action: 'fontSizeDown', label: '字体缩小', defaultKeys: 'Ctrl+-' },
   { action: 'fontSizeReset', label: '字体重置', defaultKeys: 'Ctrl+0' },
   { action: 'copy', label: '复制', defaultKeys: 'Ctrl+C' },
-  { action: 'paste', label: '粘贴', defaultKeys: 'Ctrl+V' }
+  { action: 'paste', label: '粘贴', defaultKeys: 'Ctrl+V' },
+  // tmux 风格切焦:Alt+方向键 / Alt+H J K L 都行,默认走方向键(易记)。
+  // Alt 而非 Ctrl 是为了不和 readline Ctrl+P/N、shell history Ctrl+→ 冲突。
+  { action: 'focusUp', label: '焦点上移', defaultKeys: 'Alt+ArrowUp' },
+  { action: 'focusDown', label: '焦点下移', defaultKeys: 'Alt+ArrowDown' },
+  { action: 'focusLeft', label: '焦点左移', defaultKeys: 'Alt+ArrowLeft' },
+  { action: 'focusRight', label: '焦点右移', defaultKeys: 'Alt+ArrowRight' }
 ]
 
 export const DEFAULT_SHORTCUTS: Record<string, string> = Object.fromEntries(
@@ -47,7 +57,13 @@ function codeToKey(code: string): string | null {
     Comma: ',',
     Period: '.',
     Slash: '/',
-    Backquote: '`'
+    Backquote: '`',
+    // 方向键和功能键的 code 直接就是名字 —— 显式映射只是为了让 default 中
+    // 'Alt+ArrowUp' 这种字符串与 eventToShortcut 的输出严格一致。
+    ArrowUp: 'ArrowUp',
+    ArrowDown: 'ArrowDown',
+    ArrowLeft: 'ArrowLeft',
+    ArrowRight: 'ArrowRight'
   }
   return map[code] || null
 }

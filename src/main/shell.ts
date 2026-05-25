@@ -7,6 +7,34 @@ import { readFile } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { shellIntegration } from './shell-integration'
 import { killProcessTree } from './proc'
+import type {
+  BranchInfo,
+  WorktreeInfo,
+  MergeOpKind,
+  MergeStatus,
+  ConflictedFile,
+  CommitInfo,
+  CommitDetail,
+  CommitLogOpts,
+  GitInfo,
+  GitResult,
+  GitResultWithWarning,
+  DiffPayload,
+  DiffStats,
+  WorktreeAddOpts,
+  PtyStartOpts
+} from '@shared/types'
+
+// Re-export 给同包内继续 import 的现状代码,迁移到共享类型不破坏现状。
+export type {
+  BranchInfo,
+  WorktreeInfo,
+  MergeOpKind,
+  MergeStatus,
+  ConflictedFile,
+  CommitInfo,
+  CommitDetail
+}
 
 const execFileP = promisify(execFile)
 
@@ -73,10 +101,7 @@ function isValidDir(p: string): boolean {
   }
 }
 
-export function startPty(
-  webContents: WebContents,
-  opts: { paneId: string; cols?: number; rows?: number; cwd?: string }
-): void {
+export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   const { paneId } = opts
   if (!paneId) throw new Error('startPty requires a paneId')
 
@@ -308,7 +333,7 @@ export async function getRepoName(cwd: string): Promise<string | null> {
   }
 }
 
-export async function getGitInfo(cwd: string): Promise<{ isRepo: boolean; branch: string | null }> {
+export async function getGitInfo(cwd: string): Promise<GitInfo> {
   try {
     const { stdout: inside } = await execFileP('git', ['rev-parse', '--is-inside-work-tree'], {
       ...GIT_OPTS,
@@ -327,22 +352,6 @@ export async function getGitInfo(cwd: string): Promise<{ isRepo: boolean; branch
     // not a git repo, or git not installed
   }
   return { isRepo: false, branch: null }
-}
-
-export interface BranchInfo {
-  name: string
-  /** Exists as a local branch. */
-  local: boolean
-  /** Exists on at least one remote. A branch can be both local and remote. */
-  remote: boolean
-  /**
-   * The remote this branch lives on (e.g. `origin`, `upstream`). When several
-   * remotes carry the same branch name, `origin` is preferred, else the first
-   * seen. Undefined for purely local branches.
-   */
-  remoteName?: string
-  /** True when `git branch` shows `+` — checked out in another linked worktree. */
-  worktree?: boolean
 }
 
 /**
@@ -451,7 +460,7 @@ function parseShortstat(stdout: string): { added: number; deleted: number } {
   return { added: added ? parseInt(added) : 0, deleted: deleted ? parseInt(deleted) : 0 }
 }
 
-export async function getGitDiffStats(cwd: string): Promise<{ added: number; deleted: number }> {
+export async function getGitDiffStats(cwd: string): Promise<DiffStats> {
   try {
     const { stdout } = await execFileP('git', ['diff', 'HEAD', '--shortstat'], { ...GIT_OPTS, cwd })
     return parseShortstat(stdout)
@@ -470,7 +479,7 @@ export async function checkoutGitBranch(
   branchName: string,
   isRemote?: boolean,
   remoteName?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<GitResult> {
   try {
     let args: string[]
     if (isRemote) {
@@ -499,7 +508,7 @@ export async function gitHasUncommittedChanges(cwd: string): Promise<boolean> {
  * Stash tracked + staged changes (no `-u`: untracked files are left alone so
  * we don't sweep up build artifacts). Used by the "stash & switch" flow.
  */
-export async function gitStash(cwd: string): Promise<{ success: boolean; error?: string }> {
+export async function gitStash(cwd: string): Promise<GitResult> {
   try {
     await execFileP('git', ['stash', 'push', '-m', 'Gittim: 切换分支前自动暂存'], {
       ...GIT_OPTS,
@@ -509,18 +518,6 @@ export async function gitStash(cwd: string): Promise<{ success: boolean; error?:
   } catch (err) {
     return { success: false, error: cleanGitError(err) }
   }
-}
-
-export interface WorktreeInfo {
-  path: string
-  branch: string | null
-  head: string | null
-  /** This is the main working tree (the repo root), not a linked worktree. */
-  isMain: boolean
-  /** Detached HEAD (no branch). */
-  detached: boolean
-  /** `git worktree lock`-ed — removal needs --force. */
-  locked: boolean
 }
 
 /**
@@ -573,7 +570,7 @@ export async function gitRemoveWorktree(
   cwd: string,
   worktreePath: string,
   force?: boolean
-): Promise<{ success: boolean; error?: string }> {
+): Promise<GitResult> {
   try {
     const args = ['worktree', 'remove']
     if (force) args.push('--force')
@@ -590,7 +587,7 @@ export async function gitRemoveWorktree(
  * Falls back to `git diff` when there's no commit yet (unborn HEAD). Capped at
  * 10 MB so a huge diff can't blow up the IPC payload / renderer.
  */
-export async function getGitDiff(cwd: string): Promise<{ diff: string; truncated: boolean }> {
+export async function getGitDiff(cwd: string): Promise<DiffPayload> {
   const opts = { ...GIT_OPTS, cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15_000 }
   try {
     const { stdout } = await execFileP('git', ['diff', 'HEAD'], opts)
@@ -615,33 +612,8 @@ export async function getGitDiff(cwd: string): Promise<{ diff: string; truncated
 // Merge / rebase / cherry-pick / revert conflict state
 // ---------------------------------------------------------------------------
 
-export type MergeOpKind = 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
-
-export interface ConflictedFile {
-  /** Repo-relative path. */
-  path: string
-  /** Two-char index/worktree status from `git status -z --porcelain=v2 -u` for unmerged rows. */
-  status: string
-  /** Human-readable Chinese description of `status`. */
-  description: string
-}
-
-export interface MergeStatus {
-  /** null = no operation in progress. */
-  inProgress: MergeOpKind
-  /**
-   * For merge: the branch or ref being merged in (decoded from MERGE_MSG).
-   * For rebase: the source branch (head-name without refs/heads/ prefix).
-   * For cherry-pick / revert: short hash of the commit being applied.
-   */
-  target: string | null
-  /**
-   * For rebase: short hash of the commit we're replaying onto (rebase-merge/onto).
-   * Null for other operation kinds.
-   */
-  onto: string | null
-  conflicts: ConflictedFile[]
-}
+// （MergeOpKind / ConflictedFile / MergeStatus 已迁移到 @shared/types。本文件
+// 仍 re-export 给现有 import 用,见顶部 export type 块。）
 
 /**
  * Resolve a git-internal path (e.g. `MERGE_HEAD`, `rebase-merge`) to an
@@ -726,7 +698,7 @@ export async function getMergeStatus(cwd: string): Promise<MergeStatus> {
     gitInternalPath(cwd, 'REVERT_HEAD')
   ])
 
-  let kind: MergeOpKind = null
+  let kind: MergeOpKind | null = null
   let target: string | null = null
   let onto: string | null = null
 
@@ -822,7 +794,7 @@ export async function resolveConflictBySide(
   cwd: string,
   file: string,
   side: 'ours' | 'theirs'
-): Promise<{ success: boolean; error?: string }> {
+): Promise<GitResult> {
   try {
     await execFileP('git', ['checkout', `--${side}`, '--', file], { ...GIT_OPTS, cwd })
     await execFileP('git', ['add', '--', file], { ...GIT_OPTS, cwd })
@@ -836,10 +808,7 @@ export async function resolveConflictBySide(
  * Mark a conflicted file as resolved (user edited it externally — e.g. in
  * their IDE — and wants Gittim to `git add` it). No checkout, just add.
  */
-export async function markConflictResolved(
-  cwd: string,
-  file: string
-): Promise<{ success: boolean; error?: string }> {
+export async function markConflictResolved(cwd: string, file: string): Promise<GitResult> {
   try {
     await execFileP('git', ['add', '--', file], { ...GIT_OPTS, cwd })
     return { success: true }
@@ -853,10 +822,7 @@ export async function markConflictResolved(
  * from the most recent `getMergeStatus()` call; we trust it rather than
  * re-detecting, so a stale UI state doesn't drive the wrong git command.
  */
-export async function abortMergeOp(
-  cwd: string,
-  kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
-): Promise<{ success: boolean; error?: string }> {
+export async function abortMergeOp(cwd: string, kind: MergeOpKind): Promise<GitResult> {
   const subCmd =
     kind === 'merge'
       ? ['merge', '--abort']
@@ -881,10 +847,7 @@ export async function abortMergeOp(
  * (we have no TTY here). For merge/cherry-pick/revert that means "reuse the
  * default commit message"; for rebase --continue it's a no-op (still safe).
  */
-export async function continueMergeOp(
-  cwd: string,
-  kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert'
-): Promise<{ success: boolean; error?: string }> {
+export async function continueMergeOp(cwd: string, kind: MergeOpKind): Promise<GitResult> {
   const subCmd =
     kind === 'merge'
       ? ['merge', '--continue', '--no-edit']
@@ -920,6 +883,16 @@ export async function continueMergeOp(
  * 超过 2 MB、文件不存在、git show 失败、内容含 NUL（二进制）一律返回 null，
  * 让前端 fallback 到无高亮的纯文本渲染。
  */
+// git ref 名允许字母数字 + / . _ - ^ ~ @,且不能以 - 开头(否则会被 git 当 flag
+// 解析)。`HEAD^` / `abc123^` / `feat/x` / `tags/v1.0.0` 都合法。`git show <ref>:
+// <path>` 不支持 `--` 分隔(整个 revision-shaped 实参是一个 token),所以必须
+// 用白名单兜底。出现非法字符直接 reject —— 比静默截断更安全。
+function isSafeGitRef(ref: string): boolean {
+  if (!ref || ref.startsWith('-')) return false
+  // 显式允许 ref 中可能合法出现的字符
+  return /^[A-Za-z0-9_./^~@-]+$/.test(ref)
+}
+
 export async function gitShowFile(
   cwd: string,
   ref: string | null,
@@ -940,6 +913,7 @@ export async function gitShowFile(
       if (size > MAX) return null
       content = await readFile(full, 'utf-8')
     } else {
+      if (!isSafeGitRef(ref)) return null
       const { stdout } = await execFileP('git', ['show', `${ref}:${path}`], {
         ...GIT_OPTS,
         cwd,
@@ -955,10 +929,7 @@ export async function gitShowFile(
   }
 }
 
-export async function getFileDiff(
-  cwd: string,
-  file: string
-): Promise<{ diff: string; truncated: boolean }> {
+export async function getFileDiff(cwd: string, file: string): Promise<DiffPayload> {
   const opts = { ...GIT_OPTS, cwd, maxBuffer: 4 * 1024 * 1024, timeout: 10_000 }
   try {
     const { stdout } = await execFileP('git', ['diff', '--', file], opts)
@@ -976,26 +947,7 @@ export async function getFileDiff(
 // Commit history (git log + show)
 // ---------------------------------------------------------------------------
 
-export interface CommitInfo {
-  hash: string
-  shortHash: string
-  author: string
-  email: string
-  /** ISO 8601 author date. */
-  date: string
-  parents: string[]
-  /** Decoration refs, e.g. ['HEAD -> main', 'origin/main', 'tag: v1.0']. */
-  refs: string[]
-  subject: string
-}
-
-export interface CommitDetail extends CommitInfo {
-  body: string
-  /** Unified patch (may be huge — caller decides what to render). */
-  diff: string
-  /** True when the patch exceeded the buffer cap and was truncated. */
-  truncated: boolean
-}
+// CommitInfo / CommitDetail 已迁移到 @shared/types,见顶部 re-export。
 
 // ASCII Unit Separator (0x1F) between fields; Record Separator (0x1E) between
 // commits. Both are extremely rare in real commit messages and immune to
@@ -1021,23 +973,13 @@ function parseRefs(raw: string): string[] {
  * `--no-decorate` is omitted on purpose so `%D` returns the ref decorations
  * (HEAD pointer, branch/tag names) we render as chips in the UI.
  */
-export async function getCommitLog(
-  cwd: string,
-  opts: {
-    skip?: number
-    limit?: number
-    /** Branch / tag / arbitrary ref to walk from. Empty → HEAD. */
-    ref?: string
-    /** Filter `git log --grep` (case-insensitive regex on subject + body). */
-    grep?: string
-    /** Filter `git log --author` (case-insensitive regex on name + email). */
-    author?: string
-  }
-): Promise<CommitInfo[]> {
+export async function getCommitLog(cwd: string, opts: CommitLogOpts): Promise<CommitInfo[]> {
   const args = [
     'log',
     `--pretty=format:${LOG_RECORD_SEP}${LOG_FORMAT}`,
-    `--max-count=${Math.max(1, Math.min(opts.limit ?? 200, 1000))}`,
+    // 默认 50 条 —— 大仓库一次 200 太重(包括解析 parents/refs + 渲染),
+    // 滚动加载更顺。caller 可以传 limit 覆盖。
+    `--max-count=${Math.max(1, Math.min(opts.limit ?? 50, 1000))}`,
     `--skip=${Math.max(0, opts.skip ?? 0)}`
   ]
   if (opts.grep) {
@@ -1165,10 +1107,7 @@ function isSafeRef(ref: string): boolean {
  * leave the worktree in a merging state — the PaneToolbar refresh that follows
  * picks that up via getMergeStatus and the badge appears automatically.
  */
-export async function gitMerge(
-  cwd: string,
-  ref: string
-): Promise<{ success: boolean; error?: string }> {
+export async function gitMerge(cwd: string, ref: string): Promise<GitResult> {
   if (!isSafeRef(ref)) return { success: false, error: '无效的分支引用' }
   try {
     await execFileP('git', ['merge', '--no-edit', ref], {
@@ -1187,10 +1126,7 @@ export async function gitMerge(
  * Rebase the current branch onto `ref`. Same conflict-recovery story as
  * gitMerge — leaves a rebase-in-progress state on conflict.
  */
-export async function gitRebase(
-  cwd: string,
-  ref: string
-): Promise<{ success: boolean; error?: string }> {
+export async function gitRebase(cwd: string, ref: string): Promise<GitResult> {
   if (!isSafeRef(ref)) return { success: false, error: '无效的分支引用' }
   try {
     await execFileP('git', ['rebase', ref], {
@@ -1211,10 +1147,7 @@ export async function gitRebase(
  * dedicated UI affordance is safer than smuggling it through a context-menu
  * "推送" entry.
  */
-export async function gitPush(
-  cwd: string,
-  branch: string
-): Promise<{ success: boolean; error?: string }> {
+export async function gitPush(cwd: string, branch: string): Promise<GitResult> {
   if (!isSafeRef(branch)) return { success: false, error: '无效的分支名' }
   try {
     const remote = await getDefaultRemote(cwd)
@@ -1235,7 +1168,7 @@ export async function gitPush(
  * auto-rebase a divergent pull — the user should make that call explicitly via
  * the merge/rebase entries.
  */
-export async function gitPull(cwd: string): Promise<{ success: boolean; error?: string }> {
+export async function gitPull(cwd: string): Promise<GitResult> {
   try {
     await execFileP('git', ['pull', '--ff-only'], {
       ...GIT_OPTS,
@@ -1257,7 +1190,7 @@ export async function gitDeleteBranch(
   cwd: string,
   branch: string,
   force?: boolean
-): Promise<{ success: boolean; error?: string }> {
+): Promise<GitResult> {
   if (!isSafeRef(branch)) return { success: false, error: '无效的分支名' }
   try {
     await execFileP('git', ['branch', force ? '-D' : '-d', branch], { ...GIT_OPTS, cwd })
@@ -1269,8 +1202,8 @@ export async function gitDeleteBranch(
 
 export async function gitAddWorktree(
   cwd: string,
-  opts: { path: string; newBranch?: string; fromBranch?: string }
-): Promise<{ success: boolean; error?: string; warning?: string }> {
+  opts: WorktreeAddOpts
+): Promise<GitResultWithWarning> {
   try {
     const args = ['worktree', 'add']
     if (opts.newBranch) args.push('-b', opts.newBranch)

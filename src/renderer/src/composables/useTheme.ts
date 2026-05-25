@@ -1,24 +1,26 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import type { ITheme } from '@xterm/xterm'
+import type { ThemePref } from '@shared/types'
 
-// Singleton theme state shared across every component (module-scoped refs).
-// The renderer owns the CSS-token swap (html[data-theme] + the `.dark` class
-// Element Plus keys off); Electron's nativeTheme is the source of truth for
-// "follow system" and is kept in sync via the preload bridge.
+// 单例 theme state(模块级 ref),全 app 共享:
+//   - renderer 负责 html[data-theme] / .dark 类切换 → Element Plus 全部用 EL CSS
+//     var 跟着变;
+//   - main 端 nativeTheme 是"跟随系统"的 source of truth,通过 preload bridge 同步。
+//
+// xterm 用自己的 JS theme(canvas 上画 ANSI / 背景),不能直接读 CSS var。这里
+// 走"应用 mode → 读 EL CSS var 解析为真实色"的折中:background / foreground /
+// selection 等"主题相关色"从 EL var 提取,ANSI 16 色仍然硬编码(它们是终端
+// 标准对应,不该跟 EL primary 等业务色挂钩)。
 
-export type ThemePref = 'system' | 'dark' | 'light'
+export type { ThemePref }
 export type ThemeMode = 'dark' | 'light'
 
 const preference = ref<ThemePref>('system')
-const mode = ref<ThemeMode>('dark') // effective, resolved theme
+const mode = ref<ThemeMode>('dark')
 
-// xterm has its own JS theme object (not CSS), so it can't read our CSS vars.
-// Keep two palettes here and hand the active one to every Terminal instance.
-const XTERM_DARK: ITheme = {
-  background: '#1b1b1f',
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  selectionBackground: '#264f78',
+// ANSI 16 色 —— 终端"原色",跟主题无关,两套各自固定。这部分**故意不**用
+// EL token:user 的脚本输出的红色字符不该跟 UI 报错色绑定。
+const ANSI_DARK = {
   black: '#0c0c0c',
   red: '#c50f1f',
   green: '#13a10e',
@@ -36,12 +38,7 @@ const XTERM_DARK: ITheme = {
   brightCyan: '#61d6d6',
   brightWhite: '#f2f2f2'
 }
-
-const XTERM_LIGHT: ITheme = {
-  background: '#ffffff',
-  foreground: '#1f1f1f',
-  cursor: '#1f1f1f',
-  selectionBackground: '#add6ff',
+const ANSI_LIGHT = {
   black: '#000000',
   red: '#cd3131',
   green: '#15803d',
@@ -60,13 +57,41 @@ const XTERM_LIGHT: ITheme = {
   brightWhite: '#a5a5a5'
 }
 
-const xtermTheme = computed<ITheme>(() => (mode.value === 'dark' ? XTERM_DARK : XTERM_LIGHT))
+/**
+ * 用 mode 当前值,从 EL CSS var 读出 xterm 的"主题相关色"(背景 / 文字 / 光标 /
+ * 选区)。配合 mode 默认 ANSI 表,组成完整 ITheme。
+ *
+ * `cssVar()` 在 SSR / 测试环境里可能拿不到 documentElement;给一份对应主题的
+ * fallback 色,保证返回值始终合法。
+ */
+function readXtermPalette(m: ThemeMode): ITheme {
+  // applyMode() 已经把 .dark / data-theme 设到 html 上,EL CSS var 这一刻生效。
+  // 不需要 nextTick —— CSS var 是同步更新的。
+  const style = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null
+  const cssVar = (name: string, fallback: string): string => {
+    if (!style) return fallback
+    const v = style.getPropertyValue(name).trim()
+    return v || fallback
+  }
+  const ansi = m === 'dark' ? ANSI_DARK : ANSI_LIGHT
+  return {
+    background: cssVar('--el-bg-color', m === 'dark' ? '#141414' : '#ffffff'),
+    foreground: cssVar('--el-text-color-primary', m === 'dark' ? '#e5eaf3' : '#303133'),
+    cursor: cssVar('--el-text-color-primary', m === 'dark' ? '#e5eaf3' : '#303133'),
+    cursorAccent: cssVar('--el-bg-color', m === 'dark' ? '#141414' : '#ffffff'),
+    selectionBackground: cssVar('--el-color-primary-light-5', m === 'dark' ? '#264f78' : '#add6ff'),
+    ...ansi
+  }
+}
+
+// 主题切换会改变 EL CSS var → readXtermPalette 结果不同。computed 依赖 mode,
+// 所以 mode 变更即触发重算;Terminal.vue 的 watch(xtermTheme) 也会跟着应用。
+const xtermTheme = computed<ITheme>(() => readXtermPalette(mode.value))
 
 function applyMode(next: ThemeMode): void {
   mode.value = next
   const el = document.documentElement
   el.dataset.theme = next
-  // Element Plus dark mode keys off the `.dark` class on <html>.
   el.classList.toggle('dark', next === 'dark')
 }
 
@@ -97,11 +122,8 @@ async function init(): Promise<void> {
   } catch {
     // keep default 'system'
   }
-  // Push the preference to the main process so nativeTheme (and thus
-  // shouldUseDark + native chrome) reflects it before we resolve.
   window.api.themeSetSource(preference.value)
   await resolveEffective()
-  // OS appearance changes only matter while following the system.
   window.api.onNativeThemeUpdated((dark) => {
     if (preference.value === 'system') applyMode(dark ? 'dark' : 'light')
   })

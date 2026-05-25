@@ -7,15 +7,26 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 export default defineConfig({
   main: {
+    resolve: {
+      alias: {
+        '@shared': resolve('src/shared')
+      }
+    },
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
+    resolve: {
+      alias: {
+        '@shared': resolve('src/shared')
+      }
+    },
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer/src')
+        '@renderer': resolve('src/renderer/src'),
+        '@shared': resolve('src/shared')
       }
     },
     // worker bundle 用 ES 输出 —— shiki worker 内部走动态 import 按需加载语言 grammar，

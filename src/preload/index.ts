@@ -1,154 +1,84 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type {
+  TaskMeta,
+  Settings,
+  GitInfo,
+  GitResult,
+  GitResultWithWarning,
+  BranchInfo,
+  WorktreeInfo,
+  WorktreeAddOpts,
+  MergeStatus,
+  MergeOpKind,
+  CommitInfo,
+  CommitDetail,
+  CommitLogOpts,
+  DiffPayload,
+  DiffStats,
+  PtyStartOpts,
+  PtyDataPayload,
+  PtyExitPayload,
+  TaskDataPayload,
+  TaskIdPayload,
+  IdeInfo
+} from '@shared/types'
 
-// Mirror of main's SavedLayout — preload is its own bundle and can't import
-// from main, so the shape is duplicated here. Keep in sync with main/settings.ts.
-type SavedLayout =
-  | { type: 'pane'; cwd: string }
-  | {
-      type: 'split'
-      direction: 'row' | 'column'
-      ratio: number
-      a: SavedLayout
-      b: SavedLayout
-    }
-
-interface TaskMeta {
-  id: string
-  name: string
-  command: string
-  cwd: string
-  status: 'idle' | 'running' | 'exited' | 'failed'
-  exitCode: number | null
-  startedAt: number | null
-}
-
-// Custom APIs for renderer
+// API 暴露给 renderer 的桥接对象。每个方法对应 main 里的 ipcMain.handle / send。
+// 通道命名见 main/index.ts 顶部注释:
+//   sys-* / git-* / pty-* / task-* / settings-* / theme-* / win-* / ide-*
+// 之前 git 系列混用 `get-git-*` 与 `git-*`,已统一为 git-*。
 const api = {
-  getCwd: () => ipcRenderer.invoke('get-cwd') as Promise<string>,
-  getPlatform: () => ipcRenderer.invoke('get-platform') as Promise<NodeJS.Platform>,
-  getAppVersion: () => ipcRenderer.invoke('get-app-version') as Promise<string>,
-  getGitInfo: (cwd: string) =>
-    ipcRenderer.invoke('get-git-info', cwd) as Promise<{ isRepo: boolean; branch: string | null }>,
-  getGitBranches: (cwd: string) =>
-    ipcRenderer.invoke('get-git-branches', cwd) as Promise<
-      { name: string; local: boolean; remote: boolean; remoteName?: string; worktree?: boolean }[]
-    >,
-  getRepoName: (cwd: string) => ipcRenderer.invoke('get-repo-name', cwd) as Promise<string | null>,
-  getGitDiffStats: (cwd: string) =>
-    ipcRenderer.invoke('git-diff-stats', cwd) as Promise<{ added: number; deleted: number }>,
+  // ---- 系统信息 -----------------------------------------------------------
+  getCwd: () => ipcRenderer.invoke('sys-cwd') as Promise<string>,
+  getPlatform: () => ipcRenderer.invoke('sys-platform') as Promise<NodeJS.Platform>,
+  getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
+
+  // ---- Git ---------------------------------------------------------------
+  getGitInfo: (cwd: string) => ipcRenderer.invoke('git-info', cwd) as Promise<GitInfo>,
+  getGitBranches: (cwd: string) => ipcRenderer.invoke('git-branches', cwd) as Promise<BranchInfo[]>,
+  getRepoName: (cwd: string) => ipcRenderer.invoke('git-repo-name', cwd) as Promise<string | null>,
+  getGitDiffStats: (cwd: string) => ipcRenderer.invoke('git-diff-stats', cwd) as Promise<DiffStats>,
   gitHasChanges: (cwd: string) => ipcRenderer.invoke('git-has-changes', cwd) as Promise<boolean>,
   gitCheckout: (cwd: string, branchName: string, isRemote?: boolean, remoteName?: string) =>
-    ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote, remoteName) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  gitStash: (cwd: string) =>
-    ipcRenderer.invoke('git-stash', cwd) as Promise<{ success: boolean; error?: string }>,
+    ipcRenderer.invoke('git-checkout', cwd, branchName, isRemote, remoteName) as Promise<GitResult>,
+  gitStash: (cwd: string) => ipcRenderer.invoke('git-stash', cwd) as Promise<GitResult>,
   gitWorktrees: (cwd: string) =>
-    ipcRenderer.invoke('git-worktrees', cwd) as Promise<
-      {
-        path: string
-        branch: string | null
-        head: string | null
-        isMain: boolean
-        detached: boolean
-        locked: boolean
-      }[]
-    >,
+    ipcRenderer.invoke('git-worktrees', cwd) as Promise<WorktreeInfo[]>,
   gitWorktreeRemove: (cwd: string, worktreePath: string, force?: boolean) =>
-    ipcRenderer.invoke('git-worktree-remove', cwd, worktreePath, force) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  gitDiff: (cwd: string) =>
-    ipcRenderer.invoke('git-diff', cwd) as Promise<{ diff: string; truncated: boolean }>,
+    ipcRenderer.invoke('git-worktree-remove', cwd, worktreePath, force) as Promise<GitResult>,
+  gitDiff: (cwd: string) => ipcRenderer.invoke('git-diff', cwd) as Promise<DiffPayload>,
   gitFileDiff: (cwd: string, file: string) =>
-    ipcRenderer.invoke('git-file-diff', cwd, file) as Promise<{
-      diff: string
-      truncated: boolean
-    }>,
+    ipcRenderer.invoke('git-file-diff', cwd, file) as Promise<DiffPayload>,
   gitShowFile: (cwd: string, ref: string | null, path: string) =>
     ipcRenderer.invoke('git-show-file', cwd, ref, path) as Promise<string | null>,
-  // Merge / rebase / cherry-pick / revert state
   gitMergeStatus: (cwd: string) =>
-    ipcRenderer.invoke('git-merge-status', cwd) as Promise<{
-      inProgress: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null
-      target: string | null
-      onto: string | null
-      conflicts: { path: string; status: string; description: string }[]
-    }>,
+    ipcRenderer.invoke('git-merge-status', cwd) as Promise<MergeStatus>,
   gitConflictResolve: (cwd: string, file: string, side: 'ours' | 'theirs') =>
-    ipcRenderer.invoke('git-conflict-resolve', cwd, file, side) as Promise<{
-      success: boolean
-      error?: string
-    }>,
+    ipcRenderer.invoke('git-conflict-resolve', cwd, file, side) as Promise<GitResult>,
   gitConflictMarkResolved: (cwd: string, file: string) =>
-    ipcRenderer.invoke('git-conflict-mark-resolved', cwd, file) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  gitMergeAbort: (cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
-    ipcRenderer.invoke('git-merge-abort', cwd, kind) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  gitMergeContinue: (cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
-    ipcRenderer.invoke('git-merge-continue', cwd, kind) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  // Commit history
-  gitLog: (
-    cwd: string,
-    opts: { skip?: number; limit?: number; ref?: string; grep?: string; author?: string }
-  ) =>
-    ipcRenderer.invoke('git-log', cwd, opts) as Promise<
-      {
-        hash: string
-        shortHash: string
-        author: string
-        email: string
-        date: string
-        parents: string[]
-        refs: string[]
-        subject: string
-      }[]
-    >,
+    ipcRenderer.invoke('git-conflict-mark-resolved', cwd, file) as Promise<GitResult>,
+  gitMergeAbort: (cwd: string, kind: MergeOpKind) =>
+    ipcRenderer.invoke('git-merge-abort', cwd, kind) as Promise<GitResult>,
+  gitMergeContinue: (cwd: string, kind: MergeOpKind) =>
+    ipcRenderer.invoke('git-merge-continue', cwd, kind) as Promise<GitResult>,
+  gitLog: (cwd: string, opts: CommitLogOpts) =>
+    ipcRenderer.invoke('git-log', cwd, opts) as Promise<CommitInfo[]>,
   gitCommitDetail: (cwd: string, hash: string) =>
-    ipcRenderer.invoke('git-commit-detail', cwd, hash) as Promise<{
-      hash: string
-      shortHash: string
-      author: string
-      email: string
-      date: string
-      parents: string[]
-      refs: string[]
-      subject: string
-      body: string
-      diff: string
-      truncated: boolean
-    } | null>,
-  // Branch ops (context menu)
+    ipcRenderer.invoke('git-commit-detail', cwd, hash) as Promise<CommitDetail | null>,
   gitMerge: (cwd: string, ref: string) =>
-    ipcRenderer.invoke('git-merge', cwd, ref) as Promise<{ success: boolean; error?: string }>,
+    ipcRenderer.invoke('git-merge', cwd, ref) as Promise<GitResult>,
   gitRebase: (cwd: string, ref: string) =>
-    ipcRenderer.invoke('git-rebase', cwd, ref) as Promise<{ success: boolean; error?: string }>,
+    ipcRenderer.invoke('git-rebase', cwd, ref) as Promise<GitResult>,
   gitPush: (cwd: string, branch: string) =>
-    ipcRenderer.invoke('git-push', cwd, branch) as Promise<{ success: boolean; error?: string }>,
-  gitPull: (cwd: string) =>
-    ipcRenderer.invoke('git-pull', cwd) as Promise<{ success: boolean; error?: string }>,
+    ipcRenderer.invoke('git-push', cwd, branch) as Promise<GitResult>,
+  gitPull: (cwd: string) => ipcRenderer.invoke('git-pull', cwd) as Promise<GitResult>,
   gitBranchDelete: (cwd: string, branch: string, force?: boolean) =>
-    ipcRenderer.invoke('git-branch-delete', cwd, branch, force) as Promise<{
-      success: boolean
-      error?: string
-    }>,
-  gitWorktreeAdd: (cwd: string, opts: { path: string; newBranch?: string; fromBranch?: string }) =>
-    ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<{
-      success: boolean
-      error?: string
-      warning?: string
-    }>,
+    ipcRenderer.invoke('git-branch-delete', cwd, branch, force) as Promise<GitResult>,
+  gitWorktreeAdd: (cwd: string, opts: WorktreeAddOpts) =>
+    ipcRenderer.invoke('git-worktree-add', cwd, opts) as Promise<GitResultWithWarning>,
+
+  // ---- Window controls / dialogs -----------------------------------------
   selectDirectory: () => ipcRenderer.invoke('select-directory') as Promise<string | null>,
   winMinimize: () => ipcRenderer.send('win-minimize'),
   winMaximize: () => ipcRenderer.send('win-maximize'),
@@ -159,29 +89,10 @@ const api = {
     ipcRenderer.on('window-state-changed', listener)
     return () => ipcRenderer.removeListener('window-state-changed', listener)
   },
-  settingsGet: () =>
-    ipcRenderer.invoke('settings-get') as Promise<{
-      windowBounds?: { x?: number; y?: number; width: number; height: number }
-      windowMaximized?: boolean
-      fontSize?: number
-      scrollback?: number
-      paneLayout?: SavedLayout
-      autoOpenTasksOnRun?: boolean
-      tasksDrawerWidth?: number
-      theme?: 'system' | 'dark' | 'light'
-      defaultIde?: string
-      shortcutOverrides?: Record<string, string>
-    }>,
-  settingsSet: (patch: {
-    fontSize?: number
-    scrollback?: number
-    paneLayout?: SavedLayout | null
-    autoOpenTasksOnRun?: boolean
-    tasksDrawerWidth?: number
-    theme?: 'system' | 'dark' | 'light'
-    defaultIde?: string
-    shortcutOverrides?: Record<string, string>
-  }) => ipcRenderer.send('settings-set', patch),
+
+  // ---- Settings + Theme --------------------------------------------------
+  settingsGet: () => ipcRenderer.invoke('settings-get') as Promise<Settings>,
+  settingsSet: (patch: Partial<Settings>) => ipcRenderer.send('settings-set', patch),
   themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
   themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
   onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {
@@ -189,8 +100,9 @@ const api = {
     ipcRenderer.on('native-theme-updated', listener)
     return () => ipcRenderer.removeListener('native-theme-updated', listener)
   },
-  ptyStart: (opts: { paneId: string; cols?: number; rows?: number; cwd?: string }) =>
-    ipcRenderer.invoke('pty-start', opts) as Promise<void>,
+
+  // ---- PTY ---------------------------------------------------------------
+  ptyStart: (opts: PtyStartOpts) => ipcRenderer.invoke('pty-start', opts) as Promise<void>,
   ptyWrite: (paneId: string, data: string) => ipcRenderer.send('pty-write', paneId, data),
   ptyResize: (paneId: string, cols: number, rows: number) =>
     ipcRenderer.send('pty-resize', paneId, cols, rows),
@@ -200,31 +112,21 @@ const api = {
   ptyHasRunningProcess: (paneId: string) =>
     ipcRenderer.invoke('pty-has-running-process', paneId) as Promise<boolean>,
   onPtyData: (paneId: string, cb: (data: string) => void) => {
-    const listener = (
-      _event: IpcRendererEvent,
-      payload: { paneId: string; data: string }
-    ): void => {
+    const listener = (_event: IpcRendererEvent, payload: PtyDataPayload): void => {
       if (payload && payload.paneId === paneId) cb(payload.data)
     }
     ipcRenderer.on('pty-data', listener)
-    return () => {
-      ipcRenderer.removeListener('pty-data', listener)
-    }
+    return () => ipcRenderer.removeListener('pty-data', listener)
   },
   onPtyExit: (paneId: string, cb: (exitCode: number) => void) => {
-    const listener = (
-      _event: IpcRendererEvent,
-      payload: { paneId: string; exitCode: number }
-    ): void => {
+    const listener = (_event: IpcRendererEvent, payload: PtyExitPayload): void => {
       if (payload && payload.paneId === paneId) cb(payload.exitCode)
     }
     ipcRenderer.on('pty-exit', listener)
-    return () => {
-      ipcRenderer.removeListener('pty-exit', listener)
-    }
+    return () => ipcRenderer.removeListener('pty-exit', listener)
   },
 
-  // --- Background tasks ----------------------------------------------------
+  // ---- Background tasks --------------------------------------------------
   taskSubscribe: () => ipcRenderer.invoke('task-subscribe') as Promise<TaskMeta[]>,
   taskList: () => ipcRenderer.invoke('task-list') as Promise<TaskMeta[]>,
   taskOutput: (id: string) => ipcRenderer.invoke('task-output', id) as Promise<string>,
@@ -242,16 +144,8 @@ const api = {
     ipcRenderer.invoke('task-update', id, patch) as Promise<TaskMeta | null>,
   readPackageScripts: (cwd: string) =>
     ipcRenderer.invoke('read-package-scripts', cwd) as Promise<Record<string, string>>,
-  ideList: (force?: boolean) =>
-    ipcRenderer.invoke('ide-list', force) as Promise<
-      { id: string; name: string; command: string; iconDataUrl?: string }[]
-    >,
-  ideOpen: (ideId: string, cwd: string) =>
-    ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<{ success: boolean; error?: string }>,
-  openFolder: (cwd: string) => ipcRenderer.invoke('open-folder', cwd) as Promise<boolean>,
-  pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
-  onTaskData: (cb: (payload: { id: string; chunk: string }) => void) => {
-    const listener = (_e: IpcRendererEvent, p: { id: string; chunk: string }): void => cb(p)
+  onTaskData: (cb: (payload: TaskDataPayload) => void) => {
+    const listener = (_e: IpcRendererEvent, p: TaskDataPayload): void => cb(p)
     ipcRenderer.on('task-data', listener)
     return () => ipcRenderer.removeListener('task-data', listener)
   },
@@ -260,21 +154,29 @@ const api = {
     ipcRenderer.on('task-status', listener)
     return () => ipcRenderer.removeListener('task-status', listener)
   },
-  onTaskCleared: (cb: (payload: { id: string }) => void) => {
-    const listener = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+  onTaskCleared: (cb: (payload: TaskIdPayload) => void) => {
+    const listener = (_e: IpcRendererEvent, p: TaskIdPayload): void => cb(p)
     ipcRenderer.on('task-cleared', listener)
     return () => ipcRenderer.removeListener('task-cleared', listener)
   },
-  onTaskRemoved: (cb: (payload: { id: string }) => void) => {
-    const listener = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+  onTaskRemoved: (cb: (payload: TaskIdPayload) => void) => {
+    const listener = (_e: IpcRendererEvent, p: TaskIdPayload): void => cb(p)
     ipcRenderer.on('task-removed', listener)
     return () => ipcRenderer.removeListener('task-removed', listener)
-  }
+  },
+
+  // ---- IDE + file manager ------------------------------------------------
+  ideList: (force?: boolean) => ipcRenderer.invoke('ide-list', force) as Promise<IdeInfo[]>,
+  ideOpen: (ideId: string, cwd: string) =>
+    ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<GitResult>,
+  openFolder: (cwd: string) => ipcRenderer.invoke('open-folder', cwd) as Promise<boolean>,
+  pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
+export type Api = typeof api
+
+// SavedLayout / TaskMeta 等也通过 contextBridge 自动跟着 api 一起类型化(index.d.ts
+// 直接 import @shared/types,无需再复制)。
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
