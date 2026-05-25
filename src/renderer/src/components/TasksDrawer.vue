@@ -11,7 +11,6 @@ import {
   Pencil,
   Trash2,
   Search,
-  Settings2,
   X,
   FolderOpen,
   Terminal as TerminalIcon,
@@ -35,7 +34,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'editTask', id: string, cwd: string): void
-  (e: 'manageTasks', cwd?: string): void
   (e: 'widthChange', width: number): void
 }>()
 
@@ -380,9 +378,6 @@ function closeLogSearch(): void {
       <header class="tasks-header">
         <span class="tasks-header-title">任务</span>
         <div class="tasks-header-ops">
-          <button class="hdr-btn" title="管理命令" @click="emit('manageTasks', selectedTask?.cwd)">
-            <Settings2 :size="15" />
-          </button>
           <button class="hdr-btn" title="关闭" @click="emit('update:modelValue', false)">
             <X :size="15" />
           </button>
@@ -394,9 +389,7 @@ function closeLogSearch(): void {
         <aside class="tasks-side">
           <div class="task-list">
             <div v-if="!tasks.length" class="task-empty">
-              还没有命令，点上方
-              <Settings2 :size="12" style="vertical-align: -2px" />
-              新建
+              还没有命令，打开任意面板的命令选择器新建
             </div>
             <template v-for="g in taskGroups" :key="g.key">
               <!-- 分组头:只展示尾段文件夹名;hover 看完整路径。可折叠/展开。 -->

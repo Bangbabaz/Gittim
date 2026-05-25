@@ -592,7 +592,6 @@ onUnmounted(() => {
     :select-task-id="taskSelectId"
     :width="tasksDrawerWidth"
     @width-change="onTasksDrawerWidthChange"
-    @manage-tasks="(cwd?: string) => openTaskManager(null, cwd ?? null)"
     @edit-task="(id: string, cwd?: string) => openTaskManager(id, cwd ?? null)"
   />
   <TaskManagerDialog
