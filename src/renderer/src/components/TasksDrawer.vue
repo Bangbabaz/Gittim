@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 import SearchOverlay from './SearchOverlay.vue'
 import { useTheme } from '../composables/useTheme'
+import { useTasks } from '../composables/useTasks'
 import type { TaskMeta } from '@shared/types'
 import '@xterm/xterm/css/xterm.css'
 
@@ -45,7 +46,10 @@ function onResizeEnd(_e: MouseEvent, size: number): void {
   emit('widthChange', size)
 }
 
-const tasks = ref<TaskMeta[]>([])
+// 任务列表来自全局 useTasks() —— 跨 TaskRunner / TasksDrawer 共享一份 reactive
+// ref,task-status / task-removed 广播由 composable 统一处理。这里只 own
+// selectedId 这种 drawer 私有状态。
+const { allTasks: tasks, ready: tasksReady } = useTasks()
 const selectedId = ref<string | null>(null)
 
 const selectedTask = computed(() => tasks.value.find((t) => t.id === selectedId.value) || null)
@@ -228,32 +232,23 @@ function onDrawerOpened(): void {
   term.focus()
 }
 
-// --- Task data refresh ----------------------------------------------------
-async function reload(): Promise<void> {
-  tasks.value = await window.api.taskList()
-  if (selectedId.value && !tasks.value.some((t) => t.id === selectedId.value)) {
-    selectedId.value = null
-  }
-}
-
+// 任务列表的 fetch + upsert + remove 都由 useTasks 集中做。这里只订阅 drawer
+// 自己关心的"副作用"流:
+//   - onTaskData    流式输出 → 写当前选中的 log viewer
+//   - onTaskStatus  仅用来在选中 task 切换到 running 时同步 PTY 网格尺寸
+//   - onTaskCleared 重置 log viewer(re-run 后老 buffer 不该残留在屏上)
+//   - onTaskRemoved 只清 drawer 私有的 selectedId / log 绑定;列表 filter 在
+//                   useTasks 内,这里不重复
 let unsubData: (() => void) | null = null
 let unsubStatus: (() => void) | null = null
 let unsubCleared: (() => void) | null = null
 let unsubRemoved: (() => void) | null = null
 
-function upsert(meta: TaskMeta): void {
-  const i = tasks.value.findIndex((t) => t.id === meta.id)
-  if (i >= 0) tasks.value[i] = meta
-  else tasks.value.push(meta)
-}
-
-onMounted(async () => {
-  tasks.value = await window.api.taskSubscribe()
+onMounted(() => {
   unsubData = window.api.onTaskData(({ id, chunk }) => {
     if (id === selectedId.value && term) term.write(chunk)
   })
   unsubStatus = window.api.onTaskStatus((meta) => {
-    upsert(meta)
     // A task we're viewing just started — match its PTY to the viewer size.
     if (meta.id === selectedId.value && meta.status === 'running') syncTaskSize()
   })
@@ -261,7 +256,6 @@ onMounted(async () => {
     if (id === selectedId.value && term) term.reset()
   })
   unsubRemoved = window.api.onTaskRemoved(({ id }) => {
-    tasks.value = tasks.value.filter((t) => t.id !== id)
     if (selectedId.value === id) {
       selectedId.value = null
       bindLog(null)
@@ -278,12 +272,17 @@ onUnmounted(() => {
   term?.dispose()
 })
 
-// Drawer opened → init term, fit, refresh list, honor an external selection.
+// Drawer opened → 等 useTasks ready、init term、fit、honor external selection。
+// useTasks 的列表会被广播持续更新,这里 await ready 是为了首次打开就能基于
+// 最新列表做"selectedId 失效检查"(避免 stale id 残留)。
 watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
-    await reload()
+    await tasksReady
+    if (selectedId.value && !tasks.value.some((t) => t.id === selectedId.value)) {
+      selectedId.value = null
+    }
     await nextTick()
     ensureTerm()
     if (props.selectTaskId) {

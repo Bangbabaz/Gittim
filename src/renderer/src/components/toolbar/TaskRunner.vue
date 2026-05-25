@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Play, RotateCw, Square, ListChecks, ChevronDown } from 'lucide-vue-next'
+import { useTasks } from '../../composables/useTasks'
 import type { TaskMeta } from '@shared/types'
 
 // 工具栏的命令运行入口。**不依赖 git** —— 任何 cwd 都能用,所以本组件在
 // PaneToolbar 里始终渲染(无论 isRepo)。
 //
-// 任务定义本身是全局的(`window.api.taskList` 不分文件夹),但本组件只展示和
-// 控制当前 pane cwd 下的命令。"npm run dev in folder A" 和 "in folder B" 各自
-// 独立。
+// 任务定义本身是全局的(跨所有 cwd 的命令都在同一份 allTasks 里),但本组件只
+// 展示和控制当前 pane cwd 下的命令。"npm run dev in folder A" 和 "in folder B"
+// 各自独立。
+//
+// 共享数据来自 useTasks() —— 模块级单例。之前每个 TaskRunner 各自维护 allTasks
+// ref + 各自订阅 onTaskStatus / onTaskRemoved,N 个 pane 就触发 N 次 upsert,
+// task 状态变化时主线程被重复广播打到。现在所有 pane 读同一份 reactive ref。
 
 const props = defineProps<{
   cwd: string
@@ -20,10 +25,8 @@ const emit = defineEmits<{
   manageTasks: [cwd?: string, newDraft?: boolean]
 }>()
 
-const allTasks = ref<TaskMeta[]>([])
+const { allTasks } = useTasks()
 const selectedId = ref<string | null>(null)
-let unsubTaskStatus: (() => void) | null = null
-let unsubTaskRemoved: (() => void) | null = null
 
 const normPath = (p: string | undefined): string => {
   if (!p) return ''
@@ -44,12 +47,6 @@ const selectedTask = computed<TaskMeta | null>(
 )
 const runningTasks = computed(() => paneTasks.value.filter((t) => t.status === 'running'))
 
-const upsertTask = (m: TaskMeta): void => {
-  const i = allTasks.value.findIndex((t) => t.id === m.id)
-  if (i >= 0) allTasks.value[i] = m
-  else allTasks.value.push(m)
-}
-
 watch(
   paneTasks,
   (list) => {
@@ -61,19 +58,6 @@ watch(
   },
   { immediate: true }
 )
-
-onMounted(async () => {
-  allTasks.value = await window.api.taskList()
-  unsubTaskStatus = window.api.onTaskStatus(upsertTask)
-  unsubTaskRemoved = window.api.onTaskRemoved(({ id }) => {
-    allTasks.value = allTasks.value.filter((t) => t.id !== id)
-  })
-})
-
-onUnmounted(() => {
-  unsubTaskStatus?.()
-  unsubTaskRemoved?.()
-})
 
 const onPickCommand = (cmd: string): void => {
   if (cmd === '__manage__') {
