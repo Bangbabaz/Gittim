@@ -15,7 +15,10 @@ const DEFAULTS: Settings = {
   taskOutputCapKB: 4096,
   autoOpenTasksOnRun: true,
   tasksDrawerWidth: 860,
-  theme: 'system'
+  theme: 'system',
+  sttLanguage: 'zh',
+  sttDeviceId: '',
+  voiceShortcut: 'F2'
 }
 
 let cache: Settings | null = null

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw, Keyboard } from 'lucide-vue-next'
+import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw, Keyboard, Mic } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
@@ -58,6 +58,13 @@ const effectiveShortcuts = computed(() => ({
   ...shortcutOverrides.value
 }))
 
+// ---- 语音输入设置 ---------------------------------------------------------
+const sttLanguage = ref('zh')
+const sttDeviceId = ref('')
+const voiceShortcut = ref('F2')
+const audioInputDevices = ref<MediaDeviceInfo[]>([])
+const recordingVoice = ref(false)
+
 // 内部 binding 字符串统一用 'Ctrl' 表达"主修饰键",UI 显示按平台翻译。mac 上
 // 用 ⌘⇧⌥ 更符合习惯且更省横向空间。
 const displayShortcutParts = (combo: string): string[] => {
@@ -81,6 +88,61 @@ const resetShortcut = (action: string): void => {
   shortcutOverrides.value = next
   window.api.settingsSet({ shortcutOverrides: next })
 }
+
+// ---- 语音输入设置 handlers ------------------------------------------------
+const onSttLanguageChange = (v: string): void => {
+  sttLanguage.value = v
+  window.api.settingsSet({ sttLanguage: v })
+}
+
+const refreshAudioDevices = async (): Promise<void> => {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices()
+    audioInputDevices.value = all.filter((d) => d.kind === 'audioinput')
+  } catch {
+    audioInputDevices.value = []
+  }
+}
+
+const onSttDeviceIdChange = (v: string): void => {
+  // sentinel '__default__' 表示系统默认，落盘存空字符串方便 getUserMedia 判断。
+  const id = v === '__default__' ? '' : v
+  sttDeviceId.value = id
+  window.api.settingsSet({ sttDeviceId: id })
+}
+
+const onVoiceShortcutChange = (v: string): void => {
+  voiceShortcut.value = v
+  window.api.settingsSet({ voiceShortcut: v })
+}
+
+const startVoiceRecording = (): void => {
+  recordingVoice.value = true
+}
+
+const onVoiceRecordingKeydown = (e: KeyboardEvent): void => {
+  if (!recordingVoice.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.key === 'Escape') {
+    recordingVoice.value = false
+    return
+  }
+  // 语音快捷键允许无修饰键(F1-F12 等),与常规快捷键不同。
+  const shortcut = eventToShortcut(e)
+  recordingVoice.value = false
+  onVoiceShortcutChange(shortcut)
+}
+
+const watchVoiceRecording = (): void => {
+  if (recordingVoice.value) {
+    window.addEventListener('keydown', onVoiceRecordingKeydown, true)
+  } else {
+    window.removeEventListener('keydown', onVoiceRecordingKeydown, true)
+  }
+}
+
+watch(recordingVoice, watchVoiceRecording)
 
 const onRecordingKeydown = (e: KeyboardEvent): void => {
   if (!recordingAction.value) return
@@ -131,7 +193,12 @@ const watchRecording = (): void => {
 }
 
 watch(showSettings, (open) => {
-  if (!open) recordingAction.value = null
+  if (open) {
+    void refreshAudioDevices()
+  } else {
+    recordingAction.value = null
+    recordingVoice.value = false
+  }
 })
 
 watch(recordingAction, watchRecording)
@@ -299,6 +366,9 @@ onMounted(async () => {
   if (settings.shortcutOverrides && typeof settings.shortcutOverrides === 'object') {
     shortcutOverrides.value = settings.shortcutOverrides as Record<string, string>
   }
+  if (typeof settings.sttLanguage === 'string') sttLanguage.value = settings.sttLanguage
+  if (typeof settings.sttDeviceId === 'string') sttDeviceId.value = settings.sttDeviceId
+  if (typeof settings.voiceShortcut === 'string') voiceShortcut.value = settings.voiceShortcut
 
   restoreFromSaved(settings.paneLayout)
 
@@ -331,6 +401,7 @@ onUnmounted(() => {
   unsubscribeTaskStatus?.()
   resizeObserver?.disconnect()
   window.removeEventListener('keydown', onRecordingKeydown, true)
+  window.removeEventListener('keydown', onVoiceRecordingKeydown, true)
   window.removeEventListener('beforeunload', flushSaveOnUnload)
 })
 </script>
@@ -476,6 +547,7 @@ onUnmounted(() => {
                 <el-select
                   :model-value="themePref"
                   size="small"
+                  popper-class="settings-select-popper"
                   style="width: 140px"
                   @update:model-value="(v: ThemePref) => onThemeChange(v)"
                 >
@@ -509,9 +581,59 @@ onUnmounted(() => {
               </p>
             </div>
           </section>
+
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <Mic :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">语音输入</h3>
+            </header>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">识别语言</label>
+                <el-select
+                  :model-value="sttLanguage"
+                  size="small"
+                  popper-class="settings-select-popper"
+                  style="width: 140px"
+                  @update:model-value="onSttLanguageChange"
+                >
+                  <el-option label="中文" value="zh" />
+                  <el-option label="英文" value="en" />
+                  <el-option label="自动检测" value="auto" />
+                </el-select>
+              </div>
+              <p class="settings-item-desc">
+                语音识别目标语言。"自动检测"让模型自动判断语种。
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">麦克风</label>
+                <el-select
+                  :model-value="sttDeviceId || '__default__'"
+                  size="small"
+                  popper-class="settings-select-popper"
+                  style="width: 180px"
+                  @update:model-value="onSttDeviceIdChange"
+                  @visible-change="(v: boolean) => v && refreshAudioDevices()"
+                >
+                  <el-option label="系统默认" value="__default__" />
+                  <el-option
+                    v-for="d in audioInputDevices"
+                    :key="d.deviceId"
+                    :label="d.label || `设备 ${d.deviceId.slice(0, 8)}`"
+                    :value="d.deviceId"
+                  />
+                </el-select>
+              </div>
+              <p class="settings-item-desc">
+                用于语音输入的录音设备,可在耳机、内置麦克风等之间切换。
+              </p>
+            </div>
+          </section>
         </template>
 
-        <template v-if="settingsTab === 'shortcuts'">
+        <template v-else-if="settingsTab === 'shortcuts'">
           <section class="settings-section">
             <header class="settings-section-header">
               <Keyboard :size="14" class="settings-section-icon" />
@@ -552,6 +674,47 @@ onUnmounted(() => {
                   >
                     <RotateCcw :size="12" />
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <header class="settings-section-header" style="margin-top: 20px">
+              <Mic :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">语音输入</h3>
+            </header>
+            <p class="settings-item-desc" style="margin-top: -8px">
+              按住该键说话,松开后自动识别并粘贴文本。建议设置为 F2-F12 等不与终端交互冲突的按键。
+            </p>
+            <div class="shortcut-list">
+              <div class="shortcut-row">
+                <span class="shortcut-label">按下说话</span>
+                <div class="shortcut-keys">
+                  <template v-if="recordingVoice">
+                    <span class="shortcut-recording">按下按键...</span>
+                  </template>
+                  <template v-else>
+                    <span
+                      class="shortcut-kbd"
+                      :class="{ modified: voiceShortcut !== 'F2' }"
+                      @click="startVoiceRecording"
+                    >
+                      <span
+                        v-for="(part, i) in displayShortcutParts(voiceShortcut)"
+                        :key="i"
+                        class="shortcut-key-chip"
+                      >
+                        {{ part }}
+                      </span>
+                    </span>
+                    <button
+                      v-if="voiceShortcut !== 'F2'"
+                      class="shortcut-reset"
+                      title="恢复默认"
+                      @click="onVoiceShortcutChange('F2')"
+                    >
+                      <RotateCcw :size="12" />
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>
@@ -620,6 +783,9 @@ onUnmounted(() => {
           :font-size="appFontSize"
           :scrollback="appScrollback"
           :shortcuts="shortcutOverrides"
+          :stt-language="sttLanguage"
+          :stt-device-id="sttDeviceId"
+          :voice-shortcut="voiceShortcut"
           :is-active="pane.id === activeId"
           @focus="setActive"
           @split="onSplit"
@@ -919,6 +1085,25 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: var(--el-text-color-secondary);
   line-height: 1.55;
+}
+
+/* 设置面板下拉框:统一小号字体、紧凑间距 */
+.settings-item-row .el-select {
+  --el-font-size-base: 12px;
+}
+
+.settings-item-row .el-select .el-input__inner {
+  font-size: 12px;
+  height: 26px;
+  line-height: 26px;
+}
+
+/* 下拉选项 popper(el-select 默认 append-to-body,必须全局命中) */
+.el-popper.settings-select-popper .el-select-dropdown__item {
+  font-size: 12px;
+  padding: 4px 12px;
+  height: auto;
+  line-height: 1.5;
 }
 
 .font-size-control {

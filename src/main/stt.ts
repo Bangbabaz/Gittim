@@ -54,7 +54,7 @@ async function getWhisper(): Promise<WhisperInstance> {
     const modelPath = resolveModelPath()
     if (!modelPath) {
       throw new Error(
-        '未找到 whisper 模型文件 ggml-small-q5_1.bin。请运行 `yarn fetch-models` 拉取后重启。'
+        `未找到 whisper 模型文件 ${MODEL_FILE}。请运行 \`yarn fetch-models\` 拉取后重启。`
       )
     }
     // dynamic import:smart-whisper 是 native binding,加载失败要把错误传给 IPC
@@ -62,7 +62,9 @@ async function getWhisper(): Promise<WhisperInstance> {
     const mod = await import('smart-whisper')
     const Whisper = (mod as { Whisper: new (path: string, opts?: object) => WhisperInstance })
       .Whisper
-    return new Whisper(modelPath, { gpu: false })
+    // gpu: true —— macOS 上走 Metal(Apple Silicon 快很多),win/linux 无对应
+    // 后端时 smart-whisper 自动回退 CPU,不会出错。
+    return new Whisper(modelPath, { gpu: true })
   })()
   try {
     whisperInstance = await initPromise
@@ -75,7 +77,7 @@ async function getWhisper(): Promise<WhisperInstance> {
 
 export async function transcribePcm(
   pcm: Float32Array,
-  language: string = 'auto'
+  language: string = 'zh'
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   try {
     if (!pcm || pcm.length === 0) {

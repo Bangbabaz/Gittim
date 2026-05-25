@@ -8,7 +8,7 @@
 //     thread 延迟)。如果将来 Chromium 真把它去掉,再迁移。
 //   - 不流式分段转写:whisper.cpp 的 context 不是流式的,一段语音整体送入识别
 //     质量最好;按住录音的 PTT 形态下,单段一般 < 30s,整段处理体验最自然。
-//   - language 默认 'auto':中英混说也能识别,首段语种判断多花 ~100ms,体感无差别。
+//   - language 默认 'zh'(可通过 settings.sttLanguage 配置),可选 'en'/'auto'。
 
 import { ref, type Ref } from 'vue'
 
@@ -20,6 +20,8 @@ export type VoiceState = 'idle' | 'recording' | 'transcribing' | 'done' | 'error
 
 export interface VoiceInputOptions {
   language?: string
+  /** 音频输入设备 ID,空字符串表示系统默认。 */
+  deviceId?: string
   onResult?: (text: string) => void
   onError?: (msg: string) => void
 }
@@ -105,12 +107,14 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): UseVoiceInputReturn
     level.value = 0
     chunks = []
     try {
+      const deviceId = opts.deviceId || ''
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: false,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {})
         }
       })
       if (myRun !== runId) {
@@ -178,7 +182,7 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): UseVoiceInputReturn
       if (myRun !== runId) return
       const result = await window.api.sttTranscribe({
         pcm: pcm16k,
-        language: opts.language ?? 'auto'
+        language: opts.language ?? 'zh'
       })
       if (myRun !== runId) return
       if (result.ok) {

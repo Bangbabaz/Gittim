@@ -39,6 +39,9 @@ const props = withDefaults(
     fontSize?: number
     scrollback?: number
     shortcuts?: Record<string, string>
+    sttLanguage?: string
+    sttDeviceId?: string
+    voiceShortcut?: string
     /**
      * 父级 layout 中本 pane 是否为 active。activeId 变化(Alt+方向键切焦、点击其它
      * pane、新建 worktree 自动 active 新 pane)会让这个 prop 翻转 —— 翻 true 时
@@ -53,6 +56,9 @@ const props = withDefaults(
     fontSize: DEFAULT_FONT_SIZE,
     scrollback: DEFAULT_SCROLLBACK,
     shortcuts: () => ({}),
+    sttLanguage: 'zh',
+    sttDeviceId: '',
+    voiceShortcut: 'F2',
     isActive: false
   }
 )
@@ -141,7 +147,8 @@ const {
   stop: voiceStop,
   cancel: voiceCancel
 } = useVoiceInput({
-  language: 'auto',
+  language: props.sttLanguage || 'zh',
+  deviceId: props.sttDeviceId || '',
   onResult: (text) => {
     terminal.paste(text)
   }
@@ -311,10 +318,11 @@ const closeSearch = (): void => {
 // xterm's default handling. Also call preventDefault() on shortcuts that the
 // browser/Electron might otherwise grab (Ctrl+D bookmark, etc).
 terminal.attachCustomKeyEventHandler((e): boolean => {
-  // F2 PTT 录音:不走 DEFAULT_SHORTCUTS / shortcutMatches —— PTT 同时需要
-  // keydown(开始)和 keyup(结束),而 shortcuts 系统只匹配 keydown。e.repeat
-  // 在按住时会持续触发 keydown,我们只接首次 down。
-  if (e.code === 'F2') {
+  // Voice PTT:keydown(开始) + keyup(结束),通过 settings.voiceShortcut 配置。
+  // shortcutMatches 对 F2 这类功能键同样生效(eventToShortcut fallback 到 e.key)。
+  // e.repeat 在按住时会持续触发 keydown,只接首次 down。
+  const voiceKey = props.voiceShortcut || 'F2'
+  if (shortcutMatches(voiceKey, e)) {
     e.preventDefault()
     if (e.type === 'keydown' && !e.repeat) {
       void voiceStart()

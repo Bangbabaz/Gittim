@@ -199,6 +199,12 @@ export interface Settings {
   defaultIde?: string
   /** 非默认快捷键绑定,key = ShortcutAction。 */
   shortcutOverrides?: Record<string, string>
+  /** STT 识别语言,默认 'zh'。可选 'zh' | 'en' | 'auto'。 */
+  sttLanguage?: string
+  /** 语音输入设备 ID,空字符串表示系统默认。 */
+  sttDeviceId?: string
+  /** 语音输入 PTT 快捷键,默认 'F2'。 */
+  voiceShortcut?: string
 }
 
 // ---------------------------------------------------------------------------
