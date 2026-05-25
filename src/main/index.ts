@@ -6,6 +6,7 @@ import {
   writePty,
   resizePty,
   killPty,
+  killAllPtyTrees,
   getCurrentDir,
   getPtyCwd,
   ptyHasRunningProcess,
@@ -373,7 +374,12 @@ async function runCleanup(): Promise<void> {
   if (!cleanupPromise) {
     cleanupPromise = (async () => {
       try {
-        await killAllTasks()
+        // 后台任务 + 每个面板的 PTY 子进程树并行清理。仅依赖
+        // webContents.once('destroyed') 兜底是不够的 —— before-quit 期间 main
+        // 已在收尾,async killPty 没人 await,killProcessTree 起的 PowerShell
+        // snapshot 会被 main 退出打断,detached 的孙子(Nx workers / vite /
+        // dev server)随之逃逸。这里两边一起 await 直到全部杀完。
+        await Promise.all([killAllTasks(), killAllPtyTrees()])
       } finally {
         flushSettings()
         cleanupDone = true

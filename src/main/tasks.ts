@@ -291,6 +291,13 @@ export function createTask(opts: { name?: string; command: string; cwd: string }
   return toMeta(t)
 }
 
+// pty.kill() 成功不代表 onExit 一定很快到 —— 罕见情况(进程 ignore SIGTERM、
+// Windows ConPty 异常、shell 仍在 flush)会让 status 永远卡在 'running',UI
+// 看起来"停不下来"。killProcessTree 已经把孙子杀光,shell 孤立后通常秒退,
+// 这里 3 秒兜底:还没收到 exit 就强制广播 exited。onExit 真姗姗来迟也无害,
+// onData/onExit 都有 `t.pty !== pty` 守护,旧实例的回调被识别为过期忽略。
+const STOP_TIMEOUT_MS = 3000
+
 export async function stopTask(id: string): Promise<void> {
   const t = tasks.get(id)
   if (!t || !t.pty) return
@@ -306,6 +313,7 @@ export async function stopTask(id: string): Promise<void> {
       // never let snapshot failure block the kill
     }
   }
+  const ptyAtKill = t.pty
   let threw = false
   try {
     t.pty.kill()
@@ -318,7 +326,17 @@ export async function stopTask(id: string): Promise<void> {
     t.pty = null
     t.status = 'exited'
     broadcast('task-status', toMeta(t))
+    return
   }
+  const timer = setTimeout(() => {
+    // 旧 pty 还指着自己 → onExit 没来过。把指针拆掉、广播 exited。
+    if (t.pty !== ptyAtKill) return
+    t.pty = null
+    t.status = 'exited'
+    broadcast('task-status', toMeta(t))
+  }, STOP_TIMEOUT_MS)
+  // 别让兜底定时器阻挡 app 退出 —— before-quit 的 cleanup 不应该等这 3 秒。
+  timer.unref?.()
 }
 
 /** Forward keystrokes/paste from the log viewer to a running task's PTY. */

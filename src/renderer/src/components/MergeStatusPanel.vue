@@ -108,6 +108,22 @@ watch(
 
 defineExpose({ refresh })
 
+// 文件解决后,缓存的 diff(冲突 marker 版本)就过期了 —— 必须丢掉,否则用户
+// 在 refresh 期间或者下次再展开看到的还是带冲突的旧 patch。同步丢掉 expanded
+// 状态(resolve 后该文件多半已经从 conflicts 列表消失,但保险起见显式清理)。
+function invalidateDiffCache(path: string): void {
+  if (fileDiffs.value.has(path)) {
+    const next = new Map(fileDiffs.value)
+    next.delete(path)
+    fileDiffs.value = next
+  }
+  if (expanded.value.has(path)) {
+    const e = new Set(expanded.value)
+    e.delete(path)
+    expanded.value = e
+  }
+}
+
 async function pickSide(file: ConflictedFile, side: 'ours' | 'theirs'): Promise<void> {
   if (!props.cwd) return
   busyFile.value = file.path
@@ -118,6 +134,7 @@ async function pickSide(file: ConflictedFile, side: 'ours' | 'theirs'): Promise<
       return
     }
     ElMessage.success(side === 'ours' ? '已保留我方版本' : '已保留对方版本')
+    invalidateDiffCache(file.path)
     emit('changed')
     await refresh()
   } finally {
@@ -135,6 +152,7 @@ async function markResolved(file: ConflictedFile): Promise<void> {
       return
     }
     ElMessage.success('已标记为解决')
+    invalidateDiffCache(file.path)
     emit('changed')
     await refresh()
   } finally {

@@ -81,12 +81,30 @@ const defaultProjectName = computed(() => {
   return `${folderName.value}-${leaf}`
 })
 
+// 统一拼合 location + 项目名。之前 wtFullPath (显示用) 和 handleCreateWorktree
+// (实际创建用) 各自写了一份判断,分歧:
+//   - wtFullPath:cwd 含 '\\' OR loc 含 '\\' → '\\'
+//   - handleCreate:只看 cwd 含 '\\'
+// 导致用户浏览出 Windows 风格路径 (含 '\\')、而 cwd 是 OSC 7 给的 POSIX 风格
+// (D:/foo) 时,UI 显示 `D:\foo\new` 但创建走 `D:/foo/new`,后续 pathExists 检查
+// 用的不是同一条路径。这里抽 helper 两处共用。
+function pickSep(cwd: string | undefined, location: string): string {
+  return (cwd ?? '').includes('\\') || location.includes('\\') ? '\\' : '/'
+}
+
+function joinWorktreePath(location: string, name: string, cwd: string | undefined): string {
+  const sep = pickSep(cwd, location)
+  // 把 location 内的混合分隔符统一为 sep(避免 `D:/foo\bar\` 这样的输入),
+  // 同时剥掉尾随分隔符。
+  const norm = location.replace(/[\\/]+$/, '').replace(/[\\/]/g, sep)
+  return `${norm}${sep}${name}`
+}
+
 const wtFullPath = computed(() => {
-  const loc = wtLocation.value.trim().replace(/[\\/]+$/, '')
+  const loc = wtLocation.value.trim()
   const name = wtProjectName.value.trim()
   if (!loc || !name) return ''
-  const sep = loc.includes('\\') || (props.cwd ?? '').includes('\\') ? '\\' : '/'
-  return `${loc}${sep}${name}`
+  return joinWorktreePath(loc, name, props.cwd)
 })
 
 const wtPathExists = ref(false)
@@ -166,8 +184,7 @@ async function handleCreateWorktree(): Promise<void> {
       return
     }
   }
-  const sep = props.cwd.includes('\\') ? '\\' : '/'
-  const fullPath = `${wtLocation.value.replace(/\\/g, sep)}${sep}${wtProjectName.value.trim()}`
+  const fullPath = joinWorktreePath(wtLocation.value, wtProjectName.value.trim(), props.cwd)
   if (await window.api.pathExists(fullPath)) {
     wtPathExists.value = true
     ElMessage.error(`同名文件夹已存在:${fullPath}`)

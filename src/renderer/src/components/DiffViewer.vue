@@ -241,6 +241,13 @@ const highlighted = ref(new Map<string, { old: string[] | null; new: string[] | 
 // 每次 files 变化（即 props.diff 变化）都启动新一轮高亮。
 // gen 用来在 async 完成时丢弃过期结果，避免快速切换 diff 时旧结果污染新视图。
 let gen = 0
+
+// 并发上限。大 PR / commit 可能有数百文件,如果对每个文件起独立 async,
+// 一次性发上千个 IPC + shiki worker 任务,IPC 通道拥塞,worker 队列爆,主线程
+// 反而被 message handler 卡住。串行调度,固定窗口数同时跑 —— 视区内的文件
+// 优先(按 files 顺序,通常 GitLogViewer 选中的文件靠前),后续慢慢补全。
+const HIGHLIGHT_CONCURRENCY = 4
+
 watch(
   files,
   (fs) => {
@@ -248,10 +255,15 @@ watch(
     const myGen = gen
     highlighted.value = new Map()
     if (!props.fetchContent) return
-    for (const f of fs) {
-      if (!f.lang || f.binary) continue
-      const fetch = props.fetchContent
-      void (async () => {
+    const fetch = props.fetchContent
+    const queue = fs.filter((f) => f.lang && !f.binary)
+    let idx = 0
+
+    const runOne = async (): Promise<void> => {
+      while (myGen === gen) {
+        const i = idx++
+        if (i >= queue.length) return
+        const f = queue[i]
         const [oldText, newText] = await Promise.all([
           f.oldName ? fetch('old', f.oldName).catch(() => null) : Promise.resolve(null),
           f.newName ? fetch('new', f.newName).catch(() => null) : Promise.resolve(null)
@@ -265,7 +277,11 @@ watch(
         const next = new Map(highlighted.value)
         next.set(f.id, { old: oldHtml, new: newHtml })
         highlighted.value = next
-      })()
+      }
+    }
+
+    for (let i = 0; i < Math.min(HIGHLIGHT_CONCURRENCY, queue.length); i++) {
+      void runOne()
     }
   },
   { immediate: true }

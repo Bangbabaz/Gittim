@@ -164,10 +164,17 @@ export function shellIntegration(shellPath: string): ShellSpec {
     //
     // $E = ESC, $P = current path, $G = '>'. Prefix the OSC 7 hook to the
     // existing PROMPT (or default `$P$G`) so a user's custom prompt survives.
+    //
+    // 嵌套启动保护:如果 existing 已经含我们的 OSC 7 hook(用户在 Gittim 内
+    // 嵌套启动子 cmd,子 cmd 继承父进程的 PROMPT),不再前置一层,否则每次
+    // 嵌套都会让 PROMPT 变长一截。token 用 `]7;file://` 而不是单纯 `]7;`,
+    // 避免误碰其它 OSC 9;1/9;9 子代码或 ConEmu 自定义提示。
     const env = { ...baseEnv }
     const host = env.COMPUTERNAME || 'localhost'
     const existing = env.PROMPT && env.PROMPT.length ? env.PROMPT : '$P$G'
-    env.PROMPT = `$E]7;file://${host}/$P$E\\${existing}`
+    env.PROMPT = existing.includes(']7;file://')
+      ? existing
+      : `$E]7;file://${host}/$P$E\\${existing}`
     // cmd.exe doesn't have a -l switch; passing it makes cmd open the file
     // named "-l" and fail. The previous code worked only because cmd treats
     // an unrecognised switch as a path and silently ignores the error.

@@ -213,6 +213,20 @@ export async function killPty(paneId: string): Promise<void> {
 }
 
 /**
+ * Kill every live PTY pane and its descendant tree. Called from `before-quit`
+ * so dev servers / Claude Code / vim 等长期 PTY 子进程不会在 Gittim 关闭后逃逸。
+ *
+ * 不能依赖 webContents.once('destroyed') 兜底:`before-quit` 触发时 main 已经
+ * 在收尾,destroy handler 内调用的 killPty 是 async 但不被 await,
+ * killProcessTree 内部还要起 PowerShell snapshot —— main 退出会直接打断它们。
+ * 这里同 killAllTasks 一样 await 完整个清理。
+ */
+export async function killAllPtyTrees(): Promise<void> {
+  const ids = Array.from(sessions.keys())
+  await Promise.all(ids.map((id) => killPty(id)))
+}
+
+/**
  * Best-effort check: does the pane's shell have any child process running
  * (i.e. is a command currently executing in it)? Used to warn before closing
  * a pane that's mid-task. node-pty's pid is the shell itself, so any child
@@ -763,13 +777,23 @@ export async function getMergeStatus(cwd: string): Promise<MergeStatus> {
     for (const rec of records) {
       if (!rec.startsWith('u ')) continue
       // Layout: `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`.
-      // We split into 11 max so the path's spaces (Windows-style names like
-      // `My Documents/foo.txt` exist) survive intact in the last token.
-      const parts = rec.split(' ')
-      if (parts.length < 11) continue
-      const xy = parts[1]
-      const path = parts.slice(10).join(' ')
+      // 不能用 `split(' ').slice(10).join(' ')` —— path 中的连续空格(Windows
+      // 风格 `My  Documents/foo.txt`)、tab、控制字符都会被 split+join 压成单
+      // 空格,后续 `git checkout --ours -- <path>` 就找不到文件了。改为定位
+      // 第 10 个空格的位置(`u` 之后第 9 个字段结束的空格),从那之后整段当
+      // path —— 字面保留任何字符。
+      let pos = -1
+      for (let i = 0, count = 0; i < rec.length; i++) {
+        if (rec[i] === ' ' && ++count === 10) {
+          pos = i
+          break
+        }
+      }
+      if (pos < 0) continue
+      const path = rec.slice(pos + 1)
       if (!path) continue
+      // XY 是 `u ` 之后固定 2 字符。
+      const xy = rec.slice(2, 4)
       conflicts.push({ path, status: xy, description: describeConflictStatus(xy) })
     }
   } catch {

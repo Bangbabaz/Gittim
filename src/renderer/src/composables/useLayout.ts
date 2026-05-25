@@ -536,33 +536,57 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   const serializeLayout = (): SavedLayout | null =>
     layout.value ? serializeNode(layout.value) : null
 
-  const deserializeNode = (saved: SavedLayout, paneCwdAcc: Record<string, string>): LayoutNode => {
+  // settings.json 是用户可手动编辑的 —— 备份恢复、同步工具搬运、版本回滚都
+  // 可能引入损坏(深度异常 / 字段缺失 / 类型不对)。超过这个深度的 layout 直接
+  // fallback 到单 pane,避免无限递归把 renderer 栈打爆。32 足够覆盖任何合理
+  // 的人类使用场景(2^32 = 40 亿个 pane)。
+  const MAX_LAYOUT_DEPTH = 32
+
+  const deserializeNode = (
+    saved: SavedLayout,
+    paneCwdAcc: Record<string, string>,
+    depth = 0
+  ): LayoutNode => {
+    if (depth >= MAX_LAYOUT_DEPTH || !saved || typeof saved !== 'object') {
+      return { type: 'pane', id: newPaneId() }
+    }
     if (saved.type === 'pane') {
       const id = newPaneId()
-      if (saved.cwd) paneCwdAcc[id] = saved.cwd
+      if (saved.cwd && typeof saved.cwd === 'string') paneCwdAcc[id] = saved.cwd
       return { type: 'pane', id }
+    }
+    // split 节点 — 校验子节点存在,否则当 pane 处理。
+    if (saved.type !== 'split' || !saved.a || !saved.b) {
+      return { type: 'pane', id: newPaneId() }
     }
     return {
       type: 'split',
-      direction: saved.direction,
-      ratio: saved.ratio,
-      a: deserializeNode(saved.a, paneCwdAcc),
-      b: deserializeNode(saved.b, paneCwdAcc)
+      direction: saved.direction === 'column' ? 'column' : 'row',
+      ratio:
+        typeof saved.ratio === 'number' && saved.ratio > MIN_RATIO && saved.ratio < MAX_RATIO
+          ? saved.ratio
+          : 0.5,
+      a: deserializeNode(saved.a, paneCwdAcc, depth + 1),
+      b: deserializeNode(saved.b, paneCwdAcc, depth + 1)
     }
   }
 
   const restoreFromSaved = (saved: SavedLayout | null | undefined): void => {
     if (saved) {
-      const restoredPaneCwd: Record<string, string> = {}
-      const restored = deserializeNode(saved, restoredPaneCwd)
-      layout.value = restored
-      paneCwd.value = restoredPaneCwd
-      activeId.value = firstLeafId(restored)
-    } else {
-      const firstId = newPaneId()
-      layout.value = { type: 'pane', id: firstId }
-      activeId.value = firstId
+      try {
+        const restoredPaneCwd: Record<string, string> = {}
+        const restored = deserializeNode(saved, restoredPaneCwd)
+        layout.value = restored
+        paneCwd.value = restoredPaneCwd
+        activeId.value = firstLeafId(restored)
+        return
+      } catch {
+        // 异常 saved 形状 —— fall through 到下面的默认单 pane。
+      }
     }
+    const firstId = newPaneId()
+    layout.value = { type: 'pane', id: firstId }
+    activeId.value = firstId
   }
 
   // ---- 全局事件注册 ------------------------------------------------------
