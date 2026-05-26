@@ -601,12 +601,24 @@ onMounted(async () => {
     terminal.writeln(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m`)
   })
 
-  await window.api.ptyStart({
-    paneId: props.paneId,
-    cols: terminal.cols,
-    rows: terminal.rows,
-    cwd: props.cwd || undefined
-  })
+  // ptyStart 失败的真实原因(ENOENT 找不到 shell、EACCES 权限拒绝、cwd 不存在
+  // 等)只会以 unhandled rejection 形式出现在 devtools console —— 用户看到的
+  // 是一个完全空白的终端、无任何提示。这里 catch 后把错误写进 terminal,让用
+  // 户至少能知道哪里出问题(以及 paneId,方便排查日志)。仍然挂 ResizeObserver
+  // / focus,因为 terminal 本身是好的,只是没接上 PTY。
+  try {
+    await window.api.ptyStart({
+      paneId: props.paneId,
+      cols: terminal.cols,
+      rows: terminal.rows,
+      cwd: props.cwd || undefined
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    terminal.writeln(`\r\n\x1b[31m[无法启动终端会话: ${msg}]\x1b[0m`)
+    terminal.writeln(`\x1b[90m  pane: ${props.paneId}\x1b[0m`)
+    if (props.cwd) terminal.writeln(`\x1b[90m  cwd:  ${props.cwd}\x1b[0m`)
+  }
 
   // Watch the container — splits/window resizes/drags all change its size.
   // 通过 rAF 合并连续触发,避免拖拽时高频 fit() + ptyResize IPC。

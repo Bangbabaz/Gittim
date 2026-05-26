@@ -351,8 +351,39 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     placement: 'top' | 'bottom' | 'left' | 'right' = 'right'
   ): void => {
     if (!layout.value) return
+    const rect = findPaneRect(paneId)
+    const resolved = (
+      placement: 'top' | 'bottom' | 'left' | 'right'
+    ): 'top' | 'bottom' | 'left' | 'right' | null => {
+      const dir = PLACEMENT_MAP[placement].direction
+      if (!rect) return placement
+      const dim = dir === 'row' ? rect.width : rect.height
+      if (dim >= MIN_PANE * 2 + DIVIDER) return placement
+      // 用户挑的方向太窄,自动尝试垂直方向(left/right ↔ top/bottom):
+      // 大多数 worktree 创建发生在窄/高的 pane 上,90° 方向通常够。
+      const flip: Record<typeof placement, 'top' | 'bottom' | 'left' | 'right'> = {
+        left: 'top',
+        right: 'bottom',
+        top: 'left',
+        bottom: 'right'
+      }
+      const alt = flip[placement]
+      const altDim = PLACEMENT_MAP[alt].direction === 'row' ? rect.width : rect.height
+      if (altDim >= MIN_PANE * 2 + DIVIDER) return alt
+      return null
+    }
+
+    const finalPlacement = resolved(placement)
+    if (!finalPlacement) {
+      // 两个方向都开不出一个可用尺寸的子 pane —— 与 onSplit 的 silent-fail 一致,
+      // 但已创建的 worktree 不应该被"丢"。退而求其次:把当前 pane 的 cwd 改到
+      // 新 worktree,用户至少能立刻进去工作,可以稍后用 split 自行打开邻居 pane。
+      paneCwd.value = { ...paneCwd.value, [paneId]: worktreePath }
+      return
+    }
+
     const newId = newPaneId()
-    const { direction, newFirst } = PLACEMENT_MAP[placement] ?? PLACEMENT_MAP.right
+    const { direction, newFirst } = PLACEMENT_MAP[finalPlacement]
     layout.value = insertAdjacent(
       layout.value,
       paneId,

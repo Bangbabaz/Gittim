@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { parse } from 'diff2html'
 import { LineType } from 'diff2html/lib-esm/types'
 import ShikiWorker from '../workers/shiki.worker?worker'
@@ -103,11 +103,14 @@ const LANG_MAP: Record<string, string> = {
 // 零阻塞 —— codeToHtml 是同步 CPU 密集操作，放在主线程会让 el-dialog 的进入
 // 动画掉帧（用户感受就是"打开 diff 弹窗卡一下"）。
 //
-// 单例 worker 跨所有 DiffViewer 实例复用。模块加载即 spawn，让 shiki 在 worker
-// 里后台预热。请求按自增 id 路由，pending 表收 resolver。
+// 每个 DiffViewer 实例独占一个 worker —— `<script setup>` 顶层代码每次实例化
+// 都会跑,如果不 terminate,反复开关 diff/commit-history/merge 弹窗会把旧 worker
+// 留在内存(每个携带 highlighter + grammars + themes,几 MB 起)。在
+// onBeforeUnmount 里 terminate,并拒绝 pending 请求避免回调挂死。
 const worker = new ShikiWorker()
 let nextReqId = 0
 const pending = new Map<number, (lines: string[] | null) => void>()
+let workerAlive = true
 
 worker.addEventListener('message', (e: MessageEvent<{ id: number; lines: string[] | null }>) => {
   const { id, lines } = e.data
@@ -119,12 +122,23 @@ worker.addEventListener('message', (e: MessageEvent<{ id: number; lines: string[
 })
 
 function workerTokenize(content: string, lang: string): Promise<string[] | null> {
+  if (!workerAlive) return Promise.resolve(null)
   return new Promise((resolve) => {
     const id = ++nextReqId
     pending.set(id, resolve)
     worker.postMessage({ id, content, lang })
   })
 }
+
+onBeforeUnmount(() => {
+  workerAlive = false
+  // 在 terminate 前把残留 resolver 全部 resolve(null),避免 watch 里的
+  // `await tokenizeFile` 永久挂起 —— 组件已经在销毁,被 await 的代码不会再
+  // 写状态,但 Promise 漏掉 settle 仍然会让闭包持有 closure 内的 fs 引用。
+  for (const resolve of pending.values()) resolve(null)
+  pending.clear()
+  worker.terminate()
+})
 
 function detectLang(filename: string): string | null {
   const base = filename.replace(/\\/g, '/').split('/').pop() || filename

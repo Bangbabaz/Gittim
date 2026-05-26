@@ -1,5 +1,5 @@
 import { spawn, IPty } from 'node-pty'
-import { WebContents } from 'electron'
+import { WebContents, app } from 'electron'
 import { statSync } from 'fs'
 import { readSettings, updateSettings } from './settings'
 import { killProcessTree } from './proc'
@@ -177,7 +177,12 @@ function appendOutput(t: Task, chunk: string): void {
 }
 
 function spawnPty(t: Task): void {
-  const cwd = t.cwd && isValidDir(t.cwd) ? t.cwd : process.env.HOME || process.cwd()
+  // 与 shell.ts 一致用 app.getPath('home'):
+  //   - Windows 没有 $HOME(应当是 %USERPROFILE%),旧代码 fallback 到 process.cwd()
+  //     —— 在 packaged app 里是安装目录,task 跑过去会读不到 package.json,
+  //     用户体感是"运行无效"。
+  //   - app.getPath('home') 跨平台都返回用户家目录,与 PTY pane 的默认值统一。
+  const cwd = t.cwd && isValidDir(t.cwd) ? t.cwd : app.getPath('home')
   const shell = defaultShell()
   // Run the command through the shell so users can use pipes, &&, env vars,
   // and `npm run x` resolves from node_modules/.bin. Login + interactive on
