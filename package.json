@@ -12,14 +12,15 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
-    "dev": "node scripts/fetch-whisper-model.mjs && electron-vite dev",
-    "build": "node scripts/fetch-whisper-model.mjs && npm run typecheck && electron-vite build",
+    "dev": "node scripts/fetch-whisper-model.mjs && node scripts/rebuild-stt.mjs && electron-vite dev",
+    "build": "node scripts/fetch-whisper-model.mjs && node scripts/rebuild-stt.mjs && npm run typecheck && electron-vite build",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
     "fetch-models": "node scripts/fetch-whisper-model.mjs",
-    "postinstall": "node -e \"const fs=require('fs'),p=require('path');for(const d of ['darwin-arm64','darwin-x64','linux-arm64','linux-x64']){const f=p.join('node_modules/node-pty/prebuilds',d,'spawn-helper');try{fs.chmodSync(f,0o755)}catch{}}\" && node -e \"const fs=require('fs');const f='node_modules/smart-whisper/binding.gyp';if(fs.existsSync(f)){let c=fs.readFileSync(f,'utf8');if(!c.includes('/utf-8')){c=c.replace(\\\"'VCCLCompilerTool': { 'ExceptionHandling': 1 }\\\",\\\"'VCCLCompilerTool': { 'ExceptionHandling': 1, 'AdditionalOptions': ['/utf-8'] }\\\");fs.writeFileSync(f,c);console.log('patched smart-whisper binding.gyp for UTF-8')}}\""
+    "rebuild-stt": "node scripts/rebuild-stt.mjs --force",
+    "postinstall": "node -e \"const fs=require('fs'),p=require('path');for(const d of ['darwin-arm64','darwin-x64','linux-arm64','linux-x64']){const f=p.join('node_modules/node-pty/prebuilds',d,'spawn-helper');try{fs.chmodSync(f,0o755)}catch{}}\" && node -e \"const fs=require('fs');const f='node_modules/smart-whisper/binding.gyp';if(fs.existsSync(f)){let c=fs.readFileSync(f,'utf8');if(!c.includes('/utf-8')){c=c.replace(\\\"'VCCLCompilerTool': { 'ExceptionHandling': 1 }\\\",\\\"'VCCLCompilerTool': { 'ExceptionHandling': 1, 'AdditionalOptions': ['/utf-8'] }\\\");fs.writeFileSync(f,c);console.log('patched smart-whisper binding.gyp for UTF-8')}}\" && node scripts/rebuild-stt.mjs --force"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -34,6 +35,7 @@
     "element-plus": "^2.14.0",
     "lucide-vue-next": "^1.0.0",
     "node-pty": "^1.1.0",
+    "opencc-js": "^1.3.1",
     "sass": "^1.99.0",
     "shiki": "^4.1.0",
     "smart-whisper": "^0.8.1"
@@ -42,6 +44,7 @@
     "@electron-toolkit/eslint-config-prettier": "3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@electron/rebuild": "^4.0.4",
     "@types/node": "^22.19.1",
     "@vitejs/plugin-vue": "^6.0.2",
     "electron": "^39.2.6",

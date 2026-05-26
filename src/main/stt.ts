@@ -47,6 +47,31 @@ type WhisperInstance = {
 let whisperInstance: WhisperInstance | null = null
 let initPromise: Promise<WhisperInstance> | null = null
 
+// 繁→简后处理 converter。opencc-js/t2cn 只 ~66KB(vs 完整包 1MB),仅含繁→简
+// 字典。**惰性**加载:用户没说中文时(language!='zh')永远不实例化,模块不占内存。
+type T2sConverter = (text: string) => string
+let t2sConverter: T2sConverter | null = null
+let t2sInitPromise: Promise<T2sConverter> | null = null
+
+async function getT2sConverter(): Promise<T2sConverter> {
+  if (t2sConverter) return t2sConverter
+  if (t2sInitPromise) return t2sInitPromise
+  t2sInitPromise = (async () => {
+    const mod = await import('opencc-js/t2cn')
+    // `from: 't'` 是通用繁体(覆盖港、台、各种繁体变体);to: 'cn' 简体。比指定
+    // 'tw'/'hk' 更宽松 —— 我们只想把任何繁体扫成简体,不在意源是哪一支。
+    const conv = mod.Converter({ from: 't', to: 'cn' })
+    return conv
+  })()
+  try {
+    t2sConverter = await t2sInitPromise
+    return t2sConverter
+  } catch (err) {
+    t2sInitPromise = null
+    throw err
+  }
+}
+
 async function getWhisper(): Promise<WhisperInstance> {
   if (whisperInstance) return whisperInstance
   if (initPromise) return initPromise
@@ -84,16 +109,36 @@ export async function transcribePcm(
       return { ok: false, error: '没有录到声音' }
     }
     const whisper = await getWhisper()
-    const task = await whisper.transcribe(pcm, {
+    // 简体引导 prompt:language='zh' 时显著降低 whisper-tiny/small 输出繁体(港台
+    // 用语)的概率 —— 量化模型本身不区分简繁,给一段简体文本作 prefix 会让后续
+    // token sampling 偏向简体字符表。
+    // language='auto' 时**故意不加** —— initial_prompt 会污染 whisper 内部的语言
+    // 检测路径,把英语录音强制推成中文输出。auto 用户接受 whisper 的判断即可。
+    const opts: Record<string, unknown> = {
       language,
       suppress_non_speech_tokens: true,
       no_timestamps: true
-    })
+    }
+    if (language === 'zh') {
+      opts.initial_prompt = '以下是普通话的句子,使用简体中文转写。'
+    }
+    const task = await whisper.transcribe(pcm, opts)
     const segments = await task.result
-    const text = (Array.isArray(segments) ? segments : [])
+    let text = (Array.isArray(segments) ? segments : [])
       .map((s) => (typeof s?.text === 'string' ? s.text : ''))
       .join('')
       .trim()
+    // 双保险:initial_prompt 没拦住的残留繁体词(small 量化模型偶尔会跑偏),
+    // 在这里 OpenCC 强制转简体。仅对 language='zh' 做 —— 'auto' 可能是英语
+    // 里碰到的"México"/"São Paulo"等专名,不应改;'en' 之外的其它语言同理。
+    if (language === 'zh' && text) {
+      try {
+        const conv = await getT2sConverter()
+        text = conv(text)
+      } catch {
+        // OpenCC 加载/转换失败不影响主功能,返回原始文本即可。
+      }
+    }
     return { ok: true, text }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
