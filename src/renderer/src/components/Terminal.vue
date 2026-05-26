@@ -653,12 +653,9 @@ onUnmounted(() => {
     <PaneToolbar
       ref="toolbarRef"
       :cwd="currentCwd"
-      :voice-active="voiceState === 'recording'"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
-      @voice-press="voiceStart"
-      @voice-release="voiceStop"
     />
     <div ref="terminalRef" class="terminal-container"></div>
     <RecordingIndicator

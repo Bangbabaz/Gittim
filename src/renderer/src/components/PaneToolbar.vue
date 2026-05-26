@@ -6,7 +6,6 @@ import GitOpsButtons from './toolbar/GitOpsButtons.vue'
 import DiffStatsButton from './toolbar/DiffStatsButton.vue'
 import TaskRunner from './toolbar/TaskRunner.vue'
 import IdeLauncher from './toolbar/IdeLauncher.vue'
-import VoiceInputButton from './toolbar/VoiceInputButton.vue'
 import type { BranchInfo, DiffStats, MergeStatus } from '@shared/types'
 
 // 工具栏协调器。集中管理 git 状态(branches / currentBranch / diffStats /
@@ -23,16 +22,12 @@ type WorktreePlacement = 'top' | 'bottom' | 'left' | 'right'
 
 const props = defineProps<{
   cwd: string | undefined
-  /** Terminal 透传过来的录音状态,仅用于按钮的 active 高亮。 */
-  voiceActive?: boolean
 }>()
 
 const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   openTasks: []
   manageTasks: [cwd?: string, newDraft?: boolean]
-  voicePress: []
-  voiceRelease: []
 }>()
 
 // --- Git 状态(从 IPC 拉取的快照,下发给 BranchSelector / WorktreePanel /
@@ -161,18 +156,14 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
       />
     </template>
 
-    <!-- 任务运行 / 语音输入 / IDE 启动:无论是否 git 都显示。IdeLauncher 自带
-         margin-left: auto,把右侧锚定到工具栏末端。DiffStatsButton 跟在最后,
-         保证 +N -N 在最右。 -->
+    <!-- 任务运行 / IDE 启动:无论是否 git 都显示。语音输入只走快捷键(默认 F2),
+         不再渲染按钮 —— 录音中浮在 pane 底部的 RecordingIndicator 就是反馈。
+         IdeLauncher 自带 margin-left: auto,把右侧锚定到工具栏末端。
+         DiffStatsButton 跟在最后,保证 +N -N 在最右。 -->
     <TaskRunner
       :cwd="props.cwd"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
-    />
-    <VoiceInputButton
-      :active="!!props.voiceActive"
-      @press="emit('voicePress')"
-      @release="emit('voiceRelease')"
     />
     <IdeLauncher :cwd="props.cwd" />
     <DiffStatsButton v-if="isRepo" :cwd="props.cwd" :diff-stats="diffStats" />
