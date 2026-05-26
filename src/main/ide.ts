@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { join, dirname, basename } from 'path'
 import { app, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { updateSettings } from './settings'
 import type { IdeInfo } from '@shared/types'
 
 export type { IdeInfo }
@@ -702,37 +703,38 @@ async function extractIcon(command: string, id?: string): Promise<string | undef
 // ---------------------------------------------------------------------------
 
 let cache: IdeInfo[] | null = null
-let prewarming: Promise<IdeInfo[]> | null = null
+let scanning: Promise<IdeInfo[]> | null = null
 
 /**
- * 在 app ready 后异步触发首次 IDE 扫描。macOS 上 `system_profiler -json` 第一次跑
- * 1–2 秒,Windows 注册表 sweep ~300 ms;放到启动期跑就不再卡用户首次点击 IDE
- * 按钮的瞬间。fire-and-forget,失败也无所谓 —— 用户真去点的时候会再触发一次。
+ * 用 settings 中持久化的上次扫描结果填充 main 的 cache,使第一次 `ide-list` IPC
+ * 立即返回 —— 不阻塞 UI 等 system_profiler / 注册表扫描。
+ *
+ * 设计上**没有**自动预扫(prewarm):mac 上 `system_profiler -json` 首次可能跑
+ * 10+ 秒,会占满 libuv 线程池让其它 execFile(git 操作等)排队;同时启动期完全
+ * 没必要 —— 用户感知"启动卡顿"主要就来自这种背景 IO。改成纯 lazy 后,只在
+ * 用户真的点"重新检测"或 cache 为空时第一次访问 ide-list 才触发完整扫描。
  */
-export function prewarmIdes(): void {
-  if (cache || prewarming) return
-  prewarming = detectIdes(false).catch(() => [])
+export function hydrateIdeCache(persisted: IdeInfo[] | undefined | null): void {
+  if (cache) return
+  if (!persisted || !Array.isArray(persisted) || persisted.length === 0) return
+  cache = persisted
 }
 
 export async function detectIdes(force = false): Promise<IdeInfo[]> {
   if (cache && !force) return cache
-  // 命中预热正在进行的扫描,避免连续两次 system_profiler。force 模式强制重扫,
-  // 仍然 await prewarming 一下保证旧的扫描进程不会和新的 race。
-  if (!force && prewarming) {
-    try {
-      const result = await prewarming
-      if (cache) return cache
-      return result
-    } catch {
-      // 预热失败 —— 走下面真正的检测流程
-    }
-  }
+  // 并发去重:多个 IdeLauncher 同时 onMounted 时只跑一次实际扫描。
+  if (!force && scanning) return scanning
   if (force) {
     registryCache = null
     macAppsCache = null
-    prewarming = null
   }
+  scanning = runDetect().finally(() => {
+    scanning = null
+  })
+  return scanning
+}
 
+async function runDetect(): Promise<IdeInfo[]> {
   // Fire both platform-wide enumerations in parallel with PATH lookup so the
   // total wall-clock cost is one PowerShell startup, not N.
   const [regEntries, macApps] = await Promise.all([readWindowsRegistry(), readMacApplications()])
@@ -815,6 +817,10 @@ export async function detectIdes(force = false): Promise<IdeInfo[]> {
   )
 
   cache = found
+  // 持久化结果到 settings:下次启动 hydrateIdeCache() 直接命中,UI 第一帧就能
+  // 显示真实图标 + 列表,不必等本次 ~15s 的完整重扫(macOS Tahoe 上 system_profiler
+  // 首次极慢)。updateSettings 内部已有 250ms debounce flush,频繁触发也安全。
+  updateSettings({ cachedIdes: found })
   return found
 }
 

@@ -83,6 +83,11 @@ function defaultShell(): string {
     // override via GITTIM_SHELL if they prefer cmd, pwsh, or git-bash.
     return process.env.GITTIM_SHELL || 'powershell.exe'
   }
+  // macOS Catalina+(2019)默认 shell 是 zsh,bash 已被 Apple 标记为 deprecated。
+  // 实际触发概率很低(process.env.SHELL 一般都设了);但 fallback 用 zsh 比 bash
+  // 更贴合现代 mac 用户的预期 —— shell-integration 也是为 zsh 路径准备的全套
+  // .zshenv/.zprofile/.zshrc wrapper。Linux 上 bash 仍然是普遍默认。
+  if (process.platform === 'darwin') return process.env.SHELL || '/bin/zsh'
   return process.env.SHELL || '/bin/bash'
 }
 

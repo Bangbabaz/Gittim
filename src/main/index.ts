@@ -53,10 +53,25 @@ import {
   resizeTask,
   killAllTasks
 } from './tasks'
-import { detectIdes, openIde, prewarmIdes } from './ide'
+import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
+
+// macOS 26 (Tahoe) + Electron 39 上,Chromium 的输入法状态机会与 mac IME 频繁
+// 不同步,blink.mojom.WidgetHost 每秒抛 100+ 条 `TextInputStateChanged rejected`
+// IPC 错误,顶死 mojo pipe 导致 GPU/Network helper 偶发崩重启 —— 表现为启动
+// 后输入卡顿、首帧渲染拖慢。下面三个 feature 都和"窗口/焦点状态被 macOS 误判
+// 为不可见"链路相关,关掉后错误流消失。必须在 app.whenReady() 之前调用,
+// commandLine switches 只在进程启动早期生效。
+// 如果将来 Electron 升级修了上游问题(跟踪关键字
+// "MacWebContentsOcclusion + TextInputState")可以拆掉这三行。
+app.commandLine.appendSwitch(
+  'disable-features',
+  'CalculateNativeWinOcclusion,MacWebContentsOcclusion'
+)
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 let mainWindow: BrowserWindow | null = null
 
@@ -151,6 +166,12 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media')
   })
+
+  // 用上次扫描的 IDE 列表填充 main 的内存 cache,让首个 IdeLauncher mount 时
+  // ide-list IPC 直接返回缓存,不必等本次完整扫描(mac 上 system_profiler 首次
+  // 10+ 秒,会占满 libuv 线程池让其它 execFile 排队 —— 这是启动卡顿的主要来源)。
+  // 必须在注册 `ide-list` ipcMain.handle 之前调用。
+  hydrateIdeCache(readSettings().cachedIdes)
 
   // ----- IPC handlers ------------------------------------------------------
   //
@@ -375,10 +396,9 @@ app.whenReady().then(() => {
   })
 
   createWindow()
-  // IDE 检测要 ~300 ms（Windows 注册表）/ 1-2 s（macOS system_profiler）。
-  // 在窗口已经显示后异步预扫,首次点击 IDE 按钮时就是缓存命中。失败也无所谓 ——
-  // detectIdes(true) 会按需重试。
-  prewarmIdes()
+  // 不再启动期自动 detectIdes —— hydrateIdeCache 已经让 UI 立即可用,真正的扫描
+  // 推迟到 cache miss(首次启动无 settings.cachedIdes)或用户点"重新检测"时。
+  // mac 上 system_profiler 一次扫 10+ 秒,启动期不该跟 PTY/git 抢线程池。
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

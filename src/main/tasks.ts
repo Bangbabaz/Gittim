@@ -49,6 +49,8 @@ function genId(): string {
 
 function defaultShell(): string {
   if (isWindows) return process.env.COMSPEC || 'cmd.exe'
+  // mac 默认 zsh,linux 仍 bash —— 见 shell.ts defaultShell 的同步注释。
+  if (process.platform === 'darwin') return process.env.SHELL || '/bin/zsh'
   return process.env.SHELL || '/bin/bash'
 }
 

@@ -197,6 +197,12 @@ export interface Settings {
   theme?: ThemePref
   /** 主工具栏 "在 IDE 中打开" 上次选中的 IDE id。 */
   defaultIde?: string
+  /**
+   * 上一次 detectIdes 的结果(含 iconDataUrl)。启动期 hydrate 进 main 的 cache,
+   * 让 IdeLauncher 第一帧就能拿到 IDE 列表 + 真实图标,不需要等异步扫描。
+   * 用户点"重新检测"或第一次 dev 启动时由 detectIdes 完整重扫并覆盖。
+   */
+  cachedIdes?: IdeInfo[]
   /** 非默认快捷键绑定,key = ShortcutAction。 */
   shortcutOverrides?: Record<string, string>
   /** STT 识别语言,默认 'zh'。可选 'zh' | 'en' | 'auto'。 */
