@@ -67,6 +67,8 @@ const api = {
     ipcRenderer.invoke('git-log', cwd, opts) as Promise<CommitInfo[]>,
   gitCommitDetail: (cwd: string, hash: string) =>
     ipcRenderer.invoke('git-commit-detail', cwd, hash) as Promise<CommitDetail | null>,
+  gitCommitBranches: (cwd: string, hashes: string[]) =>
+    ipcRenderer.invoke('git-commit-branches', cwd, hashes) as Promise<Record<string, string[]>>,
   gitMerge: (cwd: string, ref: string) =>
     ipcRenderer.invoke('git-merge', cwd, ref) as Promise<GitResult>,
   gitRebase: (cwd: string, ref: string) =>

@@ -214,6 +214,9 @@ async function loadInitial(): Promise<void> {
       selectedHash.value = list[0].hash
       loadDetail(list[0].hash)
     }
+    // 不 await:branches 信息独立于主列表渲染,异步注入避免 ~0.5-1s 的 rev-list
+    // 卡住 commits 显示。
+    void loadBranchesForCommits(list.map((c) => c.hash), myGen)
   } catch {
     if (myGen === listGen) commits.value = []
   } finally {
@@ -224,6 +227,7 @@ async function loadInitial(): Promise<void> {
 async function loadMore(): Promise<void> {
   if (!props.cwd || !hasMore.value || loadingMore.value) return
   loadingMore.value = true
+  const myGen = listGen
   try {
     const list = await window.api.gitLog(props.cwd, {
       skip: commits.value.length,
@@ -232,10 +236,31 @@ async function loadMore(): Promise<void> {
       grep: grepDebounced.value || undefined,
       author: authorDebounced.value || undefined
     })
+    if (myGen !== listGen) return
     commits.value = [...commits.value, ...list]
     if (list.length < PAGE) hasMore.value = false
+    void loadBranchesForCommits(list.map((c) => c.hash), myGen)
   } finally {
     loadingMore.value = false
+  }
+}
+
+/**
+ * 异步算这一批 commits 各自被哪些分支包含,合并回 commits.value。listGen 比对
+ * 保护:用户切换 cwd / branch filter / grep 时 generation 已经++,老调用回来
+ * 不能污染新列表。失败静默 —— commits 主功能不依赖 branches。
+ */
+async function loadBranchesForCommits(hashes: string[], myGen: number): Promise<void> {
+  if (!hashes.length) return
+  try {
+    const map = await window.api.gitCommitBranches(props.cwd, hashes)
+    if (myGen !== listGen) return
+    const toMerge = new Set(hashes)
+    commits.value = commits.value.map((c) =>
+      toMerge.has(c.hash) ? { ...c, branches: map[c.hash] || [] } : c
+    )
+  } catch {
+    // 静默 —— 主功能不受影响
   }
 }
 
@@ -406,6 +431,29 @@ function formatFullDate(iso: string): string {
 
 type Decoration = { kind: 'head' | 'branch' | 'remote' | 'tag'; label: string }
 
+/**
+ * 把 commit.refs 里展示过的分支名归一成 Set,供 extraBranches 做差集 ——
+ * 'HEAD -> main' 拆出 'main';'tag: x'/'HEAD'/'origin/HEAD' 不算分支跳过。
+ * 这样"包含于"那一行不会和顶上 decoration 标签里已经亮的分支重复显示。
+ */
+function refsAsBranchSet(refs: string[]): Set<string> {
+  const set = new Set<string>()
+  for (const r of refs) {
+    if (r.startsWith('HEAD -> ')) set.add(r.slice('HEAD -> '.length))
+    else if (r.startsWith('tag: ')) continue
+    else if (r === 'HEAD') continue
+    else if (/\/HEAD$/.test(r)) continue
+    else set.add(r)
+  }
+  return set
+}
+
+function extraBranches(c: CommitInfo): string[] {
+  if (!c.branches?.length) return []
+  const ignore = refsAsBranchSet(c.refs)
+  return c.branches.filter((b) => !ignore.has(b))
+}
+
 function decorate(refs: string[]): Decoration[] {
   const out: Decoration[] = []
   for (const r of refs) {
@@ -521,44 +569,49 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
           >
             <!-- graph 单元:lane 圆点 + 上下连线。同行所有 SVG 宽度都用
                  graphWidth(max over rows),保证 commit 内容列对齐。 -->
-            <svg
+            <!-- 包一层 cell:cell 走 align-self: stretch 跟 row 等高,SVG 在
+                 cell 内 absolute 定位 + height:100% —— 这样 SVG 不撑高 row
+                 (absolute 脱离布局,SVG 没 viewBox 默认 height 150px 不会反过
+                 来把 row 拉高),圆点 cy=18 仍对齐 subject 行视觉中心,底段
+                 y2="100%" 拉到 row 底,与下一个 SVG 的顶段 y=0 无缝接续。 -->
+            <div
               v-if="graphRows[idx]"
-              class="gl-graph"
-              :width="graphWidth"
-              :height="graphHeight"
-              :viewBox="`0 0 ${graphWidth} ${graphHeight}`"
+              class="gl-graph-cell"
+              :style="{ width: graphWidth + 'px' }"
             >
-              <line
-                v-for="(s, si) in graphRows[idx].topSegments"
-                :key="`t${si}`"
-                :x1="laneCenterX(s.fromLane)"
-                :y1="0"
-                :x2="laneCenterX(s.toLane)"
-                :y2="graphHeight / 2"
-                :stroke="s.color"
-                stroke-width="1.5"
-              />
-              <line
-                v-for="(s, si) in graphRows[idx].bottomSegments"
-                :key="`b${si}`"
-                :x1="laneCenterX(s.fromLane)"
-                :y1="graphHeight / 2"
-                :x2="laneCenterX(s.toLane)"
-                :y2="graphHeight"
-                :stroke="s.color"
-                stroke-width="1.5"
-              />
-              <!-- merge commit:空心圆 + 加粗描边表达"合并节点";普通 commit
-                   实心圆 —— 一眼区分 merge / 普通。 -->
-              <circle
-                :cx="laneCenterX(graphRows[idx].ownLane)"
-                :cy="graphHeight / 2"
-                :r="GRAPH.dotRadius"
-                :fill="graphRows[idx].isMerge ? 'var(--el-bg-color)' : graphRows[idx].dotColor"
-                :stroke="graphRows[idx].dotColor"
-                :stroke-width="graphRows[idx].isMerge ? 2 : 1"
-              />
-            </svg>
+              <svg class="gl-graph" :width="graphWidth" height="100%">
+                <line
+                  v-for="(s, si) in graphRows[idx].topSegments"
+                  :key="`t${si}`"
+                  :x1="laneCenterX(s.fromLane)"
+                  :y1="0"
+                  :x2="laneCenterX(s.toLane)"
+                  :y2="graphHeight / 2"
+                  :stroke="s.color"
+                  stroke-width="1.5"
+                />
+                <line
+                  v-for="(s, si) in graphRows[idx].bottomSegments"
+                  :key="`b${si}`"
+                  :x1="laneCenterX(s.fromLane)"
+                  :y1="graphHeight / 2"
+                  :x2="laneCenterX(s.toLane)"
+                  y2="100%"
+                  :stroke="s.color"
+                  stroke-width="1.5"
+                />
+                <!-- merge commit:空心圆 + 加粗描边表达"合并节点";普通 commit
+                     实心圆 —— 一眼区分 merge / 普通。 -->
+                <circle
+                  :cx="laneCenterX(graphRows[idx].ownLane)"
+                  :cy="graphHeight / 2"
+                  :r="GRAPH.dotRadius"
+                  :fill="graphRows[idx].isMerge ? 'var(--el-bg-color)' : graphRows[idx].dotColor"
+                  :stroke="graphRows[idx].dotColor"
+                  :stroke-width="graphRows[idx].isMerge ? 2 : 1"
+                />
+              </svg>
+            </div>
             <div class="gl-row-body">
               <div class="gl-row-top">
                 <span class="gl-subject" :title="c.subject">{{ c.subject }}</span>
@@ -576,6 +629,16 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
                   :class="`gl-ref-${d.kind}`"
                   :title="d.label"
                   >{{ d.label }}</span
+                >
+              </div>
+              <div v-if="extraBranches(c).length" class="gl-row-branches">
+                <span class="gl-branches-label">包含于</span>
+                <span
+                  v-for="b in extraBranches(c)"
+                  :key="b"
+                  class="gl-ref gl-ref-contained"
+                  :title="b"
+                  >{{ b }}</span
                 >
               </div>
             </div>
@@ -780,14 +843,22 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   text-align: left;
 }
 
-// graph SVG 紧贴行左边缘,与上一行的 SVG 自然连接成连续 lane 线。
-// align-self: flex-start —— SVG 高度固定 36px(= GRAPH.rowHeight)对齐 row 顶部,
-// 圆点 cy=18 正好落在 subject 行中心;commit 有 refs 时 row 扩高,SVG 不跟着拉伸,
-// 避免圆点被拉成椭圆 / 跳出 subject 行视觉中线。
-.gl-graph {
+// graph cell 走 align-self: stretch 跟 row 等高;SVG 绝对定位 + height 100%
+// 跟 cell 等高 —— 不撑高 row(否则 SVG 没 viewBox 时浏览器会用 default 150px
+// 内 height 解析,反过来把整行拉到 150px)。overflow: visible 防 1.5 stroke
+// 在 SVG 边界被裁。
+.gl-graph-cell {
   flex-shrink: 0;
+  align-self: stretch;
+  position: relative;
+}
+
+.gl-graph {
   display: block;
-  align-self: flex-start;
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
 }
 
 .gl-row-body {
@@ -796,7 +867,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 6px 0;
+  padding: 0;
 }
 
 .gl-row:hover {
@@ -851,6 +922,27 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 2px;
+}
+
+// "包含于"那一行 —— 列出 ref decoration 没出现的分支(本 commit 是哪些分支的祖先)。
+// 比 decoration 弱化:用 fill 灰底 + secondary text,不抢主行的视觉重点。
+.gl-row-branches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.gl-branches-label {
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+  letter-spacing: 0.04em;
+}
+
+.gl-ref-contained {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
 }
 
 .gl-ref {

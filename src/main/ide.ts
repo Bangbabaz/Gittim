@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join, dirname, basename } from 'path'
@@ -593,15 +593,28 @@ function resolveShimToExe(shim: string, candidateId: string): string | null {
  *   - '/opt/homebrew/bin/zed'  (brew shim — no bundle, returns undefined)
  */
 async function resolveAppBundle(command: string): Promise<string | undefined> {
-  const idx = command.indexOf('.app/')
-  if (idx >= 0) {
-    const bundle = command.slice(0, idx + 4)
-    return existsSync(bundle) ? bundle : undefined
+  const tryExtract = (p: string): string | undefined => {
+    const idx = p.indexOf('.app/')
+    if (idx >= 0) {
+      const bundle = p.slice(0, idx + 4)
+      return existsSync(bundle) ? bundle : undefined
+    }
+    if (/\.app\/?$/i.test(p)) {
+      const bundle = p.replace(/\/$/, '')
+      return existsSync(bundle) ? bundle : undefined
+    }
+    return undefined
   }
-  if (/\.app\/?$/i.test(command)) {
-    const bundle = command.replace(/\/$/, '')
-    return existsSync(bundle) ? bundle : undefined
-  }
+  const direct = tryExtract(command)
+  if (direct) return direct
+  // PATH 上拿到的常是 /usr/local/bin/<cli> 这种 symlink
+  // (VSCode/Cursor/Trae/Windsurf/CodeFuse 的 "Install <name> command in PATH"、
+  // JetBrains Toolbox 都装在这里),原路径里没有 '.app/' 子串。跟过 realpath
+  // 之后才能落进真正的 bundle 内部,再匹配出 bundle 根。
+  try {
+    const real = realpathSync(command)
+    if (real !== command) return tryExtract(real)
+  } catch {}
   return undefined
 }
 
@@ -621,28 +634,25 @@ async function resolveAppBundle(command: string): Promise<string | undefined> {
  * Both tools ship with every macOS. Each invocation is a fresh process so
  * failures stay isolated to the IDE that triggered them.
  */
-async function extractIconMac(command: string): Promise<string | undefined> {
-  const bundle = await resolveAppBundle(command)
+async function extractIconMac(command: string, ideId?: string): Promise<string | undefined> {
+  let bundle = await resolveAppBundle(command)
+  // 即便走了 realpath,有些 fork 仍可能落不到标准 bundle(自定义 wrapper / 非
+  // 标准启动器布局)。最后兜底:用候选定义里的 macAppNames 在 macAppsCache 里
+  // substring 匹配 _name,拿到的 path 就是 system_profiler 报告的 bundle 路径。
+  if (!bundle && ideId) {
+    const c = candidates().find((cand) => cand.id === ideId)
+    if (c?.macAppNames?.length && macAppsCache) {
+      const hit = macAppsCache.find((app) => {
+        const name = app._name || ''
+        return c.macAppNames!.some((k) => name.includes(k))
+      })
+      if (hit?.path && existsSync(hit.path)) bundle = hit.path
+    }
+  }
   if (!bundle) return undefined
 
-  let iconName: string
-  try {
-    const { stdout } = await execFileP(
-      'defaults',
-      ['read', join(bundle, 'Contents/Info'), 'CFBundleIconFile'],
-      { timeout: 2000 }
-    )
-    // `defaults` wraps values containing spaces in double quotes; strip them.
-    iconName = stdout.trim().replace(/^"|"$/g, '')
-  } catch {
-    return undefined
-  }
-  if (!iconName) return undefined
-  // CFBundleIconFile sometimes includes the extension ('Code.icns'),
-  // sometimes not ('idea'). Normalise.
-  if (!/\.icns$/i.test(iconName)) iconName += '.icns'
-  const icnsPath = join(bundle, 'Contents/Resources', iconName)
-  if (!existsSync(icnsPath)) return undefined
+  const icnsPath = await resolveBundleIcns(bundle)
+  if (!icnsPath) return undefined
 
   // mkdtemp + rm rather than a static name so parallel detect calls (the
   // Promise.all in detectIdes) don't clobber each other.
@@ -659,6 +669,52 @@ async function extractIconMac(command: string): Promise<string | undefined> {
   } finally {
     // Best-effort cleanup — leftover tmp dirs are reaped by the OS anyway.
     rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/**
+ * 解出 bundle 的主 .icns 路径,按优先级三步走:
+ *   1) Info.plist CFBundleIconFile —— 经典 key
+ *   2) Info.plist CFBundleIconName —— 走 Asset Catalog 的现代 Electron 应用
+ *      (蚂蚁 CodeFuse 等)只有这个 key,defaults read CFBundleIconFile 直接报错
+ *   3) 扫 Contents/Resources/*.icns 取文件最大者 —— 主图标通常远大于文档类型图标
+ */
+async function resolveBundleIcns(bundle: string): Promise<string | undefined> {
+  for (const key of ['CFBundleIconFile', 'CFBundleIconName']) {
+    try {
+      const { stdout } = await execFileP(
+        'defaults',
+        ['read', join(bundle, 'Contents/Info'), key],
+        { timeout: 2000 }
+      )
+      let iconName = stdout.trim().replace(/^"|"$/g, '')
+      if (!iconName) continue
+      if (!/\.icns$/i.test(iconName)) iconName += '.icns'
+      const p = join(bundle, 'Contents/Resources', iconName)
+      if (existsSync(p)) return p
+    } catch {
+      // 这个 key 不存在 / defaults 出错,继续试下一个
+    }
+  }
+  try {
+    const resDir = join(bundle, 'Contents/Resources')
+    if (!existsSync(resDir)) return undefined
+    const icns = readdirSync(resDir).filter((f) => /\.icns$/i.test(f))
+    if (!icns.length) return undefined
+    let best = icns[0]
+    let bestSize = -1
+    for (const f of icns) {
+      try {
+        const s = statSync(join(resDir, f))
+        if (s.size > bestSize) {
+          bestSize = s.size
+          best = f
+        }
+      } catch {}
+    }
+    return join(resDir, best)
+  } catch {
+    return undefined
   }
 }
 
@@ -682,7 +738,7 @@ async function extractIcon(command: string, id?: string): Promise<string | undef
     return undefined
   }
 
-  if (isMac) return extractIconMac(command)
+  if (isMac) return extractIconMac(command, id)
 
   try {
     const target = isWindows ? exeForShim(command) : command
@@ -810,9 +866,16 @@ async function runDetect(): Promise<IdeInfo[]> {
 
   // Extract icons in parallel — getFileIcon is async per-target and we don't
   // want N serial round-trips to the OS shell.
+  //
+  // 重新检测时上一轮已经成功提取的图标可能因瞬时失败(sips 偶发超时、
+  // macAppsCache 刚 reset 还没回填、Asset Catalog 巨大 bundle 慢读)被无脑覆盖
+  // 成 undefined。snapshot 上一轮的 iconDataUrl,只在本轮真的拿到新图标时才更新,
+  // 失败时 fallback 到旧值 —— 只有从未成功过的 ide 才会接受 undefined。
+  const prevIcons = new Map((cache || []).map((i) => [i.id, i.iconDataUrl]))
   await Promise.all(
     found.map(async (ide) => {
-      ide.iconDataUrl = await extractIcon(ide.command, ide.id)
+      const fresh = await extractIcon(ide.command, ide.id)
+      ide.iconDataUrl = fresh || prevIcons.get(ide.id)
     })
   )
 

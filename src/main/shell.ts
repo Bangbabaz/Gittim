@@ -3,7 +3,7 @@ import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
-import { readFile } from 'fs/promises'
+import { readFile, rm } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { shellIntegration } from './shell-integration'
 import { killProcessTree } from './proc'
@@ -591,14 +591,106 @@ export async function gitRemoveWorktree(
   force?: boolean
 ): Promise<GitResult> {
   try {
-    const args = ['worktree', 'remove']
-    if (force) args.push('--force')
-    args.push(worktreePath)
-    await execFileP('git', args, { ...GIT_OPTS, cwd, timeout: 15_000 })
+    if (force) {
+      // 强制路径:不走 `git worktree remove --force`,直接 fs.rm + prune。
+      //
+      // git 自带的 remove --force 在 Windows 上对 node_modules / IDE 索引锁定的
+      // 文件经常以 "failed to delete" 失败 —— git 内部用一次性删除,EBUSY 直接
+      // 抛错。fs.rm 的 maxRetries 在遇到 EBUSY/ENOTEMPTY/EPERM 时会按 retryDelay
+      // 重试,大多数瞬时锁(VSCode/Trae 索引器、防病毒扫描)在几百毫秒内会释放。
+      //
+      // 删完后跑 `git worktree prune` 扫 `.git/worktrees/*` 把孤立条目清掉,
+      // 状态等价于 `git worktree remove --force` 成功后的样子。
+      await rm(worktreePath, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 200
+      })
+      await execFileP('git', ['worktree', 'prune'], { ...GIT_OPTS, cwd, timeout: 10_000 })
+      return { success: true }
+    }
+    await execFileP('git', ['worktree', 'remove', worktreePath], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 15_000
+    })
     return { success: true }
   } catch (err) {
     return { success: false, error: cleanGitError(err) }
   }
+}
+
+/**
+ * 算每个 commit 被哪些分支包含。
+ *
+ * `git branch --contains <hash>` 对单 commit 高效,但 batch N 个 commit 要跑 N 次
+ * spawn(Windows cold-start 各 ~50ms 拉满)。这里换一个维度:对每个分支(M 通常远
+ * 比 N 小)跑一次 `git rev-list <tip>` 拿到该分支的全部祖先,然后用 Set 做反向
+ * 查表 —— O(M) spawn 而不是 O(N),且 M 个 rev-list 可以全并发。
+ *
+ * --max-count=10000 是为了避免在巨型仓库(linux/chromium 那种十万+ commit)单条
+ * rev-list 输出几 MB 拖慢 IPC;GitLogViewer 一次 PAGE=50 + 累加分页,5000 已是
+ * 用户能滚到的远古,10000 留 2x 余量 —— 真触到了限制(返回的 branches 没有覆
+ * 盖该 hash),前端 fallback 表现就是"包含于"那一行少了几个分支,不影响主功能。
+ */
+export async function gitCommitBranches(
+  cwd: string,
+  hashes: string[]
+): Promise<Record<string, string[]>> {
+  const result: Record<string, string[]> = {}
+  if (!hashes.length) return result
+  for (const h of hashes) result[h] = []
+
+  try {
+    // 1) 一次性拿所有本地 + 远程分支的 tip。tag/HEAD 排除 —— 用户语义是"包含
+    //    于哪些分支",ref decoration 已经显示 HEAD/tag。
+    const { stdout: refsOut } = await execFileP(
+      'git',
+      ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/', 'refs/remotes/'],
+      { ...GIT_OPTS, cwd, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 }
+    )
+    const branches: Array<{ name: string; tip: string }> = []
+    for (const line of refsOut.split(/\r?\n/)) {
+      if (!line) continue
+      const sp = line.lastIndexOf(' ')
+      if (sp <= 0) continue
+      let refname = line.slice(0, sp)
+      const tip = line.slice(sp + 1)
+      // refs/heads/foo → foo; refs/remotes/origin/HEAD → origin/HEAD(后面会过滤)
+      if (refname.startsWith('refs/heads/')) refname = refname.slice('refs/heads/'.length)
+      else if (refname.startsWith('refs/remotes/')) refname = refname.slice('refs/remotes/'.length)
+      // origin/HEAD 是个符号引用指向另一个分支的 tip,会跟那个分支重复 —— 跳过。
+      if (refname === 'HEAD' || /\/HEAD$/.test(refname)) continue
+      branches.push({ name: refname, tip })
+    }
+
+    const hashSet = new Set(hashes)
+
+    // 2) 每个分支并发跑 rev-list,把命中的 hash 累到 result。allSettled 让单个
+    //    rev-list 失败(比如 shallow clone 在某些分支报错)不影响其他分支。
+    await Promise.allSettled(
+      branches.map(async (b) => {
+        try {
+          const { stdout } = await execFileP(
+            'git',
+            ['rev-list', '--max-count=10000', b.tip],
+            { ...GIT_OPTS, cwd, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }
+          )
+          for (const h of stdout.split(/\r?\n/)) {
+            if (h && hashSet.has(h)) {
+              result[h].push(b.name)
+            }
+          }
+        } catch {
+          // 单个分支查询失败不影响其它 —— 静默继续
+        }
+      })
+    )
+  } catch {
+    // for-each-ref 失败时返回全空 map —— 前端会把"包含于"那一行藏起来,主功能正常
+  }
+  return result
 }
 
 /**

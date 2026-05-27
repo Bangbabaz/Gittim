@@ -12,14 +12,15 @@ import https from 'node:https'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = dirname(__dirname)
 
-const MODEL_NAME = 'ggml-tiny-q5_1.bin'
+const MODEL_NAME = 'ggml-small-q5_1.bin'
 const MODEL_DIR = join(ROOT, 'resources', 'models')
 const MODEL_PATH = join(MODEL_DIR, MODEL_NAME)
 // HuggingFace 上 whisper.cpp 官方仓库存放的所有 ggml 量化模型。small-q5_1 约 181MB。
 const MIRROR = process.env.HF_MIRROR || 'huggingface.co'
 const URL = `https://${MIRROR}/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}`
-// q5_1 tiny 模型的真实大小(~31MB),作为下载完整性校验的下界(允许 ±1MB 误差)。
-const MIN_SIZE = 30 * 1024 * 1024
+// q5_1 small 模型的真实大小(~181MB),作为下载完整性校验的下界 —— 留出一定余量
+// 防止偶发的"传完一半连接断"被当作"已存在"跳过(那种情况下文件大小通常 < 80MB)。
+const MIN_SIZE = 170 * 1024 * 1024
 
 if (existsSync(MODEL_PATH)) {
   const size = statSync(MODEL_PATH).size
@@ -33,7 +34,7 @@ if (existsSync(MODEL_PATH)) {
 
 mkdirSync(MODEL_DIR, { recursive: true })
 
-console.log(`[fetch-models] 下载 whisper 模型 ${MODEL_NAME}(~31MB,仅首次)`)
+console.log(`[fetch-models] 下载 whisper 模型 ${MODEL_NAME}(~181MB,仅首次)`)
 console.log(`  源: ${URL}`)
 console.log(`  目标: ${MODEL_PATH}`)
 if (MIRROR === 'huggingface.co') {

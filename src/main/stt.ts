@@ -18,7 +18,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
-const MODEL_FILE = 'ggml-tiny-q5_1.bin'
+const MODEL_FILE = 'ggml-small-q5_1.bin'
 
 // 在 dev 与打包下,模型文件落在不同位置 —— 解析时按优先级试。
 // dev: __dirname = D:\project\gittim\out\main → ../../resources/models/

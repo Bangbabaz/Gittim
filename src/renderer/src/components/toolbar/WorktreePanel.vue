@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderGit2, Trash2 } from 'lucide-vue-next'
+import { FolderGit2, Trash2, SplitSquareHorizontal } from 'lucide-vue-next'
 import type { BranchInfo, WorktreeInfo } from '@shared/types'
 
 // 工作树:新建对话框 + 管理对话框 + 两个工具栏按钮。
@@ -240,6 +240,15 @@ function openWtManage(): void {
   loadWorktrees()
 }
 
+// 在右侧新 pane 打开该工作树。复用 worktreeCreated 事件(命名沿用语义偏"创建"
+// 但本质上对接的就是"用 path 起新 pane"的管道,PaneToolbar → Terminal → App
+// 那条链路无需改动)。打开后关闭管理对话框,避免点了之后 dialog 还挡着新 pane。
+function openWorktree(w: WorktreeInfo): void {
+  if (!w.path) return
+  showWtManage.value = false
+  emit('worktreeCreated', w.path, 'right')
+}
+
 async function removeWorktree(w: WorktreeInfo): Promise<void> {
   if (w.isMain) return
   try {
@@ -257,7 +266,9 @@ async function removeWorktree(w: WorktreeInfo): Promise<void> {
     if (!r.success) {
       try {
         await ElMessageBox.confirm(
-          `删除失败:${r.error || '该工作树可能有未提交更改或已锁定'}\n是否强制删除?`,
+          `删除失败:${r.error || '该工作树可能有未提交更改或已锁定'}\n\n` +
+            `是否强制删除工作树文件夹?\n` +
+            `(直接删除磁盘上的文件夹 + git worktree prune,对 node_modules 等被文件锁占用的情况更鲁棒)`,
           '强制删除工作树',
           { confirmButtonText: '强制删除', cancelButtonText: '取消', type: 'warning' }
         )
@@ -417,6 +428,9 @@ defineExpose({ openWorktreeDialog })
             <span v-else-if="w.branch" class="wt-manage-branch">{{ w.branch }}</span>
           </div>
         </div>
+        <button class="wt-open-btn" title="在右侧新面板打开" @click="openWorktree(w)">
+          <SplitSquareHorizontal :size="14" />
+        </button>
         <button
           v-if="!w.isMain"
           class="wt-del-btn"
@@ -557,6 +571,24 @@ defineExpose({ openWorktreeDialog })
 .wt-manage-branch {
   font-size: 11px;
   color: var(--el-text-color-secondary);
+}
+
+.wt-open-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+  color: var(--el-color-primary);
+  border-radius: $radius;
+}
+
+.wt-open-btn:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 13%, transparent);
+  border-color: var(--el-color-primary);
 }
 
 .wt-del-btn {

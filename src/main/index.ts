@@ -30,6 +30,7 @@ import {
   gitShowFile,
   getCommitLog,
   getCommitDetail,
+  gitCommitBranches,
   gitMerge,
   gitRebase,
   gitPush,
@@ -160,11 +161,17 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // 允许 renderer 调用 getUserMedia 拿麦克风(语音输入功能)。Chromium 把
-  // 麦克风 + 摄像头都归为 'media' permission,这里只放行 media,其它请求一律拒绝。
-  // 不放行 mac 上会静默 deny,renderer 端 getUserMedia 报 NotAllowedError。
+  // 允许 renderer 调用:
+  //   - getUserMedia 拿麦克风(语音输入功能)。Chromium 把麦克风 + 摄像头都归
+  //     为 'media' permission,不放行 mac 上会静默 deny,getUserMedia 报
+  //     NotAllowedError。
+  //   - navigator.clipboard.readText / writeText(粘贴等系统快捷键)。Electron
+  //     默认拒绝 'clipboard-read' / 'clipboard-sanitized-write',readText() 抛错
+  //     被空 catch 吞掉,表现为 Cmd/Ctrl+V 无反应。
+  // 其它权限请求(notifications、geolocation 等)一律拒绝。
+  const allowedPermissions = new Set(['media', 'clipboard-read', 'clipboard-sanitized-write'])
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media')
+    callback(allowedPermissions.has(permission))
   })
 
   // 用上次扫描的 IDE 列表填充 main 的内存 cache,让首个 IdeLauncher mount 时
@@ -241,6 +248,9 @@ app.whenReady().then(() => {
   )
   ipcMain.handle('git-commit-detail', (_event, cwd: string, hash: string) =>
     getCommitDetail(cwd, hash)
+  )
+  ipcMain.handle('git-commit-branches', (_event, cwd: string, hashes: string[]) =>
+    gitCommitBranches(cwd, hashes)
   )
 
   // Branch operations (from the branch context menu)

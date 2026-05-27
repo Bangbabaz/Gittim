@@ -676,14 +676,26 @@ function startMidDrag(e: MouseEvent): void {
   color: var(--el-text-color-primary);
 }
 
-.dv-num.del,
+/* 仿 IDE gutter 风格:代码行用非常淡的色调(8%)只做提示,行号槽位用 20% 加深
+   作为左侧"色块"强调 —— 强对比 → 文字依然可读,但远没有原来 light-5 那种铺满
+   整行的强红绿那么刺眼。色源用 element-plus 主色变量 + color-mix 调透明度,
+   主题切换自动跟随,无需自己维护 dark/light 双套。 */
 .dv-code.del {
-  background: var(--el-color-danger-light-5);
+  background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
 }
 
-.dv-num.ins,
+.dv-num.del {
+  background: color-mix(in srgb, var(--el-color-danger) 20%, transparent);
+  color: color-mix(in srgb, var(--el-color-danger) 70%, var(--el-text-color-regular));
+}
+
 .dv-code.ins {
-  background: var(--el-color-success-light-5);
+  background: color-mix(in srgb, var(--el-color-success) 8%, transparent);
+}
+
+.dv-num.ins {
+  background: color-mix(in srgb, var(--el-color-success) 20%, transparent);
+  color: color-mix(in srgb, var(--el-color-success) 70%, var(--el-text-color-regular));
 }
 
 .dv-num.empty,
