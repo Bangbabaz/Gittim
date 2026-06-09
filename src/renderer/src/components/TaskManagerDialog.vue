@@ -309,6 +309,15 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped lang="scss">
+// 输入框、cwd 选择器和 saved 按钮都共享同一套外观元素 —— 透明背景、border、
+// radius 和 focus 描边 —— 抽公共 placeholder。
+%outlined-control {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
+  border-radius: $radius;
+  color: var(--el-text-color-regular);
+}
+
 .tm-body {
   display: flex;
   height: 420px;
@@ -325,7 +334,7 @@ async function save(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 12px 8px;
+  padding: 0 8px 12px;
 }
 
 .tm-list-title {
@@ -346,11 +355,11 @@ async function save(): Promise<void> {
   border: 1px solid var(--el-border-color);
   border-radius: $radius;
   color: var(--el-text-color-regular);
-}
 
-.tm-add:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
 }
 
 .tm-list-scroll {
@@ -370,16 +379,20 @@ async function save(): Promise<void> {
   align-items: center;
   gap: 6px;
   padding: 7px 8px;
-  border-radius: 5px;
+  border-radius: $radius-md;
   cursor: pointer;
-}
 
-.tm-item:hover {
-  background: var(--el-fill-color);
-}
+  &:hover {
+    background: var(--el-fill-color);
 
-.tm-item.active {
-  background: var(--el-color-primary-light-9);
+    .tm-del {
+      display: flex;
+    }
+  }
+
+  &.active {
+    background: var(--el-color-primary-light-9);
+  }
 }
 
 .tm-item-label {
@@ -408,26 +421,20 @@ async function save(): Promise<void> {
 }
 
 .tm-del {
+  @include btn-reset;
   display: none;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
-  background: transparent;
-  border: none;
   color: var(--el-text-color-secondary);
-  cursor: pointer;
   border-radius: $radius-sm;
   flex-shrink: 0;
-}
 
-.tm-item:hover .tm-del {
-  display: flex;
-}
-
-.tm-del:hover {
-  background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
-  color: var(--el-color-danger);
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
+    color: var(--el-color-danger);
+  }
 }
 
 .tm-resizer {
@@ -437,11 +444,11 @@ async function save(): Promise<void> {
   background: transparent;
   transition: background 0.12s;
   user-select: none;
-}
 
-.tm-resizer:hover,
-.tm-resizer:active {
-  background: var(--el-color-primary);
+  &:hover,
+  &:active {
+    background: var(--el-color-primary);
+  }
 }
 
 .tm-detail {
@@ -465,33 +472,28 @@ async function save(): Promise<void> {
 }
 
 .tm-input {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color);
-  border-radius: $radius;
+  @extend %outlined-control;
   color: var(--el-text-color-primary);
   font-size: 13px;
   padding: 7px 9px;
   outline: none;
   font-family: inherit;
-}
+  @include focus-accent;
 
-.tm-input.mono {
-  font-family: $font-mono;
-  font-size: 12px;
-}
-
-.tm-input:focus {
-  border-color: var(--el-color-primary);
+  &.mono {
+    @include mono-font;
+    font-size: 12px;
+  }
 }
 
 .tm-cwd-row {
   display: flex;
   gap: 6px;
-}
 
-.tm-cwd-row .tm-input {
-  flex: 1;
-  min-width: 0;
+  .tm-input {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .tm-browse {
@@ -503,11 +505,11 @@ async function save(): Promise<void> {
   border: 1px solid var(--el-border-color);
   border-radius: $radius;
   color: var(--el-text-color-regular);
-}
 
-.tm-browse:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
 }
 
 .tm-scripts {
@@ -530,10 +532,10 @@ async function save(): Promise<void> {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-}
 
-.tm-chip:hover {
-  background: color-mix(in srgb, var(--el-color-primary) 33%, transparent);
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-primary) 33%, transparent);
+  }
 }
 
 .tm-actions {
@@ -556,16 +558,16 @@ async function save(): Promise<void> {
   font-size: 13px;
   padding: 7px 20px;
   border-radius: $radius;
-}
 
-.tm-save:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
+  &:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
 
-.tm-save:disabled {
-  background: var(--el-disabled-bg-color);
-  color: var(--el-text-color-disabled);
-  cursor: not-allowed;
+  &:disabled {
+    background: var(--el-disabled-bg-color);
+    color: var(--el-text-color-disabled);
+    cursor: not-allowed;
+  }
 }
 
 .tm-placeholder {

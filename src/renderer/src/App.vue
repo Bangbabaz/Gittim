@@ -822,7 +822,7 @@ onUnmounted(() => {
 
 <style lang="scss">
 .title-bar {
-  height: 32px;
+  height: $titlebar-h;
   background: var(--el-bg-color);
   display: flex;
   align-items: center;
@@ -830,16 +830,16 @@ onUnmounted(() => {
   padding: 0 8px;
   -webkit-app-region: drag;
   user-select: none;
-}
 
-.title-bar.mac {
-  padding-left: 78px;
+  &.mac {
+    padding-left: 78px;
+  }
 }
 
 .title-bar-text {
   color: var(--el-text-color-secondary);
   font-size: 12px;
-  font-family: $font-ui;
+  @include ui-font;
 }
 
 .title-bar-right {
@@ -858,27 +858,25 @@ onUnmounted(() => {
 
 .tb-settings {
   color: var(--el-text-color-secondary);
-}
 
-.tb-settings:hover {
-  color: var(--el-text-color-primary);
+  &:hover {
+    color: var(--el-text-color-primary);
+  }
 }
 
 .tb-btn {
-  width: 34px;
-  height: 24px;
-  border: none;
-  background: none;
-  color: var(--el-text-color-regular);
-  cursor: pointer;
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-}
+  width: 34px;
+  height: 24px;
+  color: var(--el-text-color-regular);
+  border-radius: $radius;
 
-.tb-btn:hover {
-  background: var(--el-fill-color);
+  &:hover {
+    background: var(--el-fill-color);
+  }
 }
 
 .tb-close:hover {
@@ -891,17 +889,17 @@ onUnmounted(() => {
   width: 100vw;
   height: calc(100vh - #{$titlebar-h});
   background: var(--el-bg-color);
-}
 
-.layout-root.dragging {
-  user-select: none;
-  cursor: inherit;
-}
+  &.dragging {
+    user-select: none;
+    cursor: inherit;
+  }
 
-.layout-root.pane-dragging,
-.layout-root.pane-dragging * {
-  cursor: grabbing !important;
-  user-select: none;
+  &.pane-dragging,
+  &.pane-dragging * {
+    cursor: grabbing !important;
+    user-select: none;
+  }
 }
 
 .pane-drag-source {
@@ -917,7 +915,7 @@ onUnmounted(() => {
   z-index: 3;
   background: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
   border: 2px solid var(--el-color-primary);
-  border-radius: 4px;
+  border-radius: $radius;
   pointer-events: none;
   transition:
     left 0.08s,
@@ -932,41 +930,43 @@ onUnmounted(() => {
   box-sizing: border-box;
   border: 1px solid transparent;
   transition: border-color 0.08s;
-}
 
-.pane-slot.active {
-  border-color: var(--el-color-primary);
+  &.active {
+    border-color: var(--el-color-primary);
+  }
 }
 
 .divider {
   position: absolute;
   background: var(--el-border-color);
   z-index: 1;
-}
 
-.divider.row {
-  cursor: col-resize;
-}
+  &.row {
+    cursor: col-resize;
+  }
 
-.divider.column {
-  cursor: row-resize;
+  &.column {
+    cursor: row-resize;
+  }
 }
 
 /* --- Settings drawer ----------------------------------------------------- */
 
-.settings-drawer .el-drawer__body {
-  padding: 0;
-  background: var(--el-bg-color);
-}
+.settings-drawer {
+  &.el-drawer {
+    background: var(--el-bg-color);
+  }
 
-.settings-drawer.el-drawer {
-  background: var(--el-bg-color);
+  .el-drawer__body {
+    padding: 0;
+    background: var(--el-bg-color);
+  }
 }
 
 .settings-layout {
   display: flex;
   height: 100%;
-  font-family: $font-ui;
+  @include ui-font;
 }
 
 .settings-sidebar {
@@ -976,7 +976,7 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--el-bg-color-overlay);
   border-right: 1px solid var(--el-border-color);
-  padding: 14px 0 14px 0;
+  padding: 14px 0;
 }
 
 .settings-sidebar-title {
@@ -985,7 +985,7 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--el-text-color-secondary);
-  padding: 0 18px 12px 18px;
+  padding: 0 18px 12px;
 }
 
 .settings-nav {
@@ -996,27 +996,25 @@ onUnmounted(() => {
 }
 
 .settings-nav-item {
+  @include btn-reset;
   display: flex;
   align-items: center;
   gap: 10px;
   text-align: left;
   width: 100%;
   padding: 6px 12px;
-  background: transparent;
-  border: none;
   color: var(--el-text-color-regular);
   font-size: 13px;
-  cursor: pointer;
-  border-radius: 4px;
-}
+  border-radius: $radius;
 
-.settings-nav-item:hover {
-  background: var(--el-fill-color);
-}
+  &:hover {
+    background: var(--el-fill-color);
+  }
 
-.settings-nav-item.active {
-  background: var(--el-color-primary);
-  color: #fff;
+  &.active {
+    background: var(--el-color-primary);
+    color: #fff;
+  }
 }
 
 .settings-nav-icon {
@@ -1073,6 +1071,17 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 12px;
   min-height: 28px;
+
+  /* 设置面板下拉框:统一小号字体、紧凑间距 */
+  .el-select {
+    --el-font-size-base: 12px;
+
+    .el-input__inner {
+      font-size: 12px;
+      height: 26px;
+      line-height: 26px;
+    }
+  }
 }
 
 .settings-item-label {
@@ -1085,17 +1094,6 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: var(--el-text-color-secondary);
   line-height: 1.55;
-}
-
-/* 设置面板下拉框:统一小号字体、紧凑间距 */
-.settings-item-row .el-select {
-  --el-font-size-base: 12px;
-}
-
-.settings-item-row .el-select .el-input__inner {
-  font-size: 12px;
-  height: 26px;
-  line-height: 26px;
 }
 
 /* 下拉选项 popper(el-select 默认 append-to-body,必须全局命中) */
@@ -1111,33 +1109,30 @@ onUnmounted(() => {
   align-items: center;
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color);
-  border-radius: 4px;
+  border-radius: $radius;
   padding: 2px;
   gap: 2px;
 }
 
 .fs-btn {
-  width: 24px;
-  height: 22px;
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: none;
+  width: 24px;
+  height: 22px;
   color: var(--el-text-color-primary);
   font-size: 14px;
-  cursor: pointer;
-  border-radius: 3px;
-  padding: 0;
-}
+  border-radius: $radius-sm;
 
-.fs-btn:hover:not(:disabled) {
-  background: var(--el-fill-color);
-}
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color);
+  }
 
-.fs-btn:disabled {
-  color: var(--el-text-color-disabled);
-  cursor: not-allowed;
+  &:disabled {
+    color: var(--el-text-color-disabled);
+    cursor: not-allowed;
+  }
 }
 
 .fs-value {
@@ -1149,23 +1144,20 @@ onUnmounted(() => {
 }
 
 .fs-reset {
-  width: 22px;
-  height: 22px;
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: none;
+  width: 22px;
+  height: 22px;
   color: var(--el-text-color-secondary);
-  cursor: pointer;
-  border-radius: 3px;
-  padding: 0;
+  border-radius: $radius-sm;
   margin-left: 4px;
-}
 
-.fs-reset:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
 }
 
 .about-block {
@@ -1200,21 +1192,21 @@ onUnmounted(() => {
   align-items: baseline;
   font-size: 12px;
   margin: 0;
-}
 
-.about-row dt {
-  color: var(--el-text-color-primary);
-  font-weight: normal;
-}
+  dt {
+    color: var(--el-text-color-primary);
+    font-weight: normal;
+  }
 
-.about-row dd {
-  margin: 0;
-  color: var(--el-text-color-secondary);
-}
+  dd {
+    margin: 0;
+    color: var(--el-text-color-secondary);
+  }
 
-.about-row .mono {
-  font-family: $font-mono;
-  font-size: 11px;
+  .mono {
+    @include mono-font;
+    font-size: 11px;
+  }
 }
 
 /* Shortcut list */
@@ -1231,10 +1223,10 @@ onUnmounted(() => {
   gap: 12px;
   padding: 6px 0;
   min-height: 32px;
-}
 
-.shortcut-row + .shortcut-row {
-  border-top: 1px solid var(--el-border-color-light);
+  & + & {
+    border-top: 1px solid var(--el-border-color-light);
+  }
 }
 
 .shortcut-label {
@@ -1255,29 +1247,29 @@ onUnmounted(() => {
   gap: 2px;
   cursor: pointer;
   padding: 2px 3px;
-  border-radius: 4px;
+  border-radius: $radius;
   border: 1px solid transparent;
   transition:
     border-color 0.12s,
     background 0.12s;
-}
 
-.shortcut-kbd:hover {
-  border-color: var(--el-border-color);
-  background: var(--el-fill-color);
-}
+  &:hover {
+    border-color: var(--el-border-color);
+    background: var(--el-fill-color);
+  }
 
-.shortcut-kbd.modified .shortcut-key-chip {
-  border-color: var(--el-color-primary);
+  &.modified .shortcut-key-chip {
+    border-color: var(--el-color-primary);
+  }
 }
 
 .shortcut-key-chip {
   display: inline-block;
   font-size: 11px;
-  font-family: $font-mono;
+  @include mono-font;
   background: var(--el-fill-color);
   border: 1px solid var(--el-border-color);
-  border-radius: 3px;
+  border-radius: $radius-sm;
   padding: 1px 6px;
   color: var(--el-text-color-primary);
 }
@@ -1299,21 +1291,19 @@ onUnmounted(() => {
 }
 
 .shortcut-reset {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
-  background: transparent;
-  border: none;
   color: var(--el-text-color-secondary);
-  cursor: pointer;
-  border-radius: 3px;
+  border-radius: $radius-sm;
   flex-shrink: 0;
-}
 
-.shortcut-reset:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
 }
 </style>

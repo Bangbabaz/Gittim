@@ -530,22 +530,20 @@ function closeLogSearch(): void {
 }
 
 .hdr-btn {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 22px;
-  background: transparent;
-  border: none;
   color: var(--el-text-color-secondary);
-  cursor: pointer;
   border-radius: $radius;
   -webkit-app-region: no-drag;
-}
 
-.hdr-btn:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
 }
 
 .tasks-layout {
@@ -582,16 +580,21 @@ function closeLogSearch(): void {
   gap: 8px;
   // 多一点左 padding,让 row 内容相对分组头的 caret + folder icon 有视觉缩进
   padding: 8px 8px 8px 22px;
-  border-radius: 5px;
+  border-radius: $radius-md;
   cursor: pointer;
-}
 
-.task-row:hover {
-  background: var(--el-fill-color);
-}
+  &:hover {
+    background: var(--el-fill-color);
+  }
 
-.task-row.active {
-  background: var(--el-color-primary-light-9);
+  &.active {
+    background: var(--el-color-primary-light-9);
+  }
+
+  &:hover .task-ops,
+  &.active .task-ops {
+    opacity: 1;
+  }
 }
 
 .status-dot {
@@ -600,19 +603,19 @@ function closeLogSearch(): void {
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--el-text-color-placeholder);
-}
 
-.status-dot.running {
-  background: var(--el-color-success);
-  box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
-}
+  &.running {
+    background: var(--el-color-success);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
+  }
 
-.status-dot.failed {
-  background: var(--el-color-danger);
-}
+  &.failed {
+    background: var(--el-color-danger);
+  }
 
-.status-dot.exited {
-  background: var(--el-text-color-placeholder);
+  &.exited {
+    background: var(--el-text-color-placeholder);
+  }
 }
 
 .task-meta {
@@ -630,7 +633,7 @@ function closeLogSearch(): void {
   font-size: 11px;
   color: var(--el-text-color-secondary);
   @include ellipsis;
-  font-family: $font-mono;
+  @include mono-font;
 }
 
 /* 分组头:可点击折叠/展开。caret + folder icon + 尾段文件夹名 + 数量。
@@ -645,14 +648,14 @@ function closeLogSearch(): void {
   user-select: none;
   color: var(--el-text-color-secondary);
   font-size: 11px;
-}
 
-.task-group-head:first-child {
-  margin-top: 0;
-}
+  &:first-child {
+    margin-top: 0;
+  }
 
-.task-group-head:hover {
-  color: var(--el-text-color-primary);
+  &:hover {
+    color: var(--el-text-color-primary);
+  }
 }
 
 .task-group-caret,
@@ -663,7 +666,7 @@ function closeLogSearch(): void {
 .task-group-name {
   flex: 1;
   min-width: 0;
-  font-family: $font-mono;
+  @include mono-font;
   @include ellipsis;
 }
 
@@ -677,77 +680,65 @@ function closeLogSearch(): void {
   gap: 4px;
   opacity: 0;
   transition: opacity 0.1s;
-}
 
-.task-row:hover .task-ops,
-.task-row.active .task-ops {
-  opacity: 1;
+  /* Per-row command buttons: neutral outlined default (edit), with semantic
+     variants (run/stop/danger) below overriding to filled looks. */
+  .op-btn {
+    @include neutral-outlined-btn;
+
+    &:hover {
+      color: var(--el-text-color-primary);
+    }
+
+    &.run,
+    &.stop,
+    &.danger {
+      border: none;
+      color: #fff;
+    }
+
+    /* Base semantic colour (not light-3) so the white icon stays readable in
+       the light theme — light-3 would be a pale fill with ~1.6:1 contrast. */
+    &.run {
+      background: var(--el-color-success);
+
+      &:hover {
+        background: var(--el-color-success-light-3);
+      }
+    }
+
+    &.stop,
+    &.danger {
+      background: var(--el-color-danger);
+
+      &:hover {
+        background: var(--el-color-danger-light-3);
+      }
+    }
+  }
 }
 
 .op-btn {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 22px;
   height: 22px;
   padding: 0 5px;
-  background: transparent;
-  border: none;
   color: var(--el-text-color-regular);
-  cursor: pointer;
   border-radius: $radius-sm;
   font-size: 11px;
-  font-family: inherit;
-}
 
-.op-btn:hover {
-  background: color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
-  color: var(--el-text-color-primary);
-}
+  &:hover {
+    background: color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+    color: var(--el-text-color-primary);
+  }
 
-.op-btn.danger:hover {
-  background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
-  color: var(--el-color-danger);
-}
-
-/* Per-row command buttons: neutral outlined default (edit), with the
-   semantic variants below overriding to filled run/stop/danger looks. */
-.task-ops .op-btn {
-  @include neutral-outlined-btn;
-}
-
-.task-ops .op-btn:hover {
-  color: var(--el-text-color-primary);
-}
-
-.task-ops .op-btn.run,
-.task-ops .op-btn.run:hover,
-.task-ops .op-btn.stop,
-.task-ops .op-btn.danger,
-.task-ops .op-btn.stop:hover,
-.task-ops .op-btn.danger:hover {
-  border: none;
-  color: #fff;
-}
-
-/* Base semantic colour (not light-3) so the white icon stays readable in
-   the light theme — light-3 would be a pale fill with ~1.6:1 contrast. */
-.task-ops .op-btn.run {
-  background: var(--el-color-success);
-}
-
-.task-ops .op-btn.run:hover {
-  background: var(--el-color-success-light-3);
-}
-
-.task-ops .op-btn.stop,
-.task-ops .op-btn.danger {
-  background: var(--el-color-danger);
-}
-
-.task-ops .op-btn.stop:hover,
-.task-ops .op-btn.danger:hover {
-  background: var(--el-color-danger-light-3);
+  &.danger:hover {
+    background: color-mix(in srgb, var(--el-color-danger) 27%, transparent);
+    color: var(--el-color-danger);
+  }
 }
 
 .tasks-log {
@@ -782,6 +773,16 @@ function closeLogSearch(): void {
   border-radius: $radius-sm;
   background: color-mix(in srgb, var(--el-text-color-placeholder) 20%, transparent);
   color: var(--el-text-color-secondary);
+
+  &.running {
+    background: color-mix(in srgb, var(--el-color-success) 13%, transparent);
+    color: var(--el-color-success);
+  }
+
+  &.failed {
+    background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
+    color: var(--el-color-danger);
+  }
 }
 
 .log-head-cwd {
@@ -792,7 +793,7 @@ function closeLogSearch(): void {
   min-width: 0;
   font-size: 11px;
   color: var(--el-text-color-placeholder);
-  font-family: $font-mono;
+  @include mono-font;
 }
 
 .log-head-cwd-icon {
@@ -814,16 +815,6 @@ function closeLogSearch(): void {
     direction: ltr;
     unicode-bidi: bidi-override;
   }
-}
-
-.log-head-status.running {
-  background: color-mix(in srgb, var(--el-color-success) 13%, transparent);
-  color: var(--el-color-success);
-}
-
-.log-head-status.failed {
-  background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
-  color: var(--el-color-danger);
 }
 
 .log-head-ops {

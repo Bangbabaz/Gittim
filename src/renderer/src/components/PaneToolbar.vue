@@ -170,16 +170,4 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
   </div>
 </template>
 
-<style scoped lang="scss">
-.pane-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  background: var(--el-fill-color-light);
-  border-bottom: 1px solid var(--el-border-color);
-  flex-shrink: 0;
-  user-select: none;
-}
-</style>
+<style scoped lang="scss" src="@renderer/assets/style/components/PaneToolbar.scss"></style>

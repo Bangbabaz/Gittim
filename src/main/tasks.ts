@@ -386,6 +386,40 @@ export async function removeTask(id: string): Promise<void> {
   broadcast('task-removed', { id })
 }
 
+/**
+ * 刪除所有 cwd 匹配指定路徑的任務。用於刪除工作樹時同步清理該目錄下的後台任務。
+ *
+ * 路徑規範化:統一用 `/`、去尾 `/`、Windows 忽略大小寫。
+ * 匹配規則:任務的 cwd 規範化後以目標路徑開頭(即任務在該目錄或其子目錄下)。
+ */
+function normPath(p: string): string {
+  let s = (p || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  if (isWindows) s = s.toLowerCase()
+  return s
+}
+
+export async function removeTasksByCwd(cwd: string): Promise<number> {
+  const target = normPath(cwd)
+  if (!target) return 0
+  const ids: string[] = []
+  for (const t of tasks.values()) {
+    const tc = normPath(t.cwd)
+    if (tc === target || tc.startsWith(target + '/')) {
+      ids.push(t.id)
+    }
+  }
+  if (!ids.length) return 0
+  // 先停掉所有正在運行的,再統一刪除。
+  const running = ids.map((id) => tasks.get(id)!).filter((t) => t.pty)
+  await Promise.all(running.map((t) => killTaskTree(t)))
+  for (const id of ids) {
+    tasks.delete(id)
+    broadcast('task-removed', { id })
+  }
+  persistDefs()
+  return ids.length
+}
+
 export function updateTask(
   id: string,
   patch: { name?: string; command?: string; cwd?: string }

@@ -79,48 +79,4 @@ async function openDiff(): Promise<void> {
   </el-dialog>
 </template>
 
-<style scoped lang="scss">
-.diff-stats {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 20px;
-  padding: 0 6px;
-  font-size: 11px;
-  line-height: 1;
-  font-family: $font-mono;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  border-radius: $radius-sm;
-}
-
-.diff-stats:hover {
-  border-color: var(--el-border-color);
-  background: var(--el-fill-color);
-}
-
-.diff-added {
-  color: var(--el-color-success);
-}
-
-.diff-deleted {
-  color: var(--el-color-danger);
-}
-
-.diff-state {
-  color: var(--el-text-color-placeholder);
-  font-size: 13px;
-  padding: 40px 4px;
-  text-align: center;
-}
-
-.diff-trunc {
-  font-size: 12px;
-  color: var(--el-color-warning);
-  background: color-mix(in srgb, var(--el-color-warning) 10%, transparent);
-  padding: 6px 10px;
-  margin: 8px 12px 0;
-  border-radius: $radius;
-}
-</style>
+<style scoped lang="scss" src="@renderer/assets/style/components/toolbar/DiffStatsButton.scss"></style>

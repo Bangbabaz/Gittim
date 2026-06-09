@@ -243,6 +243,17 @@ const copySelection = async (): Promise<void> => {
 
 const pasteFromClipboard = async (): Promise<void> => {
   try {
+    // 优先检查剪贴板中是否有图片。Electron 原生 clipboard API 可以直接读取
+    // NSPasteboard / CF_DIB 中的位图 —— navigator.clipboard.read() 只能拿文本。
+    const imgPath = await window.api.clipboardReadImage()
+    if (imgPath) {
+      terminal.paste(imgPath)
+      return
+    }
+  } catch {
+    // clipboard-read-image failed, fall through to text path
+  }
+  try {
     const text = await navigator.clipboard.readText()
     if (text) terminal.paste(text)
   } catch {
@@ -753,62 +764,4 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped lang="scss">
-.terminal-wrapper {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  background-color: var(--el-bg-color);
-  box-sizing: border-box;
-  position: relative;
-}
-
-/* Always-present grab strip at the very top of every pane (repo or not) so
-   the pane can be dragged onto another to re-split the layout. */
-.pane-drag-strip {
-  height: 7px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--el-fill-color-light);
-  cursor: grab;
-  -webkit-app-region: no-drag;
-}
-
-.pane-drag-strip:hover {
-  background: var(--el-fill-color);
-}
-
-.pane-drag-strip:active {
-  cursor: grabbing;
-}
-
-.pds-grip {
-  width: 26px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--el-border-color);
-  opacity: 0.5;
-  transition: opacity 0.1s;
-}
-
-.pane-drag-strip:hover .pds-grip {
-  opacity: 0.95;
-}
-
-.terminal-container {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-}
-
-.search-pos {
-  position: absolute;
-  top: $titlebar-h;
-  right: 12px;
-  z-index: 10;
-}
-</style>
+<style scoped lang="scss" src="@renderer/assets/style/components/Terminal.scss"></style>

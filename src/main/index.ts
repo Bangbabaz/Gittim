@@ -1,5 +1,8 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, screen, nativeTheme, session } from 'electron'
+import { app, shell, BrowserWindow, clipboard, dialog, ipcMain, screen, nativeTheme, session } from 'electron'
 import { join } from 'path'
+import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
+import { writeFile, mkdir } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
   startPty,
@@ -52,7 +55,8 @@ import {
   createTask,
   writeTask,
   resizeTask,
-  killAllTasks
+  killAllTasks,
+  removeTasksByCwd
 } from './tasks'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
@@ -211,8 +215,13 @@ app.whenReady().then(() => {
   ipcMain.handle('git-worktrees', (_event, cwd: string) => getGitWorktrees(cwd))
   ipcMain.handle(
     'git-worktree-remove',
-    (_event, cwd: string, worktreePath: string, force?: boolean) => {
-      return gitRemoveWorktree(cwd, worktreePath, force)
+    async (_event, cwd: string, worktreePath: string, force?: boolean) => {
+      const result = await gitRemoveWorktree(cwd, worktreePath, force)
+      if (result.success) {
+        // 删除工作树后同步清理该目录下的后台任务
+        removeTasksByCwd(worktreePath).catch(() => {})
+      }
+      return result
     }
   )
   ipcMain.handle('git-diff', (_event, cwd: string) => getGitDiff(cwd))
@@ -264,6 +273,23 @@ app.whenReady().then(() => {
 
   ipcMain.handle('git-worktree-add', (_event, cwd: string, opts: WorktreeAddOpts) => {
     return gitAddWorktree(cwd, opts)
+  })
+
+  // 读取剪贴板中的图片。Electron 原生 clipboard.readImage() 可直接读取
+  // NSPasteboard (macOS) / CF_DIB (Windows) 中的位图,不受 navigator.clipboard
+  // 只能读文本的限制。图片落盘到临时目录,返回绝对路径。
+  ipcMain.handle('clipboard-read-image', async (): Promise<string | null> => {
+    const img = clipboard.readImage()
+    if (img.isEmpty()) return null
+    // macOS 截图进剪贴板是 PNG;Windows 截图一般是 BMP/PNG,统一写 PNG。
+    const png = img.toPNG()
+    if (!png || png.length === 0) return null
+    const dir = join(tmpdir(), 'gittim-paste')
+    await mkdir(dir, { recursive: true })
+    const name = `gittim-paste-${Date.now()}-${randomBytes(4).toString('hex')}.png`
+    const filePath = join(dir, name)
+    await writeFile(filePath, png)
+    return filePath
   })
 
   ipcMain.handle('select-directory', async (): Promise<string | null> => {

@@ -450,6 +450,21 @@ defineExpose({ openWorktreeDialog })
 </template>
 
 <style scoped lang="scss">
+// wt-open-btn 和 wt-del-btn 完全同形:28x28 + 1px 半透明 border + 同色 hover。
+// 差异只在 border 色 / text 色,用 mixin 把这段壳子拎出来。
+@mixin wt-action-btn($color) {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, #{$color} 40%, transparent);
+  color: $color;
+  border-radius: $radius;
+}
+
 .wt-btn {
   @include btn-reset;
   border: 1px solid var(--el-border-color);
@@ -464,16 +479,16 @@ defineExpose({ openWorktreeDialog })
   justify-content: center;
   margin-left: 2px;
   flex-shrink: 0;
-}
 
-.wt-btn:hover {
-  border-color: var(--el-text-color-secondary);
-  color: var(--el-color-primary);
-  background: var(--el-fill-color);
-}
+  &:hover {
+    border-color: var(--el-text-color-secondary);
+    color: var(--el-color-primary);
+    background: var(--el-fill-color);
+  }
 
-.wt-btn.icon {
-  font-size: 0;
+  &.icon {
+    font-size: 0;
+  }
 }
 
 .wt-form {
@@ -503,14 +518,14 @@ defineExpose({ openWorktreeDialog })
 
 .wt-placement {
   display: flex;
-}
 
-.wt-placement :deep(.el-radio-button) {
-  flex: 1;
-}
+  :deep(.el-radio-button) {
+    flex: 1;
+  }
 
-.wt-placement :deep(.el-radio-button__inner) {
-  width: 100%;
+  :deep(.el-radio-button__inner) {
+    width: 100%;
+  }
 }
 
 .wt-warn {
@@ -557,7 +572,7 @@ defineExpose({ openWorktreeDialog })
 .wt-manage-path {
   font-size: 12px;
   color: var(--el-text-color-primary);
-  font-family: $font-mono;
+  @include mono-font;
   @include ellipsis;
 }
 
@@ -574,44 +589,26 @@ defineExpose({ openWorktreeDialog })
 }
 
 .wt-open-btn {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
-  color: var(--el-color-primary);
-  border-radius: $radius;
-}
+  @include wt-action-btn(var(--el-color-primary));
 
-.wt-open-btn:hover {
-  background: color-mix(in srgb, var(--el-color-primary) 13%, transparent);
-  border-color: var(--el-color-primary);
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-primary) 13%, transparent);
+    border-color: var(--el-color-primary);
+  }
 }
 
 .wt-del-btn {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--el-color-danger) 40%, transparent);
-  color: var(--el-color-danger);
-  border-radius: $radius;
-}
+  @include wt-action-btn(var(--el-color-danger));
 
-.wt-del-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
-  border-color: var(--el-color-danger);
-}
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--el-color-danger) 13%, transparent);
+    border-color: var(--el-color-danger);
+  }
 
-.wt-del-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .wt-main-hint {

@@ -35,6 +35,10 @@ const api = {
   getPlatform: () => ipcRenderer.invoke('sys-platform') as Promise<NodeJS.Platform>,
   getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
 
+  /** 从剪贴板读取图片(PNG)。无图片时返回 null。 */
+  clipboardReadImage: () =>
+    ipcRenderer.invoke('clipboard-read-image') as Promise<string | null>,
+
   // ---- Git ---------------------------------------------------------------
   getGitInfo: (cwd: string) => ipcRenderer.invoke('git-info', cwd) as Promise<GitInfo>,
   getGitBranches: (cwd: string) => ipcRenderer.invoke('git-branches', cwd) as Promise<BranchInfo[]>,

@@ -462,7 +462,7 @@ function startMidDrag(e: MouseEvent): void {
   display: flex;
   height: 100%;
   min-height: 0;
-  font-family: $font-mono;
+  @include mono-font;
 }
 
 /* Left: changed-files list */
@@ -482,11 +482,11 @@ function startMidDrag(e: MouseEvent): void {
   background: transparent;
   transition: background 0.12s;
   user-select: none;
-}
 
-.dv-sidebar-splitter:hover,
-.dv-sidebar-splitter:active {
-  background: var(--el-color-primary);
+  &:hover,
+  &:active {
+    background: var(--el-color-primary);
+  }
 }
 
 .dv-sidebar-title {
@@ -499,15 +499,13 @@ function startMidDrag(e: MouseEvent): void {
 }
 
 .dv-file-item {
+  @include btn-reset;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
   padding: 5px 8px;
-  background: transparent;
-  border: none;
   border-radius: $radius;
-  cursor: pointer;
   text-align: left;
 
   &:hover {
@@ -553,29 +551,29 @@ function startMidDrag(e: MouseEvent): void {
   border-radius: $radius-sm;
   flex-shrink: 0;
   @include ui-font;
-}
 
-.st-new {
-  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
-  background: var(--el-color-success-light-8);
-}
+  &.st-new {
+    color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
+    background: var(--el-color-success-light-8);
+  }
 
-.st-del {
-  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
-  background: var(--el-color-danger-light-8);
-}
+  &.st-del {
+    color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
+    background: var(--el-color-danger-light-8);
+  }
 
-.st-ren {
-  color: var(--el-color-warning);
-  background: var(--el-color-warning-light-8);
-}
+  &.st-ren {
+    color: var(--el-color-warning);
+    background: var(--el-color-warning-light-8);
+  }
 
-/* "修改" is the most common diff status — keep it readable, not the muted
-   info grey. Use the primary brand colour so it visually outweighs the
-   placeholder/info-coloured tags. */
-.st-mod {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  /* "修改" is the most common diff status — keep it readable, not the muted
+     info grey. Use the primary brand colour so it visually outweighs the
+     placeholder/info-coloured tags. */
+  &.st-mod {
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+  }
 }
 
 .dv-file-name {
@@ -584,7 +582,7 @@ function startMidDrag(e: MouseEvent): void {
   font-size: 12px;
   color: var(--el-text-color-primary);
   @include ellipsis;
-  font-family: $font-mono;
+  @include mono-font;
 }
 
 .dv-counts {
@@ -631,22 +629,22 @@ function startMidDrag(e: MouseEvent): void {
   cursor: col-resize;
   z-index: 2;
   user-select: none;
-}
 
-.dv-mid-splitter::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 3px;
-  background: transparent;
-  transition: background 0.12s;
-}
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 3px;
+    background: transparent;
+    transition: background 0.12s;
+  }
 
-.dv-mid-splitter:hover::after,
-.dv-mid-splitter:active::after {
-  background: var(--el-color-primary);
+  &:hover::after,
+  &:active::after {
+    background: var(--el-color-primary);
+  }
 }
 
 .dv-hunk {
@@ -666,6 +664,21 @@ function startMidDrag(e: MouseEvent): void {
   border-right: 1px solid var(--el-border-color);
   user-select: none;
   white-space: nowrap;
+
+  /* 仿 IDE gutter 风格:行号槽位用 20% 加深作为左侧"色块"强调。 */
+  &.del {
+    background: color-mix(in srgb, var(--el-color-danger) 20%, transparent);
+    color: color-mix(in srgb, var(--el-color-danger) 70%, var(--el-text-color-regular));
+  }
+
+  &.ins {
+    background: color-mix(in srgb, var(--el-color-success) 20%, transparent);
+    color: color-mix(in srgb, var(--el-color-success) 70%, var(--el-text-color-regular));
+  }
+
+  &.empty {
+    background: var(--el-fill-color-light);
+  }
 }
 
 .dv-code {
@@ -674,33 +687,20 @@ function startMidDrag(e: MouseEvent): void {
   word-break: break-all;
   overflow-wrap: anywhere;
   color: var(--el-text-color-primary);
-}
 
-/* 仿 IDE gutter 风格:代码行用非常淡的色调(8%)只做提示,行号槽位用 20% 加深
-   作为左侧"色块"强调 —— 强对比 → 文字依然可读,但远没有原来 light-5 那种铺满
-   整行的强红绿那么刺眼。色源用 element-plus 主色变量 + color-mix 调透明度,
-   主题切换自动跟随,无需自己维护 dark/light 双套。 */
-.dv-code.del {
-  background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
-}
+  /* 代码行用非常淡的色调(8%)只做提示;主对比留给行号槽位.色源用 element-plus
+     主色变量 + color-mix 调透明度,主题切换自动跟随,无需维护 dark/light 双套. */
+  &.del {
+    background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
+  }
 
-.dv-num.del {
-  background: color-mix(in srgb, var(--el-color-danger) 20%, transparent);
-  color: color-mix(in srgb, var(--el-color-danger) 70%, var(--el-text-color-regular));
-}
+  &.ins {
+    background: color-mix(in srgb, var(--el-color-success) 8%, transparent);
+  }
 
-.dv-code.ins {
-  background: color-mix(in srgb, var(--el-color-success) 8%, transparent);
-}
-
-.dv-num.ins {
-  background: color-mix(in srgb, var(--el-color-success) 20%, transparent);
-  color: color-mix(in srgb, var(--el-color-success) 70%, var(--el-text-color-regular));
-}
-
-.dv-num.empty,
-.dv-code.empty {
-  background: var(--el-fill-color-light);
+  &.empty {
+    background: var(--el-fill-color-light);
+  }
 }
 
 .dv-binary {

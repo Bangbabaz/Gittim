@@ -750,13 +750,59 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 </template>
 
 <style scoped lang="scss">
+// 共用的可点击行外观（commit row / file item） —— 透明底 + 透明描边 + hover 填充 +
+// active 高亮。保持视觉一致，但每个列表的间距/字号/排版仍各自定义。
+%clickable-row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: var(--el-fill-color);
+  }
+
+  &.active {
+    background: var(--el-color-primary-light-9);
+    border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  }
+}
+
+// 等宽小代码块（hash / parent / inline code）。
+%mono-chip {
+  @include mono-font;
+  background: var(--el-fill-color);
+  padding: 1px 6px;
+  border-radius: $radius-sm;
+  font-size: 11px;
+}
+
+// splitter 公共部分：4px 命中区 + ::after 描出 1px 实线，hover 变蓝。
+%splitter-base {
+  flex-shrink: 0;
+  background: transparent;
+  position: relative;
+  transition: background 0.12s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    background: var(--el-border-color);
+  }
+
+  &:hover::after {
+    background: var(--el-color-primary);
+  }
+}
+
 .gl-root {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   padding: 14px 16px;
-  font-family: $font-ui;
+  @include ui-font;
   overflow: hidden;
 }
 
@@ -781,29 +827,28 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 }
 
 .gl-refresh {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  background: transparent;
   border: 1px solid var(--el-border-color);
   border-radius: $radius-sm;
   color: var(--el-text-color-regular);
-  cursor: pointer;
   margin-left: auto;
   flex-shrink: 0;
-}
 
-.gl-refresh:hover:not(:disabled) {
-  background: var(--el-fill-color);
-  color: var(--el-color-primary);
-  border-color: var(--el-text-color-secondary);
-}
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color);
+    color: var(--el-color-primary);
+    border-color: var(--el-text-color-secondary);
+  }
 
-.gl-refresh:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .gl-body {
@@ -831,16 +876,12 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 }
 
 .gl-row {
+  @extend %clickable-row;
   display: flex;
   align-items: stretch;
   gap: 6px;
   width: 100%;
   padding: 0 8px 0 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: $radius-sm;
-  cursor: pointer;
-  text-align: left;
 }
 
 // graph cell 走 align-self: stretch 跟 row 等高;SVG 绝对定位 + height 100%
@@ -870,15 +911,6 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   padding: 0;
 }
 
-.gl-row:hover {
-  background: var(--el-fill-color);
-}
-
-.gl-row.active {
-  background: var(--el-color-primary-light-9);
-  border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
-}
-
 .gl-row-top {
   display: flex;
   align-items: center;
@@ -903,7 +935,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 }
 
 .gl-hash {
-  font-family: $font-mono;
+  @include mono-font;
   color: var(--el-color-warning);
 }
 
@@ -940,43 +972,44 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   letter-spacing: 0.04em;
 }
 
-.gl-ref-contained {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-secondary);
-}
-
 .gl-ref {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: $radius-sm;
-  font-family: $font-mono;
+  @include mono-font;
   line-height: 1.4;
   @include ellipsis;
   max-width: 200px;
-}
 
-.gl-ref-head {
-  background: color-mix(in srgb, var(--el-color-warning) 22%, transparent);
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
+  &.gl-ref-head {
+    background: color-mix(in srgb, var(--el-color-warning) 22%, transparent);
+    color: var(--el-color-warning);
+    font-weight: 600;
+  }
 
-.gl-ref-branch {
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
-}
+  &.gl-ref-branch {
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+  }
 
-.gl-ref-remote {
-  background: color-mix(in srgb, var(--el-color-info) 18%, transparent);
-  color: var(--el-color-info);
-}
+  &.gl-ref-remote {
+    background: color-mix(in srgb, var(--el-color-info) 18%, transparent);
+    color: var(--el-color-info);
+  }
 
-.gl-ref-tag {
-  background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
-  color: var(--el-color-success);
+  &.gl-ref-tag {
+    background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
+    color: var(--el-color-success);
+  }
+
+  &.gl-ref-contained {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-secondary);
+  }
 }
 
 .gl-load-more {
+  @include btn-reset;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -988,58 +1021,38 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   border-radius: $radius-sm;
   color: var(--el-text-color-secondary);
   font-size: 12px;
-  cursor: pointer;
-}
 
-.gl-load-more:hover:not(:disabled) {
-  background: var(--el-fill-color-darker);
-  color: var(--el-color-primary);
-}
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color-darker);
+    color: var(--el-color-primary);
+  }
 
-.gl-load-more:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 /* Vertical splitter (between left list and right pane / between file list and diff). */
 .gl-splitter-h {
+  @extend %splitter-base;
   width: 4px;
-  flex-shrink: 0;
   cursor: col-resize;
-  background: transparent;
-  transition: background 0.12s;
-  position: relative;
-}
 
-.gl-splitter-h::after {
-  content: '';
-  position: absolute;
-  inset: 0 1px;
-  background: var(--el-border-color);
-}
-
-.gl-splitter-h:hover::after {
-  background: var(--el-color-primary);
+  &::after {
+    inset: 0 1px;
+  }
 }
 
 /* Horizontal splitter (between meta and files+diff). */
 .gl-splitter-v {
+  @extend %splitter-base;
   height: 4px;
-  flex-shrink: 0;
   cursor: row-resize;
-  background: transparent;
-  position: relative;
-}
 
-.gl-splitter-v::after {
-  content: '';
-  position: absolute;
-  inset: 1px 0;
-  background: var(--el-border-color);
-}
-
-.gl-splitter-v:hover::after {
-  background: var(--el-color-primary);
+  &::after {
+    inset: 1px 0;
+  }
 }
 
 .gl-right {
@@ -1100,14 +1113,10 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   font-size: 12px;
   color: var(--el-text-color-regular);
   flex-wrap: wrap;
-}
 
-.gl-detail-row code {
-  font-family: $font-mono;
-  background: var(--el-fill-color);
-  padding: 1px 6px;
-  border-radius: $radius-sm;
-  font-size: 11px;
+  code {
+    @extend %mono-chip;
+  }
 }
 
 .gl-detail-label {
@@ -1115,11 +1124,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 }
 
 .gl-parent {
-  font-family: $font-mono;
-  background: var(--el-fill-color);
-  padding: 1px 6px;
-  border-radius: $radius-sm;
-  font-size: 11px;
+  @extend %mono-chip;
 }
 
 .gl-detail-body {
@@ -1128,7 +1133,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   background: var(--el-fill-color-lighter);
   border-left: 3px solid var(--el-color-info);
   border-radius: $radius-sm;
-  font-family: $font-mono;
+  @include mono-font;
   font-size: 12px;
   color: var(--el-text-color-primary);
   white-space: pre-wrap;
@@ -1176,25 +1181,12 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
 }
 
 .gl-file-item {
+  @extend %clickable-row;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
   padding: 5px 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: $radius-sm;
-  cursor: pointer;
-  text-align: left;
-}
-
-.gl-file-item:hover {
-  background: var(--el-fill-color);
-}
-
-.gl-file-item.active {
-  background: var(--el-color-primary-light-9);
-  border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
 }
 
 .gl-file-badge {
@@ -1202,38 +1194,38 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   padding: 1px 6px;
   border-radius: $radius-sm;
   flex-shrink: 0;
-}
 
-.fs-new {
-  color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
-  background: var(--el-color-success-light-8);
-}
+  &.fs-new {
+    color: color-mix(in srgb, var(--el-color-success) 75%, var(--el-text-color-primary));
+    background: var(--el-color-success-light-8);
+  }
 
-.fs-deleted {
-  color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
-  background: var(--el-color-danger-light-8);
-}
+  &.fs-deleted {
+    color: color-mix(in srgb, var(--el-color-danger) 75%, var(--el-text-color-primary));
+    background: var(--el-color-danger-light-8);
+  }
 
-.fs-renamed {
-  color: var(--el-color-warning);
-  background: var(--el-color-warning-light-8);
-}
+  &.fs-renamed {
+    color: var(--el-color-warning);
+    background: var(--el-color-warning-light-8);
+  }
 
-.fs-modified {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
+  &.fs-modified {
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+  }
 
-.fs-binary {
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
+  &.fs-binary {
+    color: var(--el-text-color-secondary);
+    background: var(--el-fill-color);
+  }
 }
 
 .gl-file-name {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  font-family: $font-mono;
+  @include mono-font;
   color: var(--el-text-color-primary);
   @include ellipsis;
 }

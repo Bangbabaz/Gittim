@@ -615,6 +615,13 @@ export async function gitRemoveWorktree(
       cwd,
       timeout: 15_000
     })
+    // git worktree remove 成功後目錄通常已刪除,但在 Windows 上偶發文件鎖導致
+    // 目錄殘留(如防毒/索引器佔用);補一刀 rm 兜底,force 使其對不存在也無害。
+    try {
+      await rm(worktreePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } catch {
+      // 目錄已不存在或其他原因無法刪除,不影響主流程
+    }
     return { success: true }
   } catch (err) {
     return { success: false, error: cleanGitError(err) }
