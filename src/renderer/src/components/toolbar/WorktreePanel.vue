@@ -50,6 +50,7 @@ const wtNameEdited = ref(false)
 const wtLocation = ref('')
 const wtPlacement = ref<WorktreePlacement>('right')
 const wtSubmitting = ref(false)
+const wtCopyTasks = ref(true)
 const repoName = ref<string | null>(null)
 
 const folderName = computed(() => {
@@ -147,6 +148,7 @@ async function openWorktreeDialog(prefillFrom?: string): Promise<void> {
   wtNameEdited.value = false
   wtLocation.value = parentDir.value
   wtPlacement.value = 'right'
+  wtCopyTasks.value = true
   showWorktreeDialog.value = true
 
   if (props.cwd) {
@@ -208,6 +210,10 @@ async function handleCreateWorktree(): Promise<void> {
     if (result.success) {
       showWorktreeDialog.value = false
       if (result.warning) ElMessage.warning(result.warning)
+      // 同步复制当前目录下的后台任务到新工作树
+      if (wtCopyTasks.value && props.cwd) {
+        cloneTasksToWorktree(props.cwd, fullPath)
+      }
       emit('worktreeCreated', fullPath, wtPlacement.value)
     } else {
       ElMessage.error(result.error || '工作树创建失败')
@@ -216,6 +222,33 @@ async function handleCreateWorktree(): Promise<void> {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   } finally {
     wtSubmitting.value = false
+  }
+}
+
+// 将当前 cwd 下的所有后台任务复制到新工作树路径(cwd 替换)。
+// fire-and-forget:失败不阻塞工作树创建流程。
+function normPath(p: string): string {
+  return (p || '').replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+async function cloneTasksToWorktree(fromCwd: string, toPath: string): Promise<void> {
+  try {
+    const all = await window.api.taskList()
+    const target = normPath(fromCwd)
+    const matching = all.filter((t) => {
+      const tc = normPath(t.cwd)
+      return tc === target || tc.startsWith(target + '/')
+    })
+    if (!matching.length) return
+    // 并发创建,保留原名和命令,cwd 替换为新路径(子目录映射保留相对结构)
+    await Promise.allSettled(
+      matching.map((t) => {
+        const newCwd = normPath(t.cwd).replace(target, normPath(toPath))
+        return window.api.taskCreate({ name: t.name, command: t.command, cwd: newCwd })
+      })
+    )
+  } catch {
+    // 静默失败
   }
 }
 
@@ -401,6 +434,13 @@ defineExpose({ openWorktreeDialog })
           <el-radio-button label="left">左</el-radio-button>
           <el-radio-button label="right">右</el-radio-button>
         </el-radio-group>
+      </div>
+
+      <div class="wt-row">
+        <label class="wt-label" />
+        <el-checkbox v-model="wtCopyTasks" size="small" class="wt-field">
+          复制当前文件夹的后台任务
+        </el-checkbox>
       </div>
     </div>
 
