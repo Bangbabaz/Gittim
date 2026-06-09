@@ -272,3 +272,15 @@ export interface TaskDataPayload {
 export interface TaskIdPayload {
   id: string
 }
+
+// ---------------------------------------------------------------------------
+// Auto-update (electron-updater)
+// ---------------------------------------------------------------------------
+
+export type UpdateStatus =
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'not-available'; version: string }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }

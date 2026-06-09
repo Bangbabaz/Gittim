@@ -58,6 +58,7 @@ import {
   killAllTasks,
   removeTasksByCwd
 } from './tasks'
+import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import icon from '../../resources/icon.png?asset'
@@ -156,6 +157,10 @@ function createWindow(): void {
   })
 
   mainWindow = win
+
+  // 初始化自动更新。必须在 mainWindow 赋值后调用,updater 需要向
+  // renderer 发送状态事件。开发模式下自动跳过。
+  initAutoUpdater(win)
 }
 
 app.whenReady().then(() => {
@@ -399,6 +404,9 @@ app.whenReady().then(() => {
   ipcMain.handle('ide-list', (_event, force?: boolean) => detectIdes(!!force))
   ipcMain.handle('ide-open', (_event, ideId: string, cwd: string) => openIde(ideId, cwd))
   ipcMain.handle('open-folder', (_event, cwd: string) => shell.openPath(cwd).then(() => true))
+
+  ipcMain.handle('update-check', () => checkForUpdates())
+  ipcMain.on('update-install', () => installUpdate())
 
   // ----- Speech-to-Text ----------------------------------------------------
   // renderer 录完一段就发完整 PCM(Float32, 16kHz, mono)过来。IPC 走结构化克隆,

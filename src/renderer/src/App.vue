@@ -6,6 +6,7 @@ import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
+import type { UpdateStatus } from '@shared/types'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
 
 // App.vue 作为"屋顶":标题栏 + 设置抽屉 + 任务抽屉 / 管理对话框 + Layout 渲染。
@@ -64,6 +65,8 @@ const sttDeviceId = ref('')
 const voiceShortcut = ref('F2')
 const audioInputDevices = ref<MediaDeviceInfo[]>([])
 const recordingVoice = ref(false)
+const updateStatus = ref<UpdateStatus | null>(null)
+let unsubscribeUpdateStatus: (() => void) | undefined
 
 // 内部 binding 字符串统一用 'Ctrl' 表达"主修饰键",UI 显示按平台翻译。mac 上
 // 用 ⌘⇧⌥ 更符合习惯且更省横向空间。
@@ -278,6 +281,11 @@ const onScrollbackChange = (size: number | undefined): void => {
   window.api.settingsSet({ scrollback: clamped })
 }
 
+const installUpdate = (): void => {
+  updateStatus.value = null
+  window.api.updateInstall()
+}
+
 const onToggleAutoOpenTasks = (val: boolean): void => {
   autoOpenTasksOnRun.value = val
   window.api.settingsSet({ autoOpenTasksOnRun: val })
@@ -381,6 +389,19 @@ onMounted(async () => {
     }
   })
 
+  // 监听自动更新状态
+  unsubscribeUpdateStatus = window.api.onUpdateStatus((status) => {
+    updateStatus.value = status
+    // 下载完成 30 秒后自动收起提示，不打扰用户
+    if (status.state === 'downloaded') {
+      setTimeout(() => {
+        if (updateStatus.value?.state === 'downloaded') {
+          updateStatus.value = null
+        }
+      }, 30_000)
+    }
+  })
+
   window.addEventListener('beforeunload', flushSaveOnUnload)
 
   if (containerRef.value) {
@@ -399,6 +420,7 @@ onUnmounted(() => {
   flushSave()
   unsubscribeWinState?.()
   unsubscribeTaskStatus?.()
+  unsubscribeUpdateStatus?.()
   resizeObserver?.disconnect()
   window.removeEventListener('keydown', onRecordingKeydown, true)
   window.removeEventListener('keydown', onVoiceRecordingKeydown, true)
@@ -764,6 +786,30 @@ onUnmounted(() => {
     :scope-cwd="taskMgrScopeCwd"
     :new-draft="taskMgrNewDraft"
   />
+  <div v-if="updateStatus" class="update-banner" :class="'update-' + updateStatus.state">
+    <template v-if="updateStatus.state === 'checking'">
+      <span class="update-icon">⏳</span>
+      <span>正在检查更新…</span>
+    </template>
+    <template v-else-if="updateStatus.state === 'available'">
+      <span class="update-icon">📦</span>
+      <span>发现新版本 {{ updateStatus.version }},下载中…</span>
+    </template>
+    <template v-else-if="updateStatus.state === 'downloading'">
+      <span class="update-icon">⬇</span>
+      <span>下载中 {{ updateStatus.percent }}%</span>
+      <progress class="update-progress" :value="updateStatus.percent" max="100" />
+    </template>
+    <template v-else-if="updateStatus.state === 'downloaded'">
+      <span class="update-icon">✅</span>
+      <span>更新已就绪,重启以安装</span>
+      <button class="update-action-btn" @click="installUpdate">立即重启</button>
+    </template>
+    <template v-else-if="updateStatus.state === 'error'">
+      <span class="update-icon">⚠️</span>
+      <span>更新检查失败: {{ updateStatus.message }}</span>
+    </template>
+  </div>
   <div
     ref="containerRef"
     class="layout-root"
@@ -947,6 +993,69 @@ onUnmounted(() => {
 
   &.column {
     cursor: row-resize;
+  }
+}
+
+/* --- Update banner ------------------------------------------------------- */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--el-border-color);
+
+  &.update-checking,
+  &.update-not-available {
+    color: var(--el-text-color-secondary);
+    background: var(--el-fill-color);
+  }
+
+  &.update-available,
+  &.update-downloading {
+    color: var(--el-color-primary);
+    background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  }
+
+  &.update-downloaded {
+    color: var(--el-color-success);
+    background: color-mix(in srgb, var(--el-color-success) 8%, transparent);
+  }
+
+  &.update-error {
+    color: var(--el-color-warning);
+    background: color-mix(in srgb, var(--el-color-warning) 8%, transparent);
+  }
+}
+
+.update-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.update-progress {
+  width: 80px;
+  height: 4px;
+  accent-color: var(--el-color-primary);
+  border-radius: 2px;
+}
+
+.update-action-btn {
+  @include btn-reset;
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: $radius-sm;
+  color: #fff;
+  background: var(--el-color-success);
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.85;
   }
 }
 

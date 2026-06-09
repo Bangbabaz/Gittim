@@ -22,7 +22,8 @@ import type {
   SttResult,
   TaskDataPayload,
   TaskIdPayload,
-  IdeInfo
+  IdeInfo,
+  UpdateStatus
 } from '@shared/types'
 
 // API 暴露给 renderer 的桥接对象。每个方法对应 main 里的 ipcMain.handle / send。
@@ -182,7 +183,18 @@ const api = {
   ideOpen: (ideId: string, cwd: string) =>
     ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<GitResult>,
   openFolder: (cwd: string) => ipcRenderer.invoke('open-folder', cwd) as Promise<boolean>,
-  pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>
+  pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
+
+  // ---- Auto-update --------------------------------------------------------
+  /** 手动检查更新（启动时自动检查,此方法供 UI 按钮/菜单调用）。 */
+  updateCheck: () => ipcRenderer.invoke('update-check'),
+  /** 立即退出并安装已下载的更新。 */
+  updateInstall: () => ipcRenderer.send('update-install'),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => {
+    const listener = (_e: IpcRendererEvent, s: UpdateStatus): void => cb(s)
+    ipcRenderer.on('update-status', listener)
+    return () => ipcRenderer.removeListener('update-status', listener)
+  }
 }
 
 export type Api = typeof api
