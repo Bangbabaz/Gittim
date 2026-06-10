@@ -1,0 +1,10 @@
+/* shiki dual-theme：每个 token <span> inline style 里同时带
+     color:<dark-rgb>          ← defaultColor:'dark' 让 dark 主题颜色直接落到 inline color
+     --shiki-light:<light-rgb> ← light 主题颜色挂在 CSS 变量上
+
+   dark 主题（app 默认 + main.ts 里强制设的 data-theme='dark'）什么都不用做，
+   inline color 直接生效。light 主题时用 var(--shiki-light) 把 inline color 顶掉
+   —— inline style 优先级高于 class，所以这里必须 !important。 */
+[data-theme='light'] .dv-code span {
+  color: var(--shiki-light) !important;
+}

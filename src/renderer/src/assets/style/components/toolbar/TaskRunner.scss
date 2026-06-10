@@ -1,0 +1,91 @@
+.cmd-pick {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--el-border-color);
+  border-radius: $radius-sm;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  margin-left: 2px;
+  flex-shrink: 0;
+
+  &:hover {
+    border-color: var(--el-text-color-secondary);
+    background: var(--el-fill-color);
+  }
+}
+
+.cmd-pick-name {
+  flex: 1;
+  min-width: 0;
+  @include ellipsis;
+}
+
+.cmd-pick-caret {
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+
+  &.running {
+    background: var(--el-color-success);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--el-color-success) 53%, transparent);
+  }
+
+  &.failed {
+    background: var(--el-color-danger);
+  }
+
+  &.none {
+    background: transparent;
+    border: 1px solid var(--el-text-color-placeholder);
+  }
+}
+
+// run/stop 按钮:基础语义色(success / danger)做 fill,白色 icon。基础色而非
+// light-3 是为了 light 主题下也能保证 WCAG AA 对比度 —— light-3 在浅色背景上
+// 是几乎不可见的极淡填充。
+.run-btn {
+  @include btn-reset;
+  background: var(--el-color-success);
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: $radius-sm;
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--el-color-success-light-3);
+    color: #fff;
+  }
+
+  &.stop {
+    background: var(--el-color-danger);
+
+    &:hover {
+      background: var(--el-color-danger-light-3);
+    }
+  }
+
+  // view 按钮中性 —— 不是 run/stop 这种语义动作,跟随中性 outlined 风格,在浅色
+  // 主题下白色 icon 不可读时也能可见。
+  &.view {
+    @include neutral-outlined-btn;
+  }
+}

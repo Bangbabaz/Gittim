@@ -1,0 +1,61 @@
+// Branch context menu — teleport 到 body,scoped 拿不到。在 overlays 之外单独
+// 写一次:位置浮动,高 z-index 在 popper 上方。
+.branch-ctx-menu {
+  position: fixed;
+  z-index: 3500;
+  min-width: 260px;
+  max-width: 380px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: $radius;
+  padding: 4px;
+  box-shadow: var(--el-box-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  user-select: none;
+  @include ui-font;
+
+  .bm-item {
+    @include btn-reset;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    border-radius: $radius-sm;
+    color: var(--el-text-color-regular);
+    font-size: 12px;
+    text-align: left;
+    line-height: 1.4;
+
+    &:hover:not(:disabled) {
+      background: var(--el-color-primary);
+      color: #fff;
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &.danger {
+      color: var(--el-color-danger);
+
+      &:hover:not(:disabled) {
+        background: var(--el-color-danger);
+        color: #fff;
+      }
+    }
+
+    b {
+      font-weight: 600;
+    }
+  }
+
+  .bm-sep {
+    height: 1px;
+    background: var(--el-border-color);
+    margin: 4px 0;
+  }
+}

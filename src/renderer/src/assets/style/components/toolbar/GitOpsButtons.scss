@@ -1,0 +1,53 @@
+.wt-btn {
+  @include btn-reset;
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
+  width: 20px;
+  height: 20px;
+  border-radius: $radius-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  flex-shrink: 0;
+
+  &:hover {
+    border-color: var(--el-text-color-secondary);
+    color: var(--el-color-primary);
+    background: var(--el-fill-color);
+  }
+
+  &.icon {
+    font-size: 0;
+  }
+}
+
+// 进行中合并/变基/冲突 chip,用 danger token 在工具栏中突出 —— 只在有冲突时
+// 渲染,所以颜色明确表达"需要注意"。
+.merge-badge {
+  @include btn-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  background: color-mix(in srgb, var(--el-color-danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-danger) 45%, transparent);
+  color: var(--el-color-danger);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  @include ui-font;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 2px;
+
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-danger) 22%, transparent);
+  }
+}
+
+.merge-badge-count {
+  @include mono-font;
+}
+
+// diff-stats 样式已迁到 DiffStatsButton。
