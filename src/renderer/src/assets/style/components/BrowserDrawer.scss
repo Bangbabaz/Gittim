@@ -1,0 +1,96 @@
+// 浏览器抽屉容器 —— 全 flex 列布局。
+// 导航栏复用 PaneToolbar 的视觉变量，webview 填充剩余空间。
+// 作为独立的 SCSS 文件被 BrowserDrawer.vue 引用。
+
+.browser-drawer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 60px; // 低于此高度不如关闭抽屉
+  border-top: 1px solid var(--el-border-color);
+  background: var(--el-bg-color);
+}
+
+.browser-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px;
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.browser-nav-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: $radius-sm;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+}
+
+.browser-nav-url {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: $radius-sm;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-regular);
+  font-size: 11px;
+  font-family: $font-mono;
+  line-height: 22px;
+  @include ellipsis;
+
+  &:focus {
+    border-color: var(--el-color-primary);
+    outline: none;
+  }
+}
+
+.browser-nav-close {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: $radius-sm;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+  margin-left: 2px;
+
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-regular);
+  }
+}
+
+.browser-webview-container {
+  flex: 1;
+  position: relative;
+  background: #fff; // webview 默认白色背景,未加载时不会透终端暗色
+
+  webview {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+}

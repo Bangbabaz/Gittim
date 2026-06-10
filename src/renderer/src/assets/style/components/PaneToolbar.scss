@@ -9,3 +9,22 @@
   flex-shrink: 0;
   user-select: none;
 }
+
+.browser-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--el-border-color);
+  border-radius: $radius-sm;
+  color: var(--el-text-color-regular);
+  flex-shrink: 0;
+
+  &:hover {
+    border-color: var(--el-text-color-secondary);
+    color: var(--el-color-primary);
+    background: var(--el-fill-color);
+  }
+}

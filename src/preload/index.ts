@@ -37,8 +37,7 @@ const api = {
   getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
 
   /** 从剪贴板读取图片(PNG)。无图片时返回 null。 */
-  clipboardReadImage: () =>
-    ipcRenderer.invoke('clipboard-read-image') as Promise<string | null>,
+  clipboardReadImage: () => ipcRenderer.invoke('clipboard-read-image') as Promise<string | null>,
 
   // ---- Git ---------------------------------------------------------------
   getGitInfo: (cwd: string) => ipcRenderer.invoke('git-info', cwd) as Promise<GitInfo>,
@@ -184,6 +183,19 @@ const api = {
     ipcRenderer.invoke('ide-open', ideId, cwd) as Promise<GitResult>,
   openFolder: (cwd: string) => ipcRenderer.invoke('open-folder', cwd) as Promise<boolean>,
   pathExists: (p: string) => ipcRenderer.invoke('path-exists', p) as Promise<boolean>,
+
+  // ---- Browser ------------------------------------------------------------
+  browserRegister: (paneId: string, webContentsId: number) =>
+    ipcRenderer.invoke('browser-register', paneId, webContentsId) as Promise<void>,
+  browserUnregister: (paneId: string) =>
+    ipcRenderer.invoke('browser-unregister', paneId) as Promise<void>,
+  browserGetMcpUrl: (paneId: string) =>
+    ipcRenderer.invoke('browser-get-mcp-url', paneId) as Promise<string>,
+  onBrowserActivate: (cb: (paneId: string) => void) => {
+    const listener = (_e: IpcRendererEvent, p: string): void => cb(p)
+    ipcRenderer.on('browser-activate', listener)
+    return () => ipcRenderer.removeListener('browser-activate', listener)
+  },
 
   // ---- Auto-update --------------------------------------------------------
   /** 手动检查更新（启动时自动检查,此方法供 UI 按钮/菜单调用）。 */

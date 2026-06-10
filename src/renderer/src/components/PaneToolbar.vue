@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { Globe } from 'lucide-vue-next'
 import BranchSelector from './toolbar/BranchSelector.vue'
 import WorktreePanel from './toolbar/WorktreePanel.vue'
 import GitOpsButtons from './toolbar/GitOpsButtons.vue'
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   openTasks: []
   manageTasks: [cwd?: string, newDraft?: boolean]
+  toggleBrowser: []
 }>()
 
 // --- Git 状态(从 IPC 拉取的快照,下发给 BranchSelector / WorktreePanel /
@@ -149,11 +151,7 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
         @worktree-created="onWorktreeCreated"
         @changed="requestRefresh"
       />
-      <GitOpsButtons
-        :cwd="props.cwd"
-        :merge-status="mergeStatus"
-        @changed="requestRefresh"
-      />
+      <GitOpsButtons :cwd="props.cwd" :merge-status="mergeStatus" @changed="requestRefresh" />
     </template>
 
     <!-- 任务运行 / IDE 启动:无论是否 git 都显示。语音输入只走快捷键(默认 F2),
@@ -165,6 +163,11 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />
+    <el-tooltip content="浏览器" placement="bottom" :show-after="300">
+      <button class="browser-btn" @click="emit('toggleBrowser')">
+        <Globe :size="13" />
+      </button>
+    </el-tooltip>
     <IdeLauncher :cwd="props.cwd" />
     <DiffStatsButton v-if="isRepo" :cwd="props.cwd" :diff-stats="diffStats" />
   </div>

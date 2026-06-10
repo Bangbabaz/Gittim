@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Settings as SettingsIcon, Type, Layout, Info, RotateCcw, Keyboard, Mic } from 'lucide-vue-next'
+import {
+  Settings as SettingsIcon,
+  Type,
+  Layout,
+  Info,
+  RotateCcw,
+  Keyboard,
+  Mic,
+  Globe,
+  Copy,
+  Check
+} from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
@@ -205,6 +216,24 @@ watch(showSettings, (open) => {
 })
 
 watch(recordingAction, watchRecording)
+
+// MCP 注册命令
+const MCP_CMD_CLAUDE = 'claude mcp add -s user -t sse gittim-browser http://127.0.0.1:9876/sse'
+const MCP_CMD_CODEX = 'codex mcp add gittim-browser http://127.0.0.1:9876/sse'
+const mcpCopied = ref<'claude' | 'codex' | null>(null)
+
+async function copyMcpCmd(which: 'claude' | 'codex'): Promise<void> {
+  const cmd = which === 'claude' ? MCP_CMD_CLAUDE : MCP_CMD_CODEX
+  try {
+    await navigator.clipboard.writeText(cmd)
+    mcpCopied.value = which
+    setTimeout(() => {
+      if (mcpCopied.value === which) mcpCopied.value = null
+    }, 2000)
+  } catch {
+    // ignore
+  }
+}
 
 // Tasks drawer 宽度
 const DEFAULT_TASKS_DRAWER_WIDTH = 860
@@ -606,6 +635,41 @@ onUnmounted(() => {
 
           <section class="settings-section">
             <header class="settings-section-header">
+              <Globe :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">MCP</h3>
+            </header>
+            <p class="settings-item-desc" style="margin-bottom: 10px">
+              注册浏览器自动化 MCP 服务，让 Agent 在终端面板中操控内置浏览器。
+              在终端中运行以下命令即可完成注册。
+            </p>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Claude Code</label>
+                <button class="settings-copy-btn" @click="copyMcpCmd('claude')">
+                  <Check v-if="mcpCopied === 'claude'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CMD_CLAUDE }}</code>
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Codex</label>
+                <button class="settings-copy-btn" @click="copyMcpCmd('codex')">
+                  <Check v-if="mcpCopied === 'codex'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CMD_CODEX }}</code>
+              </p>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <header class="settings-section-header">
               <Mic :size="14" class="settings-section-icon" />
               <h3 class="settings-section-title">语音输入</h3>
             </header>
@@ -624,9 +688,7 @@ onUnmounted(() => {
                   <el-option label="自动检测" value="auto" />
                 </el-select>
               </div>
-              <p class="settings-item-desc">
-                语音识别目标语言。"自动检测"让模型自动判断语种。
-              </p>
+              <p class="settings-item-desc">语音识别目标语言。"自动检测"让模型自动判断语种。</p>
             </div>
             <div class="settings-item">
               <div class="settings-item-row">
@@ -1203,6 +1265,37 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: var(--el-text-color-secondary);
   line-height: 1.55;
+}
+
+.settings-copy-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: $radius-sm;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--el-fill-color);
+    color: var(--el-color-primary);
+  }
+}
+
+.settings-cmd {
+  @include mono-font;
+  display: block;
+  margin-top: 2px;
+  padding: 6px 8px;
+  background: var(--el-fill-color-lighter);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  word-break: break-all;
+  line-height: 1.5;
+  user-select: all;
 }
 
 /* 下拉选项 popper(el-select 默认 append-to-body,必须全局命中) */

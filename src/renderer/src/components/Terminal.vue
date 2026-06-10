@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -18,6 +18,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
+import BrowserDrawer from './BrowserDrawer.vue'
 import SearchOverlay from './SearchOverlay.vue'
 import RecordingIndicator from './RecordingIndicator.vue'
 import { useTheme } from '../composables/useTheme'
@@ -84,6 +85,16 @@ const emit = defineEmits<{
 
 const terminalRef = ref<HTMLDivElement>()
 const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
+
+// 浏览器抽屉
+const browserOpen = ref(false)
+const browserRatio = ref(0.4)
+const browserDragState = ref<{
+  startY: number
+  startRatio: number
+  totalHeight: number
+} | null>(null)
+
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
@@ -545,8 +556,41 @@ const onTerminalFocus = async (): Promise<void> => {
 
 defineExpose({ terminal, fitAddon })
 
+// ---- 浏览器抽屉 divider 拖拽 ----------------------------------------------
+function onBrowserDividerDown(e: MouseEvent): void {
+  const container = terminalRef.value?.closest('.pane-body') as HTMLElement | null
+  if (!container) return
+  browserDragState.value = {
+    startY: e.clientY,
+    startRatio: browserRatio.value,
+    totalHeight: container.offsetHeight
+  }
+  e.preventDefault()
+}
+
+function onBrowserDividerMove(e: MouseEvent): void {
+  if (!browserDragState.value) return
+  const ds = browserDragState.value
+  const delta = ds.startY - e.clientY
+  let newRatio = ds.startRatio + delta / ds.totalHeight
+  newRatio = Math.max(0.15, Math.min(0.85, newRatio))
+  browserRatio.value = newRatio
+}
+
+function onBrowserDividerUp(): void {
+  browserDragState.value = null
+}
+
+// computed flex 比例，终端和浏览器分割
+const terminalFlex = computed(() => {
+  if (!browserOpen.value) return '1 1 0%'
+  return `${1 - browserRatio.value} 1 0%`
+})
+const browserFlex = computed(() => `${browserRatio.value} 1 0%`)
+
 let unsubscribeData: (() => void) | null = null
 let unsubscribeExit: (() => void) | null = null
+let unsubscribeBrowserActivate: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
 // Captured at open() so we can explicitly removeEventListener on unmount.
 // terminal.dispose() also tears down its DOM, but binding to the captured
@@ -637,11 +681,25 @@ onMounted(async () => {
   resizeObserver.observe(terminalRef.value)
 
   terminal.focus()
+
+  // 浏览器 divider 拖拽事件
+  window.addEventListener('mousemove', onBrowserDividerMove)
+  window.addEventListener('mouseup', onBrowserDividerUp)
+
+  // 监听 MCP server 的自动激活请求 —— agent 首次调用浏览器工具时,
+  // main process 推送此事件,面板自动打开浏览器抽屉。
+  unsubscribeBrowserActivate = window.api.onBrowserActivate((requestedPaneId) => {
+    if (requestedPaneId === props.paneId) {
+      browserOpen.value = true
+    }
+  })
 })
 
 window.addEventListener('blur', closeContextMenu)
 
 onUnmounted(() => {
+  window.removeEventListener('mousemove', onBrowserDividerMove)
+  window.removeEventListener('mouseup', onBrowserDividerUp)
   window.removeEventListener('blur', closeContextMenu)
   termElement?.removeEventListener('contextmenu', onContextMenu)
   termTextarea?.removeEventListener('focus', onTerminalFocus)
@@ -654,6 +712,7 @@ onUnmounted(() => {
   }
   unsubscribeData?.()
   unsubscribeExit?.()
+  unsubscribeBrowserActivate?.()
   void voiceCancel()
   if (indicatorTimer) {
     clearTimeout(indicatorTimer)
@@ -679,16 +738,25 @@ onUnmounted(() => {
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
+      @toggle-browser="browserOpen = !browserOpen"
     />
-    <div ref="terminalRef" class="terminal-container"></div>
-    <RecordingIndicator
-      v-if="indicatorState"
-      :state="indicatorState"
-      :level="voiceLevel"
-      :message="voiceMessage"
-    />
-    <div v-if="showSearch" class="search-pos">
-      <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
+    <div class="pane-body">
+      <div class="terminal-area" :style="{ flex: terminalFlex }">
+        <div ref="terminalRef" class="terminal-container"></div>
+        <RecordingIndicator
+          v-if="indicatorState"
+          :state="indicatorState"
+          :level="voiceLevel"
+          :message="voiceMessage"
+        />
+        <div v-if="showSearch" class="search-pos">
+          <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
+        </div>
+      </div>
+      <div v-if="browserOpen" class="browser-divider" @mousedown="onBrowserDividerDown" />
+      <div v-if="browserOpen" class="browser-area" :style="{ flex: browserFlex }">
+        <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
+      </div>
     </div>
     <Teleport to="body">
       <div

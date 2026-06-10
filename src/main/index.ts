@@ -1,4 +1,14 @@
-import { app, shell, BrowserWindow, clipboard, dialog, ipcMain, screen, nativeTheme, session } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  screen,
+  nativeTheme,
+  session
+} from 'electron'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -61,6 +71,8 @@ import {
 import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
+import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
+import { startMcpServer, stopMcpServer, getMcpPort } from './mcp-server'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
@@ -113,7 +125,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      webviewTag: true
     }
   })
 
@@ -188,6 +201,9 @@ app.whenReady().then(() => {
   // 10+ 秒,会占满 libuv 线程池让其它 execFile 排队 —— 这是启动卡顿的主要来源)。
   // 必须在注册 `ide-list` ipcMain.handle 之前调用。
   hydrateIdeCache(readSettings().cachedIdes)
+
+  // 启动内置 MCP server —— Agent 可以在终端面板里通过 MCP 协议操控浏览器。
+  startMcpServer()
 
   // ----- IPC handlers ------------------------------------------------------
   //
@@ -439,6 +455,22 @@ app.whenReady().then(() => {
     }
   })
 
+  // Browser
+  ipcMain.handle('browser-register', (_event, paneId: string, webContentsId: number) => {
+    try {
+      registerBrowser(paneId, webContentsId)
+    } catch (e) {
+      console.error('[browser] register failed:', e)
+      throw e
+    }
+  })
+  ipcMain.handle('browser-unregister', (_event, paneId: string) => {
+    unregisterBrowser(paneId)
+  })
+  ipcMain.handle('browser-get-mcp-url', () => {
+    return `http://127.0.0.1:${getMcpPort()}/sse`
+  })
+
   createWindow()
   // 不再启动期自动 detectIdes —— hydrateIdeCache 已经让 UI 立即可用,真正的扫描
   // 推迟到 cache miss(首次启动无 settings.cachedIdes)或用户点"重新检测"时。
@@ -466,7 +498,8 @@ async function runCleanup(): Promise<void> {
         // 已在收尾,async killPty 没人 await,killProcessTree 起的 PowerShell
         // snapshot 会被 main 退出打断,detached 的孙子(Nx workers / vite /
         // dev server)随之逃逸。这里两边一起 await 直到全部杀完。
-        await Promise.all([killAllTasks(), killAllPtyTrees(), disposeStt()])
+        await Promise.all([killAllTasks(), killAllPtyTrees(), disposeStt(), disposeAllBrowsers()])
+        stopMcpServer()
       } finally {
         flushSettings()
         cleanupDone = true

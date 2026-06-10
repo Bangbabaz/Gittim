@@ -274,6 +274,23 @@ export interface TaskIdPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Browser (内置浏览器面板)
+// ---------------------------------------------------------------------------
+
+export interface BrowserNetworkEntry {
+  requestId: string
+  url: string
+  method: string
+  status?: number
+  statusText?: string
+  type: string
+  timestamp: number
+  duration?: number
+  size?: number
+  resourceType?: string
+}
+
+// ---------------------------------------------------------------------------
 // Auto-update (electron-updater)
 // ---------------------------------------------------------------------------
 

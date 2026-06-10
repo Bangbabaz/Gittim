@@ -6,6 +6,7 @@ import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
 import { readFile, rm } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { shellIntegration } from './shell-integration'
+import { getMcpPort } from './mcp-server'
 import { killProcessTree } from './proc'
 import type {
   BranchInfo,
@@ -124,6 +125,11 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   // can follow `cd` commands. Falls back to passthrough for unknown shells.
   const { shell, args, env } = shellIntegration(defaultShell())
 
+  // 注入 paneId 和 MCP 端口到 shell 环境，让 Agent 进程 fork 自 shell 时
+  // 能自动继承这些变量，从而发现对应的 MCP 端点。
+  env.GITTIM_PANE_ID = opts.paneId
+  env.GITTIM_MCP_PORT = String(getMcpPort())
+
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
     cols,
@@ -229,6 +235,13 @@ export async function killPty(paneId: string): Promise<void> {
 export async function killAllPtyTrees(): Promise<void> {
   const ids = Array.from(sessions.keys())
   await Promise.all(ids.map((id) => killPty(id)))
+}
+
+/** 获取 pane 对应的 webContents(供 MCP server 推送浏览器激活事件)。 */
+export function getPtyWebContents(paneId: string): WebContents | null {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed) return null
+  return session.webContents
 }
 
 /**
@@ -679,11 +692,12 @@ export async function gitCommitBranches(
     await Promise.allSettled(
       branches.map(async (b) => {
         try {
-          const { stdout } = await execFileP(
-            'git',
-            ['rev-list', '--max-count=10000', b.tip],
-            { ...GIT_OPTS, cwd, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }
-          )
+          const { stdout } = await execFileP('git', ['rev-list', '--max-count=10000', b.tip], {
+            ...GIT_OPTS,
+            cwd,
+            timeout: 20_000,
+            maxBuffer: 64 * 1024 * 1024
+          })
           for (const h of stdout.split(/\r?\n/)) {
             if (h && hashSet.has(h)) {
               result[h].push(b.name)

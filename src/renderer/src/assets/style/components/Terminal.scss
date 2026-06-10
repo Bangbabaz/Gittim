@@ -49,6 +49,46 @@
   width: 100%;
 }
 
+// 终端 + 浏览器抽屉的 flex 分割容器
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-area {
+  position: relative;
+  min-height: 60px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+// 浏览器抽屉区域(底部)
+.browser-area {
+  min-height: 60px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  // 当抽屉打开时，左侧的 xterm scrollbar 可能与右侧零边距显得拥挤
+  // —— 这里不做多余 padding，跟终端区保持一致。
+}
+
+// 终端和浏览器之间的可拖拽分割线
+.browser-divider {
+  height: 4px;
+  flex-shrink: 0;
+  background: var(--el-border-color);
+  cursor: row-resize;
+  transition: background 0.1s;
+
+  &:hover {
+    background: var(--el-color-primary);
+  }
+}
+
 .search-pos {
   position: absolute;
   top: $titlebar-h;
