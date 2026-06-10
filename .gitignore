@@ -11,3 +11,8 @@ resources/models/*.bin
 src/renderer/auto-imports.d.ts
 src/renderer/components.d.ts
 .eslintrc-auto-import.json
+
+# Reasonix / CodeGraph
+.reasonix/
+reasonix.toml
+.codegraph/
