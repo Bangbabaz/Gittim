@@ -1347,6 +1347,18 @@ export async function gitAddWorktree(
   opts: WorktreeAddOpts
 ): Promise<GitResultWithWarning> {
   try {
+    // 先更新远程引用，确保 fromBranch 对应的远程分支已拉取到本地。
+    // fetch 失败（无网络等）不阻塞 —— 用户可能已有本地分支或离线工作。
+    try {
+      await execFileP('git', ['fetch', '--prune'], {
+        ...GIT_OPTS,
+        cwd,
+        timeout: 30_000
+      })
+    } catch {
+      // 静默忽略，后续 git worktree add 如果失败会报具体错误
+    }
+
     const args = ['worktree', 'add']
     if (opts.newBranch) args.push('-b', opts.newBranch)
     args.push(opts.path)
