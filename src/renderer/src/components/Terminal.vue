@@ -763,14 +763,15 @@ onUnmounted(() => {
           <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
         </div>
       </div>
-      <div
-        v-if="browserOpen"
-        class="browser-divider"
-        :class="{ dragging: !!browserDragState }"
-        @mousedown="onBrowserDividerDown"
-      />
-      <div v-if="browserOpen" class="browser-area" :style="{ width: browserWidth + 'px' }">
-        <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
+      <div v-if="browserOpen" class="browser-overlay" :style="{ width: browserWidth + 'px' }">
+        <div
+          class="browser-divider"
+          :class="{ dragging: !!browserDragState }"
+          @mousedown="onBrowserDividerDown"
+        />
+        <div class="browser-area">
+          <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
+        </div>
       </div>
     </div>
     <Teleport to="body">

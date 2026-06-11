@@ -49,16 +49,40 @@
   width: 100%;
 }
 
-// 终端 + 浏览器抽屉的 flex 水平分割容器
+// 终端容器 —— pane-body 为 relative，让浏览器 overlay 定位
 .pane-body {
   flex: 1;
   min-height: 0;
+  position: relative;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
 }
 
 .terminal-area {
   position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+}
+
+// 浏览器抽屉 —— 从右侧滑入的覆盖式面板
+.browser-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: row;
+  background: var(--el-bg-color);
+  border-left: 1px solid var(--el-border-color);
+  transition: width 0.15s ease;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+}
+
+.browser-area {
   flex: 1;
   min-width: 0;
   overflow: clip;
@@ -66,17 +90,7 @@
   flex-direction: column;
 }
 
-// 浏览器抽屉 —— 从右侧滑入的固定宽度面板
-.browser-area {
-  flex-shrink: 0;
-  overflow: clip;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--el-border-color);
-  transition: width 0.15s ease;
-}
-
-// 终端和浏览器之间的可拖拽分割线（垂直方向）
+// 浏览器抽屉左边缘的拖拽手柄（垂直方向，在 overlay 最左侧）
 .browser-divider {
   width: 4px;
   flex-shrink: 0;
