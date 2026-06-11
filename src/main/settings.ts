@@ -19,7 +19,8 @@ const DEFAULTS: Settings = {
   theme: 'system',
   sttLanguage: 'zh',
   sttDeviceId: '',
-  voiceShortcut: 'F2'
+  voiceShortcut: 'F2',
+  autoUpdate: true
 }
 
 let cache: Settings | null = null

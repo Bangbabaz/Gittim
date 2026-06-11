@@ -1,5 +1,6 @@
 import { autoUpdater } from 'electron-updater'
 import { BrowserWindow, app } from 'electron'
+import { readSettings } from './settings'
 import type { UpdateStatus } from '@shared/types'
 
 // 更新状态,通过 webContents.send 广播到 renderer。
@@ -24,6 +25,13 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
   // 配置日志级别：生产环境只输出 warn/error,避免 update.ejs 模板每次
   // 启动都打印一大段 "Skip checkForUpdates because application is not packed".
+  // 读取用户设置，关闭自动更新则完全不启动检查
+  const settings = readSettings()
+  if (settings.autoUpdate === false) {
+    console.log('[updater] autoUpdate 已关闭')
+    return
+  }
+
   // 生产环境关闭 info/debug 日志,避免每次启动打印无意义的 "Skip checkForUpdates".
   autoUpdater.logger = {
     info: () => {},

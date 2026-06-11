@@ -220,6 +220,8 @@ export interface Settings {
   sttDeviceId?: string
   /** 语音输入 PTT 快捷键,默认 'F2'。 */
   voiceShortcut?: string
+  /** 自动更新开关,默认 true。关闭后不检查也不下载。 */
+  autoUpdate?: boolean
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,6 @@ import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
-import type { UpdateStatus } from '@shared/types'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
 
 // App.vue 作为"屋顶":标题栏 + 设置抽屉 + 任务抽屉 / 管理对话框 + Layout 渲染。
@@ -60,6 +59,7 @@ const taskMgrFocusId = ref<string | null>(null)
 const taskMgrScopeCwd = ref<string | null>(null)
 const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
+const autoUpdate = ref(true)
 
 // 用户覆盖的快捷键(仅非默认值落盘)。下发给每个 Terminal,在 key handler 内
 // 与 DEFAULT_SHORTCUTS 合并。
@@ -76,8 +76,12 @@ const sttDeviceId = ref('')
 const voiceShortcut = ref('F2')
 const audioInputDevices = ref<MediaDeviceInfo[]>([])
 const recordingVoice = ref(false)
-const updateStatus = ref<UpdateStatus | null>(null)
-let unsubscribeUpdateStatus: (() => void) | undefined
+// 手动更新检查
+const updateChecking = ref(false)
+const updateResult = ref<string | null>(null)
+// 后台自动下载完成后显示按钮
+const updateReady = ref<string | null>(null)
+let unsubscribeUpdateStatus: (() => void) | null = null
 
 // 内部 binding 字符串统一用 'Ctrl' 表达"主修饰键",UI 显示按平台翻译。mac 上
 // 用 ⌘⇧⌥ 更符合习惯且更省横向空间。
@@ -310,14 +314,67 @@ const onScrollbackChange = (size: number | undefined): void => {
   window.api.settingsSet({ scrollback: clamped })
 }
 
-const installUpdate = (): void => {
-  updateStatus.value = null
+async function checkForUpdate(): Promise<void> {
+  if (updateChecking.value) return
+  updateChecking.value = true
+  updateResult.value = null
+
+  const timeout = new Promise<string>((_r, reject) =>
+    setTimeout(() => reject(new Error('检查超时')), 15_000)
+  )
+
+  try {
+    // 监听一次 update-status 事件
+    const result = await new Promise<string>((resolve, reject) => {
+      const unsubscribe = window.api.onUpdateStatus((status) => {
+        if (status.state === 'checking') return
+        unsubscribe()
+        switch (status.state) {
+          case 'not-available':
+            resolve('已是最新版本')
+            break
+          case 'available':
+            resolve(`发现新版本 ${status.version}，下载中…`)
+            break
+          case 'downloading':
+            resolve(`正在下载 ${status.percent}%`)
+            break
+          case 'downloaded':
+            resolve(`新版本 ${status.version} 已就绪，重启以安装`)
+            break
+          case 'error':
+            reject(new Error(status.message || '检查失败'))
+            break
+        }
+      })
+
+      window.api.updateCheck()
+      timeout.catch((e) => {
+        unsubscribe()
+        reject(e)
+      })
+    })
+
+    updateResult.value = result
+  } catch (e: unknown) {
+    updateResult.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+function installUpdate(): void {
   window.api.updateInstall()
 }
 
 const onToggleAutoOpenTasks = (val: boolean): void => {
   autoOpenTasksOnRun.value = val
   window.api.settingsSet({ autoOpenTasksOnRun: val })
+}
+
+const onToggleAutoUpdate = (val: boolean): void => {
+  autoUpdate.value = val
+  window.api.settingsSet({ autoUpdate: val })
 }
 
 const openTasksDrawer = (): void => {
@@ -398,6 +455,7 @@ onMounted(async () => {
   if (typeof settings.scrollback === 'number') appScrollback.value = settings.scrollback
   if (typeof settings.autoOpenTasksOnRun === 'boolean')
     autoOpenTasksOnRun.value = settings.autoOpenTasksOnRun
+  if (typeof settings.autoUpdate === 'boolean') autoUpdate.value = settings.autoUpdate
   if (typeof settings.tasksDrawerWidth === 'number')
     tasksDrawerWidth.value = clampDrawerWidth(settings.tasksDrawerWidth)
   if (settings.shortcutOverrides && typeof settings.shortcutOverrides === 'object') {
@@ -418,16 +476,10 @@ onMounted(async () => {
     }
   })
 
-  // 监听自动更新状态
+  // 后台自动下载完成后，标题栏显示更新按钮
   unsubscribeUpdateStatus = window.api.onUpdateStatus((status) => {
-    updateStatus.value = status
-    // 下载完成 30 秒后自动收起提示，不打扰用户
     if (status.state === 'downloaded') {
-      setTimeout(() => {
-        if (updateStatus.value?.state === 'downloaded') {
-          updateStatus.value = null
-        }
-      }, 30_000)
+      updateReady.value = status.version || null
     }
   })
 
@@ -463,6 +515,14 @@ onUnmounted(() => {
     <div class="title-bar-right">
       <button class="tb-btn tb-settings" title="设置" @click="showSettings = true">
         <SettingsIcon :size="14" />
+      </button>
+      <button
+        v-if="updateReady"
+        class="tb-btn tb-update"
+        title="点击更新"
+        @click="installUpdate"
+      >
+        更新
       </button>
       <div v-if="!isMac" class="title-bar-controls">
         <button class="tb-btn tb-min" title="最小化" @click="winMinimize">
@@ -629,6 +689,19 @@ onUnmounted(() => {
               </div>
               <p class="settings-item-desc">
                 关闭后,后台任务启动时不会自动弹出任务抽屉,需手动点工具栏的查看按钮。
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">自动更新</label>
+                <el-switch
+                  :model-value="autoUpdate"
+                  size="small"
+                  @update:model-value="(v: string | number | boolean) => onToggleAutoUpdate(!!v)"
+                />
+              </div>
+              <p class="settings-item-desc">
+                开启后启动时自动检查并下载新版本。关闭后不再检查更新，但可手动在"关于"页检测。
               </p>
             </div>
           </section>
@@ -829,6 +902,16 @@ onUnmounted(() => {
                 <dd class="mono">~/.Gittim/settings.json</dd>
               </div>
             </dl>
+            <div class="about-update">
+              <button
+                class="about-update-btn"
+                :disabled="updateChecking"
+                @click="checkForUpdate"
+              >
+                {{ updateChecking ? '检查中…' : '检测更新' }}
+              </button>
+              <span v-if="updateResult" class="about-update-result">{{ updateResult }}</span>
+            </div>
           </section>
         </template>
       </div>
@@ -848,30 +931,6 @@ onUnmounted(() => {
     :scope-cwd="taskMgrScopeCwd"
     :new-draft="taskMgrNewDraft"
   />
-  <div v-if="updateStatus" class="update-banner" :class="'update-' + updateStatus.state">
-    <template v-if="updateStatus.state === 'checking'">
-      <span class="update-icon">⏳</span>
-      <span>正在检查更新…</span>
-    </template>
-    <template v-else-if="updateStatus.state === 'available'">
-      <span class="update-icon">📦</span>
-      <span>发现新版本 {{ updateStatus.version }},下载中…</span>
-    </template>
-    <template v-else-if="updateStatus.state === 'downloading'">
-      <span class="update-icon">⬇</span>
-      <span>下载中 {{ updateStatus.percent }}%</span>
-      <progress class="update-progress" :value="updateStatus.percent" max="100" />
-    </template>
-    <template v-else-if="updateStatus.state === 'downloaded'">
-      <span class="update-icon">✅</span>
-      <span>更新已就绪,重启以安装</span>
-      <button class="update-action-btn" @click="installUpdate">立即重启</button>
-    </template>
-    <template v-else-if="updateStatus.state === 'error'">
-      <span class="update-icon">⚠️</span>
-      <span>更新检查失败: {{ updateStatus.message }}</span>
-    </template>
-  </div>
   <div
     ref="containerRef"
     class="layout-root"
@@ -972,6 +1031,19 @@ onUnmounted(() => {
   }
 }
 
+.tb-update {
+  font-size: 11px;
+  font-weight: 600;
+  @include ui-font;
+  color: var(--el-color-success);
+  padding: 0 8px;
+  width: auto;
+
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
+  }
+}
+
 .tb-btn {
   @include btn-reset;
   display: flex;
@@ -1058,67 +1130,39 @@ onUnmounted(() => {
   }
 }
 
-/* --- Update banner ------------------------------------------------------- */
+/* --- Update check (关于页) ----------------------------------------------- */
 
-.update-banner {
+.about-update {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 12px;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.about-update-btn {
+  @include btn-reset;
+  padding: 4px 14px;
   font-size: 12px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--el-border-color);
+  border-radius: $radius;
+  color: var(--el-color-primary);
+  border: 1px solid var(--el-color-primary);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.1s;
 
-  &.update-checking,
-  &.update-not-available {
-    color: var(--el-text-color-secondary);
-    background: var(--el-fill-color);
-  }
-
-  &.update-available,
-  &.update-downloading {
-    color: var(--el-color-primary);
+  &:hover:not(:disabled) {
     background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
   }
 
-  &.update-downloaded {
-    color: var(--el-color-success);
-    background: color-mix(in srgb, var(--el-color-success) 8%, transparent);
-  }
-
-  &.update-error {
-    color: var(--el-color-warning);
-    background: color-mix(in srgb, var(--el-color-warning) 8%, transparent);
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 
-.update-icon {
-  font-size: 13px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.update-progress {
-  width: 80px;
-  height: 4px;
-  accent-color: var(--el-color-primary);
-  border-radius: 2px;
-}
-
-.update-action-btn {
-  @include btn-reset;
-  margin-left: auto;
-  padding: 2px 10px;
-  font-size: 11px;
-  border-radius: $radius-sm;
-  color: #fff;
-  background: var(--el-color-success);
-  cursor: pointer;
-
-  &:hover {
-    opacity: 0.85;
-  }
+.about-update-result {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 /* --- Settings drawer ----------------------------------------------------- */
