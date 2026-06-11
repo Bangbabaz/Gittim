@@ -16,3 +16,7 @@ src/renderer/components.d.ts
 .reasonix/
 reasonix.toml
 .codegraph/
+
+# 本地环境变量（GH_TOKEN 等）
+.env
+.env.*
