@@ -38,6 +38,10 @@ interface BrowserSession {
   debuggerAttached: boolean
   networkRequests: NetworkEntry[]
   pendingRequests: Map<string, RequestTrace>
+  /** 待处理的 JS dialog（alert/confirm/prompt） */
+  pendingDialog?: { type: string; message: string; defaultPrompt?: string }
+  /** Console 日志环形缓冲（最多 50 条） */
+  consoleLogs: Array<{ type: string; text: string; timestamp: number }>
 }
 
 const sessions = new Map<string, BrowserSession>()
@@ -87,7 +91,8 @@ export function registerBrowser(paneId: string, wcId: number): void {
     webContentsId: wcId,
     debuggerAttached: true,
     networkRequests: [],
-    pendingRequests: new Map()
+    pendingRequests: new Map(),
+    consoleLogs: []
   }
 
   // 监听网络请求
@@ -145,6 +150,26 @@ export function registerBrowser(paneId: string, wcId: number): void {
           break
         }
       }
+    } else if (method === 'Page.javascriptDialogOpening') {
+      // Dialog 监听
+      const p = params as { type: string; message: string; defaultPrompt?: string }
+      session.pendingDialog = {
+        type: p.type,
+        message: p.message,
+        defaultPrompt: p.defaultPrompt
+      }
+    } else if (method === 'Runtime.consoleAPICalled') {
+      // Console 监听
+      const p = params as {
+        type: string
+        args: Array<{ value?: unknown; description?: string }>
+        timestamp: number
+      }
+      const text = p.args
+        .map((a) => (a.value !== undefined ? String(a.value) : a.description || ''))
+        .join(' ')
+      session.consoleLogs.push({ type: p.type, text, timestamp: p.timestamp })
+      if (session.consoleLogs.length > 50) session.consoleLogs.shift()
     }
   })
 
@@ -261,6 +286,36 @@ export function rejectActivation(paneId: string, reason: string): void {
     pending.reject(new Error(reason))
     pendingActivations.delete(paneId)
   }
+}
+
+/** 获取指定 pane 的待处理 dialog。 */
+export function getPendingDialog(
+  paneId: string
+): { type: string; message: string; defaultPrompt?: string } | null {
+  const session = sessions.get(paneId)
+  if (!session?.pendingDialog) return null
+  return session.pendingDialog
+}
+
+/** 清除指定 pane 的待处理 dialog。 */
+export function clearPendingDialog(paneId: string): void {
+  const session = sessions.get(paneId)
+  if (session) session.pendingDialog = undefined
+}
+
+/** 获取指定 pane 的 console 日志缓冲。 */
+export function getConsoleLogs(
+  paneId: string
+): Array<{ type: string; text: string; timestamp: number }> {
+  const session = sessions.get(paneId)
+  if (!session) return []
+  return [...session.consoleLogs]
+}
+
+/** 清空指定 pane 的 console 日志缓冲。 */
+export function clearConsoleLogs(paneId: string): void {
+  const session = sessions.get(paneId)
+  if (session) session.consoleLogs = []
 }
 
 /** 退出时清理所有 browser session。 */

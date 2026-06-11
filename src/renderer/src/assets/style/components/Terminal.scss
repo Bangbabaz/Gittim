@@ -60,7 +60,7 @@
 .terminal-area {
   position: relative;
   min-height: 60px;
-  overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
 }
@@ -68,7 +68,7 @@
 // 浏览器抽屉区域(底部)
 .browser-area {
   min-height: 60px;
-  overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
 

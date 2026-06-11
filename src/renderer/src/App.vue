@@ -994,7 +994,7 @@ onUnmounted(() => {
 
 .layout-root {
   position: relative;
-  width: 100vw;
+  width: 100%;
   height: calc(100vh - #{$titlebar-h});
   background: var(--el-bg-color);
 
@@ -1034,7 +1034,7 @@ onUnmounted(() => {
 
 .pane-slot {
   position: absolute;
-  overflow: hidden;
+  overflow: clip;
   box-sizing: border-box;
   border: 1px solid transparent;
   transition: border-color 0.08s;
