@@ -763,7 +763,10 @@ onUnmounted(() => {
           <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
         </div>
       </div>
-      <div v-if="browserOpen" class="browser-overlay" :style="{ width: browserWidth + 'px' }">
+    </div>
+    <!-- 浏览器抽屉 —— el-drawer 风格，从右侧滑入，覆盖在终端上层 -->
+    <Transition name="browser-slide">
+      <div v-if="browserOpen" class="browser-drawer-panel" :style="{ width: browserWidth + 'px' }">
         <div
           class="browser-divider"
           :class="{ dragging: !!browserDragState }"
@@ -773,7 +776,7 @@ onUnmounted(() => {
           <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
         </div>
       </div>
-    </div>
+    </Transition>
     <Teleport to="body">
       <div
         v-if="contextMenuVisible"

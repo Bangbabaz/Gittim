@@ -7,6 +7,8 @@
   background-color: var(--el-bg-color);
   box-sizing: border-box;
   position: relative;
+  // clip the browser drawer when it's translated off-screen (closed state)
+  overflow: clip;
 }
 
 /* Always-present grab strip at the very top of every pane (repo or not) so
@@ -49,11 +51,10 @@
   width: 100%;
 }
 
-// 终端容器 —— pane-body 为 relative，让浏览器 overlay 定位
+// 终端容器 —— pane-body 不再需要 relative，drawer 在 terminal-wrapper 层
 .pane-body {
   flex: 1;
   min-height: 0;
-  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -67,8 +68,11 @@
   flex-direction: column;
 }
 
-// 浏览器抽屉 —— 从右侧滑入的覆盖式面板
-.browser-overlay {
+// ---- 浏览器抽屉（el-drawer 风格，pane 内）------------------------------
+// 定位在 terminal-wrapper 内，右侧滑入覆盖终端。结合 Vue <Transition>：
+// 进入时从 translateX(100%) → 0，离开时反向。.terminal-wrapper 的
+// overflow:clip 裁剪掉动画中溢出视口的部分。
+.browser-drawer-panel {
   position: absolute;
   top: 0;
   right: 0;
@@ -78,8 +82,17 @@
   flex-direction: row;
   background: var(--el-bg-color);
   border-left: 1px solid var(--el-border-color);
-  transition: width 0.15s ease;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+}
+
+.browser-slide-enter-active,
+.browser-slide-leave-active {
+  transition: transform 0.25s ease;
+}
+
+.browser-slide-enter-from,
+.browser-slide-leave-to {
+  transform: translateX(100%);
 }
 
 .browser-area {
@@ -90,7 +103,7 @@
   flex-direction: column;
 }
 
-// 浏览器抽屉左边缘的拖拽手柄（垂直方向，在 overlay 最左侧）
+// 抽屉左边缘的拖拽手柄（垂直方向）
 .browser-divider {
   width: 4px;
   flex-shrink: 0;
