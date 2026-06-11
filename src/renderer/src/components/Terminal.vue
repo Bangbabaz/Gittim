@@ -557,6 +557,11 @@ const onTerminalFocus = async (): Promise<void> => {
 
 defineExpose({ terminal, fitAddon })
 
+// 点击终端区域自动收起浏览器抽屉（不销毁）
+function onTerminalClick(): void {
+  if (browserOpen.value) browserOpen.value = false
+}
+
 // ---- 浏览器抽屉宽度 ---------------------------------------------------
 function clampBrowserWidth(w: number): number {
   return Math.round(Math.max(MIN_BROWSER_WIDTH, Math.min(MAX_BROWSER_WIDTH, w)))
@@ -733,7 +738,7 @@ onUnmounted(() => {
     />
     <div class="pane-body">
       <div class="terminal-area">
-        <div ref="terminalRef" class="terminal-container"></div>
+        <div ref="terminalRef" class="terminal-container" @click="onTerminalClick"></div>
         <RecordingIndicator
           v-if="indicatorState"
           :state="indicatorState"
@@ -758,7 +763,12 @@ onUnmounted(() => {
       @update:model-value="(v: boolean) => browserOpen = v"
       @resize-end="onBrowserResizeEnd"
     >
-      <BrowserDrawer v-if="browserMounted" :pane-id="paneId" @close="browserOpen = false" />
+      <BrowserDrawer
+        v-if="browserMounted"
+        :pane-id="paneId"
+        @collapse="browserOpen = false"
+        @close="browserOpen = false; browserMounted = false"
+      />
     </el-drawer>
     <Teleport to="body">
       <div

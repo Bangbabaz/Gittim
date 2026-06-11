@@ -437,6 +437,65 @@ const TOOLS: McpToolDef[] = [
       },
       required: ['selector']
     }
+  },
+  {
+    // #18
+    name: 'browser_wait_and_click',
+    description:
+      '等待元素出现+可操作后自动点击。' +
+      '示例：{selector: ".dialog-submit", timeout: 8000} 等待弹窗的提交按钮出现后点击。' +
+      '如需手动分步控制，用 browser_wait + browser_click。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: '要等待并点击的元素的 CSS 选择器' },
+        timeout: {
+          type: 'number',
+          description: '超时毫秒数，默认 5000'
+        },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['selector']
+    }
+  },
+  {
+    // #19
+    name: 'browser_form_fill',
+    description:
+      '批量填入表单。' +
+      '示例：{fields: {"input[name=username]": "admin", "#email": "a@b.com"}}。' +
+      'fields 的 key 是 CSS 选择器，value 是填入文本。各字段独立执行，部分失败不影响其余。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'object',
+          description: '选择器→文本映射，如 {"input[name=username]": "admin"}'
+        },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['fields']
+    }
+  },
+  {
+    // #20
+    name: 'browser_upload',
+    description:
+      '文件上传。通过 CDP DOM.setFileInputFiles 设文件后触发 change 事件。' +
+      '示例：{selector: "input[type=file]", filePaths: ["/path/to/file.pdf"]}。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'file input 的 CSS 选择器' },
+        filePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '本地文件绝对路径列表'
+        },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['selector', 'filePaths']
+    }
   }
 ]
 
@@ -937,6 +996,58 @@ async function handleToolCall(
               success: result.success,
               error: result.error,
               checked: result.checked
+            })
+          }
+        ]
+      }
+    }
+
+    case 'browser_wait_and_click': {
+      const selector = args?.selector as string
+      const timeout = (args?.timeout as number) || 5000
+
+      if (!selector) throw new Error('缺少 selector 参数')
+
+      const result = await actions.waitAndClick(paneId, selector, timeout)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: result.success,
+              error: result.error
+            })
+          }
+        ]
+      }
+    }
+
+    case 'browser_form_fill': {
+      const fields = args?.fields as Record<string, string>
+      if (!fields || typeof fields !== 'object') throw new Error('缺少 fields 参数')
+
+      const result = await actions.formFill(paneId, fields)
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result) }
+        ]
+      }
+    }
+
+    case 'browser_upload': {
+      const selector = args?.selector as string
+      const filePaths = args?.filePaths as string[]
+      if (!selector) throw new Error('缺少 selector 参数')
+      if (!filePaths?.length) throw new Error('缺少 filePaths 参数')
+
+      const result = await actions.upload(paneId, selector, filePaths)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: result.success,
+              error: result.error
             })
           }
         ]

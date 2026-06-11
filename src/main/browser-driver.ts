@@ -14,6 +14,14 @@ export async function navigate(
   paneId: string,
   url: string
 ): Promise<{ title: string; url: string }> {
+  // 设虚拟视口 1280×720，页面按桌面端渲染，不受抽屉实际宽度影响
+  await executeCdp(paneId, 'Emulation.setDeviceMetricsOverride', {
+    width: 1280,
+    height: 720,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+
   const navResult = (await executeCdp(paneId, 'Page.navigate', { url })) as {
     frameId?: string
     loaderId?: string

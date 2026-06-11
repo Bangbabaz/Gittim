@@ -23,10 +23,12 @@
         class="browser-nav-url"
         type="text"
         :value="currentUrl"
-        readonly
-        title="当前 URL（agent 通过 MCP 控制导航）"
+        title="输入 URL 后回车导航"
         @keydown.enter="navigateToUrl"
       />
+      <button class="browser-nav-btn" title="收起抽屉" @click="emit('collapse')">
+        <Minus :size="14" />
+      </button>
       <button class="browser-nav-close" title="关闭浏览器" @click="emit('close')">
         <X :size="14" />
       </button>
@@ -48,7 +50,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ChevronLeft, ChevronRight, RotateCw, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, RotateCw, X, Minus } from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{
@@ -62,6 +64,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   close: []
+  collapse: []
   ready: []
 }>()
 
