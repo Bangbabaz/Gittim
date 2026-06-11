@@ -201,6 +201,8 @@ export interface Settings {
   tasks?: TaskDef[]
   autoOpenTasksOnRun?: boolean
   tasksDrawerWidth?: number
+  /** 浏览器抽屉宽度(px),默认 480。 */
+  browserDrawerWidth?: number
   theme?: ThemePref
   /** 主工具栏 "在 IDE 中打开" 上次选中的 IDE id。 */
   defaultIde?: string

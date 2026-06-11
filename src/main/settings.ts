@@ -15,6 +15,7 @@ const DEFAULTS: Settings = {
   taskOutputCapKB: 4096,
   autoOpenTasksOnRun: true,
   tasksDrawerWidth: 860,
+  browserDrawerWidth: 480,
   theme: 'system',
   sttLanguage: 'zh',
   sttDeviceId: '',

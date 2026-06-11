@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -86,13 +86,15 @@ const emit = defineEmits<{
 const terminalRef = ref<HTMLDivElement>()
 const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
 
-// 浏览器抽屉
+// 浏览器抽屉 —— 从面板右侧滑入，宽度可拖拽调节
+const DEFAULT_BROWSER_WIDTH = 480
+const MIN_BROWSER_WIDTH = 360
+const MAX_BROWSER_WIDTH = 2000
 const browserOpen = ref(false)
-const browserRatio = ref(0.4)
+const browserWidth = ref(DEFAULT_BROWSER_WIDTH)
 const browserDragState = ref<{
-  startY: number
-  startRatio: number
-  totalHeight: number
+  startX: number
+  startWidth: number
 } | null>(null)
 
 const contextMenuVisible = ref(false)
@@ -556,14 +558,11 @@ const onTerminalFocus = async (): Promise<void> => {
 
 defineExpose({ terminal, fitAddon })
 
-// ---- 浏览器抽屉 divider 拖拽 ----------------------------------------------
+// ---- 浏览器抽屉 divider 拖拽（水平方向）-------------------------------
 function onBrowserDividerDown(e: MouseEvent): void {
-  const container = terminalRef.value?.closest('.pane-body') as HTMLElement | null
-  if (!container) return
   browserDragState.value = {
-    startY: e.clientY,
-    startRatio: browserRatio.value,
-    totalHeight: container.offsetHeight
+    startX: e.clientX,
+    startWidth: browserWidth.value
   }
   e.preventDefault()
 }
@@ -571,22 +570,19 @@ function onBrowserDividerDown(e: MouseEvent): void {
 function onBrowserDividerMove(e: MouseEvent): void {
   if (!browserDragState.value) return
   const ds = browserDragState.value
-  const delta = ds.startY - e.clientY
-  let newRatio = ds.startRatio + delta / ds.totalHeight
-  newRatio = Math.max(0.15, Math.min(0.85, newRatio))
-  browserRatio.value = newRatio
+  const delta = ds.startX - e.clientX
+  let newWidth = ds.startWidth + delta
+  newWidth = Math.max(MIN_BROWSER_WIDTH, Math.min(MAX_BROWSER_WIDTH, Math.round(newWidth)))
+  browserWidth.value = newWidth
 }
 
 function onBrowserDividerUp(): void {
+  if (browserDragState.value) {
+    // 拖拽结束时持久化宽度
+    window.api.settingsSet({ browserDrawerWidth: browserWidth.value })
+  }
   browserDragState.value = null
 }
-
-// computed flex 比例，终端和浏览器分割
-const terminalFlex = computed(() => {
-  if (!browserOpen.value) return '1 1 0%'
-  return `${1 - browserRatio.value} 1 0%`
-})
-const browserFlex = computed(() => `${browserRatio.value} 1 0%`)
 
 let unsubscribeData: (() => void) | null = null
 let unsubscribeExit: (() => void) | null = null
@@ -686,6 +682,20 @@ onMounted(async () => {
   window.addEventListener('mousemove', onBrowserDividerMove)
   window.addEventListener('mouseup', onBrowserDividerUp)
 
+  // 加载浏览器抽屉宽度（持久化）
+  try {
+    const settings = await window.api.settingsGet()
+    if (typeof settings.browserDrawerWidth === 'number') {
+      const w = settings.browserDrawerWidth
+      browserWidth.value = Math.max(
+        MIN_BROWSER_WIDTH,
+        Math.min(MAX_BROWSER_WIDTH, Math.round(w))
+      )
+    }
+  } catch {
+    // ignore
+  }
+
   // 监听 MCP server 的自动激活请求 —— agent 首次调用浏览器工具时,
   // main process 推送此事件,面板自动打开浏览器抽屉。
   unsubscribeBrowserActivate = window.api.onBrowserActivate((requestedPaneId) => {
@@ -741,7 +751,7 @@ onUnmounted(() => {
       @toggle-browser="browserOpen = !browserOpen"
     />
     <div class="pane-body">
-      <div class="terminal-area" :style="{ flex: terminalFlex }">
+      <div class="terminal-area">
         <div ref="terminalRef" class="terminal-container"></div>
         <RecordingIndicator
           v-if="indicatorState"
@@ -753,8 +763,13 @@ onUnmounted(() => {
           <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
         </div>
       </div>
-      <div v-if="browserOpen" class="browser-divider" @mousedown="onBrowserDividerDown" />
-      <div v-if="browserOpen" class="browser-area" :style="{ flex: browserFlex }">
+      <div
+        v-if="browserOpen"
+        class="browser-divider"
+        :class="{ dragging: !!browserDragState }"
+        @mousedown="onBrowserDividerDown"
+      />
+      <div v-if="browserOpen" class="browser-area" :style="{ width: browserWidth + 'px' }">
         <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
       </div>
     </div>
