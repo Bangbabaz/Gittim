@@ -1,131 +1,135 @@
 # Gittim
 
-Git + tmux 风格的终端模拟器，支持分屏、分支切换、工作树管理与后台任务系统。
+<p align="center">
+  <img src="resources/icon.png" width="128" alt="Gittim" />
+</p>
 
-基于 Electron + Vue 3 + xterm.js 构建，在单个窗口中提供类似 tmux 的多窗格终端体验，并深度集成 Git 操作。
+<p align="center">
+  <strong>Git + tmux 风格的终端模拟器</strong>
+</p>
 
-## 功能特性
+<p align="center">
+  无限分屏 · 原生 Git 集成 · 一键工作树 · 内置浏览器 · 后台任务 · 语音输入
+</p>
 
-### 终端
+---
 
-- 基于 xterm.js 的完整终端模拟，搭配 node-pty 伪终端后端
-- 支持 xterm-256color 真彩色，暗色主题配色
-- 自适应缩放（FitAddon）、搜索（SearchAddon）、可点击链接（WebLinksAddon）、Unicode 11（Unicode11Addon）
-- 自定义字体族和字号（8-32，默认 14），支持 SF Mono、Cascadia Code、Fira Code、JetBrains Mono 等
-- 可配置的滚动缓冲区大小（1,000-200,000 行）
-- 自动注入 OSC 7 转义序列，实时跟踪 shell 当前工作目录
+## ⚡ 为什么用 Gittim
 
-### tmux 风格分屏
+Gittim 把终端的日常操作搬到图形界面里。不用记 tmux 快捷键、不用切窗口跑 `git worktree`、不用另开浏览器看页面效果 —— 所有事情在一个窗口里完成。
 
-- 递归二叉树分割布局：水平/垂直无限分割窗格
-- 拖拽分割条调整窗格大小（比例范围 5%-95%）
-- 关闭最后窗格时自动退出应用，关闭分割中第二个子窗格时自动合并
-- 布局和每个窗格的工作目录自动保存，应用重启后恢复
-- 关闭含运行中进程的窗格时弹出确认提示
+| 你需要的 | Gittim 怎么做 |
+|----------|--------------|
+| 多窗格终端 | `Ctrl+Shift+D` / `Ctrl+Shift+S` 无限分割，拖拽调大小 |
+| 切换分支 | 工具栏下拉直接切，远程分支自动 track |
+| 创建工作树 | 弹窗选分支 → 新窗格自动打开到工作树目录 |
+| 同时看终端+浏览器 | 右侧抽屉内置 webview，agent 可通过 MCP 操控 |
+| 跑后台任务 | `npm run dev` 开在后台，日志随时翻看 |
+| 语音输入命令 | 按住 `F2` 说话，松开自动转写并粘贴 |
 
-### 键盘快捷键
+## 🖥️ 分屏终端
 
-| 快捷键              | 功能                       |
-| ------------------- | -------------------------- |
-| `Ctrl+Shift+D`      | 向右分割窗格               |
-| `Ctrl+Shift+S`      | 向下分割窗格               |
-| `Ctrl+Shift+W`      | 关闭当前窗格               |
-| `Ctrl+Shift+C`      | 复制选中文本               |
-| `Ctrl+Shift+V`      | 粘贴                       |
-| `Ctrl+F`            | 打开终端搜索               |
-| `Ctrl+=` / `Ctrl++` | 增大字号                   |
-| `Ctrl+-`            | 减小字号                   |
-| `Ctrl+0`            | 重置字号                   |
-| `Ctrl+C`            | 有选中时复制，否则正常传递 |
-| `Ctrl+V`            | 粘贴                       |
+类似 tmux 的递归二叉树布局，一个窗口想开几个终端就开几个。每个窗格独立 Shell，自动跟随 `cd` 切换工作目录。
 
-右键菜单提供相同操作入口。
+- **无限分割** — 水平 / 垂直随意切，布局重启后自动恢复
+- **拖拽调整** — 拖动窗格之间的分割条改变大小
+- **拖拽重排** — 拖住窗格顶部的把手可以重新排列布局
 
-### Git 集成
+## 🌿 Git 深度集成
 
-- **分支信息**：窗格工具栏实时显示当前分支名，随 `cd` 命令自动更新
-- **分支切换**：下拉列表合并本地和远程分支，支持一键切换；本地分支用 `git checkout`，远程分支用 `git checkout --track`；有未提交更改时提供暂存后切换选项
-- **分支标签**：本地 / 远程 / 工作树 三种类型标记，一目了然
-- **Diff 查看器**：侧边对比视图，使用 diff2html 解析 `git diff` 输出；左侧文件列表点击跳转，有 +N -M 改动统计徽标，支持新文件/删除/重命名/二进制文件标记
+每个终端窗格顶部都有 Git 工具栏：
 
-### 工作树管理
+- **当前分支** — 实时显示，`cd` 到其他仓库时自动切换
+- **分支列表** — 本地 + 远程 + 工作树，一目了然
+- **一键切换** — 有未提交更改时自动提示暂存
+- **Diff 查看器** — 改动统计 + 语法高亮 + 文件级跳转
+- **合并/变基** — 右键菜单快捷操作
 
-- **创建工作树**：选择基准分支，可选项新建分支、自定义项目名称和目标路径
-- **管理工作树**：查看所有工作树列表（含 main/locked/detached 状态），支持删除（含强制删除）
-- **自动推送**：创建工作树并新建分支时，自动执行 `git push -u origin <branch>`
-- **一键跳转**：创建完成后自动拆分新窗格并定位到工作树目录
+### 工作树
 
-### 后台任务系统
+选中任意分支，一键创建 Git 工作树：
 
-- **任务定义**：设置名称、Shell 命令、工作目录，持久化到配置文件
-- **任务运行**：每个任务在独立 PTY 中运行，输出以环形缓冲区（512 KB）捕获
-- **生命周期管理**：运行、停止、重启、删除；应用退出时自动杀死所有运行中任务
-- **输出查看**：任务抽屉使用只读 xterm 实例回放日志，支持实时滚动和搜索
-- **快速操作**：窗格工具栏上的命令下拉选择器 + 运行/停止按钮
-- **package.json 集成**：编辑任务时自动读取工作目录下的 npm scripts，一键填入命令
-- **自动弹出**：任务启动时可选自动打开任务抽屉
+1. 点击工具栏的 `+` 按钮
+2. 选择基准分支（可选新建分支）
+3. 确认后自动拆分新窗格，`cd` 到工作树目录
+4. 新建分支自动 `push -u` 到远程
 
-### Shell 集成
+## 🌐 内置浏览器
 
-自动向用户 Shell 注入 OSC 7 hook，使终端能实时感知当前工作目录：
+每个终端面板都可以从右侧滑出内置浏览器。MCP Server 暴露 20 个自动化工具，终端里的 AI Agent（Claude Code、Codex 等）可以直接操控浏览器：
 
-| Shell             | 注入方式                                        |
-| ----------------- | ----------------------------------------------- |
-| Bash              | `--rcfile` 指向生成文件，`PROMPT_COMMAND` 追加  |
-| Zsh               | `ZDOTDIR` 指向生成目录，`precmd_functions` 追加 |
-| PowerShell / pwsh | `-NoLogo -NoExit -Command` 自定义 `prompt` 函数 |
-| Cmd               | 设置 `PROMPT` 环境变量，前缀带 OSC 7            |
+- **导航与截图** — 打开页面、截取全页或元素
+- **表单操作** — 填表（兼容 React/Vue 受控组件）、勾选、选择下拉
+- **模拟交互** — 点击、悬停、键盘、滚动、文件上传
+- **页面感知** — 语义化快照（比截图省 token）、元素属性、Console 日志
+- **等待与复合** — 等待元素出现、批量填表、等待后点击
 
-未知 Shell 回退到 PID 查询方式（Linux 读 `/proc/<pid>/cwd`，macOS 用 `lsof`）。
-
-### 窗口与外观
-
-- 自定义标题栏（Windows / Linux），macOS 使用原生红绿灯按钮
-- 窗口位置、大小、最大化状态持久化，防止外接显示器断开后窗口跑出屏幕
-- 设置抽屉（通用 + 关于），可调整字号、滚动缓冲、自动打开任务设置
-- 应用配置存储在 `~/.Gittim/settings.json`
-
-## 技术栈
-
-- **Electron** 39 — 桌面应用框架
-- **Vue 3** — Composition API + `<script setup lang="ts">`
-- **xterm.js** 6 — 终端模拟
-- **node-pty** — 伪终端
-- **Element Plus** — UI 组件库
-- **diff2html** — Diff 解析
-- **TypeScript** — 全面类型覆盖（主进程 + 预加载 + 渲染进程）
-- **electron-vite** — 构建工具链
-
-## 开发
-
-包管理器使用 **yarn**。
+一行命令注册 MCP：
 
 ```bash
-# 安装依赖
-yarn
-
-# 启动开发服务（HMR 热更新）
-yarn dev
-
-# 类型检查
-yarn typecheck
-
-# 代码检查
-yarn lint
-
-# 格式化
-yarn format
+claude mcp add -s user -t sse gittim-browser http://127.0.0.1:9876/sse
 ```
 
-## 构建
+## ⚙️ 后台任务
+
+把 `npm run dev`、`docker compose up` 这类长时间运行的命令交给后台：
+
+- 每个任务独立运行，输出实时流式回放
+- 停止、重启、删除，随时管理
+- 自动读取 `package.json` 的 scripts，一键填入
+- 应用重启后任务定义保留，按需启动
+
+## 🎤 语音输入
+
+按住 `F2` 说话，松开自动转写并粘贴到终端。完全离线运行，基于 whisper.cpp，模型内置在安装包中，无需网络。
+
+- 中英混说（语言设为 `auto`）
+- 录音时显示音量电平条
+- 麦克风设备可在设置中切换
+
+## ⌨️ 快捷键
+
+| 快捷键 | 功能 |
+|---|---|
+| `Ctrl+Shift+D` | 向右分割 |
+| `Ctrl+Shift+S` | 向下分割 |
+| `Ctrl+Shift+W` | 关闭窗格 |
+| `Ctrl+F` | 搜索终端 |
+| `F2` (按住) | 语音输入 |
+| `Ctrl+=` | 放大字号 |
+| `Ctrl+-` | 缩小字号 |
+| `Ctrl+0` | 重置字号 |
+
+所有快捷键可在设置中自定义。
+
+## 🎨 主题
+
+跟随系统自动切换暗色/亮色，也可手动固定。
+
+## 📦 安装
+
+从 [Releases](https://github.com/Bangbabaz/Gittim/releases) 下载最新版本：
+
+- **Windows** — `.exe` NSIS 安装包
+- **macOS** — `.dmg`
+- **Linux** — `.AppImage` / `.snap` / `.deb`
+
+## 🛠 开发
 
 ```bash
-# 构建安装包
-yarn build:win      # Windows (NSIS)
-yarn build:mac      # macOS (DMG)
-yarn build:linux    # Linux (AppImage / Snap / Deb)
+yarn              # 安装依赖
+yarn dev          # 启动开发服务 (HMR)
+yarn typecheck    # TypeScript 检查
+yarn lint         # ESLint
+yarn build:win    # 构建 Windows
+yarn build:mac    # 构建 macOS
+yarn build:linux  # 构建 Linux
 ```
 
-## 平台支持
+## 🏗 技术栈
 
-Windows、macOS、Linux 全平台支持。Shell 集成覆盖 Bash、Zsh、PowerShell / pwsh、Cmd。
+Electron · Vue 3 · xterm.js · TypeScript · Element Plus · node-pty · whisper.cpp
+
+## 📄 协议
+
+[MIT](LICENSE)
