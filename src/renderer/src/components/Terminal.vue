@@ -86,10 +86,13 @@ const emit = defineEmits<{
 const terminalRef = ref<HTMLDivElement>()
 const toolbarRef = ref<InstanceType<typeof PaneToolbar>>()
 
-// 浏览器抽屉 —— 从面板右侧滑入，宽度可拖拽调节
+// 浏览器抽屉 —— 从面板右侧滑入，宽度可拖拽调节。
+// browserMounted 控制 webview 生命周期：首次打开后常驻，收起抽屉不销毁浏览器。
+// browserOpen 控制抽屉可见性：X / 工具栏按钮 / el-drawer 关闭都只改这个。
 const DEFAULT_BROWSER_WIDTH = 480
 const MIN_BROWSER_WIDTH = 360
 const MAX_BROWSER_WIDTH = 2000
+const browserMounted = ref(false)
 const browserOpen = ref(false)
 const browserWidth = ref(DEFAULT_BROWSER_WIDTH)
 
@@ -679,6 +682,7 @@ onMounted(async () => {
   // main process 推送此事件,面板自动打开浏览器抽屉。
   unsubscribeBrowserActivate = window.api.onBrowserActivate((requestedPaneId) => {
     if (requestedPaneId === props.paneId) {
+      browserMounted.value = true
       browserOpen.value = true
     }
   })
@@ -725,7 +729,7 @@ onUnmounted(() => {
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
-      @toggle-browser="browserOpen = !browserOpen"
+      @toggle-browser="browserMounted = true; browserOpen = !browserOpen"
     />
     <div class="pane-body">
       <div class="terminal-area">
@@ -754,7 +758,7 @@ onUnmounted(() => {
       @update:model-value="(v: boolean) => browserOpen = v"
       @resize-end="onBrowserResizeEnd"
     >
-      <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
+      <BrowserDrawer v-if="browserMounted" :pane-id="paneId" @close="browserOpen = false" />
     </el-drawer>
     <Teleport to="body">
       <div
