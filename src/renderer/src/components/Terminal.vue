@@ -92,10 +92,6 @@ const MIN_BROWSER_WIDTH = 360
 const MAX_BROWSER_WIDTH = 2000
 const browserOpen = ref(false)
 const browserWidth = ref(DEFAULT_BROWSER_WIDTH)
-const browserDragState = ref<{
-  startX: number
-  startWidth: number
-} | null>(null)
 
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
@@ -558,30 +554,17 @@ const onTerminalFocus = async (): Promise<void> => {
 
 defineExpose({ terminal, fitAddon })
 
-// ---- 浏览器抽屉 divider 拖拽（水平方向）-------------------------------
-function onBrowserDividerDown(e: MouseEvent): void {
-  browserDragState.value = {
-    startX: e.clientX,
-    startWidth: browserWidth.value
-  }
-  e.preventDefault()
+// ---- 浏览器抽屉宽度 ---------------------------------------------------
+function clampBrowserWidth(w: number): number {
+  return Math.round(Math.max(MIN_BROWSER_WIDTH, Math.min(MAX_BROWSER_WIDTH, w)))
 }
 
-function onBrowserDividerMove(e: MouseEvent): void {
-  if (!browserDragState.value) return
-  const ds = browserDragState.value
-  const delta = ds.startX - e.clientX
-  let newWidth = ds.startWidth + delta
-  newWidth = Math.max(MIN_BROWSER_WIDTH, Math.min(MAX_BROWSER_WIDTH, Math.round(newWidth)))
-  browserWidth.value = newWidth
-}
-
-function onBrowserDividerUp(): void {
-  if (browserDragState.value) {
-    // 拖拽结束时持久化宽度
-    window.api.settingsSet({ browserDrawerWidth: browserWidth.value })
-  }
-  browserDragState.value = null
+// el-drawer 拖拽结束回调，size 是最终 px 宽度
+function onBrowserResizeEnd(_e: MouseEvent, size: number): void {
+  const clamped = clampBrowserWidth(size)
+  if (browserWidth.value === clamped) return
+  browserWidth.value = clamped
+  window.api.settingsSet({ browserDrawerWidth: clamped })
 }
 
 let unsubscribeData: (() => void) | null = null
@@ -678,10 +661,6 @@ onMounted(async () => {
 
   terminal.focus()
 
-  // 浏览器 divider 拖拽事件
-  window.addEventListener('mousemove', onBrowserDividerMove)
-  window.addEventListener('mouseup', onBrowserDividerUp)
-
   // 加载浏览器抽屉宽度（持久化）
   try {
     const settings = await window.api.settingsGet()
@@ -708,8 +687,6 @@ onMounted(async () => {
 window.addEventListener('blur', closeContextMenu)
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', onBrowserDividerMove)
-  window.removeEventListener('mouseup', onBrowserDividerUp)
   window.removeEventListener('blur', closeContextMenu)
   termElement?.removeEventListener('contextmenu', onContextMenu)
   termTextarea?.removeEventListener('focus', onTerminalFocus)
@@ -764,19 +741,21 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <!-- 浏览器抽屉 —— el-drawer 风格，从右侧滑入，覆盖在终端上层 -->
-    <Transition name="browser-slide">
-      <div v-if="browserOpen" class="browser-drawer-panel" :style="{ width: browserWidth + 'px' }">
-        <div
-          class="browser-divider"
-          :class="{ dragging: !!browserDragState }"
-          @mousedown="onBrowserDividerDown"
-        />
-        <div class="browser-area">
-          <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
-        </div>
-      </div>
-    </Transition>
+    <!-- 浏览器抽屉 —— el-drawer，overlay 约束在 terminal-wrapper 内 -->
+    <el-drawer
+      :model-value="browserOpen"
+      direction="rtl"
+      :size="browserWidth"
+      resizable
+      :with-header="false"
+      :modal="false"
+      :append-to-body="false"
+      class="browser-drawer-pane"
+      @update:model-value="(v: boolean) => browserOpen = v"
+      @resize-end="onBrowserResizeEnd"
+    >
+      <BrowserDrawer :pane-id="paneId" @close="browserOpen = false" />
+    </el-drawer>
     <Teleport to="body">
       <div
         v-if="contextMenuVisible"

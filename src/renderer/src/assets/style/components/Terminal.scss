@@ -68,55 +68,18 @@
   flex-direction: column;
 }
 
-// ---- 浏览器抽屉（el-drawer 风格，pane 内）------------------------------
-// 定位在 terminal-wrapper 内，右侧滑入覆盖终端。结合 Vue <Transition>：
-// 进入时从 translateX(100%) → 0，离开时反向。.terminal-wrapper 的
-// overflow:clip 裁剪掉动画中溢出视口的部分。
-.browser-drawer-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: row;
-  background: var(--el-bg-color);
-  border-left: 1px solid var(--el-border-color);
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
-}
-
-.browser-slide-enter-active,
-.browser-slide-leave-active {
-  transition: transform 0.25s ease;
-}
-
-.browser-slide-enter-from,
-.browser-slide-leave-to {
-  transform: translateX(100%);
-}
-
-.browser-area {
-  flex: 1;
-  min-width: 0;
-  overflow: clip;
-  display: flex;
-  flex-direction: column;
-}
-
-// 抽屉左边缘的拖拽手柄（垂直方向）
-.browser-divider {
-  width: 4px;
-  flex-shrink: 0;
-  background: var(--el-border-color);
-  cursor: col-resize;
-  transition: background 0.1s;
-
-  &:hover {
-    background: var(--el-color-primary);
+// ---- 浏览器抽屉 ----------------------------------------------------
+// el-drawer 默认 position: fixed（相对于视口），这里覆盖为 absolute
+// 让 .terminal-wrapper 的 position: relative 约束其定位范围。
+// modal="false" 取消暗色遮罩；resizable 提供内置拖拽手柄。
+.browser-drawer-pane {
+  :deep(.el-drawer) {
+    position: absolute !important;
+    // el-drawer 的 rtl 过渡也用 transform，这里不动；仅改定位锚点
   }
 
-  &.dragging {
-    background: var(--el-color-primary);
+  :deep(.el-drawer__body) {
+    padding: 0;
   }
 }
 
