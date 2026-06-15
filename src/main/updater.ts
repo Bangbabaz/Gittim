@@ -79,8 +79,18 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
 /** 手动触发更新检查（renderer 菜单/按钮）。 */
 export async function checkForUpdates(): Promise<void> {
-  if (!app.isPackaged) return
-  await autoUpdater.checkForUpdates()
+  if (!app.isPackaged) {
+    sendUpdateStatus({ state: 'error', message: '开发模式不支持更新检测' })
+    return
+  }
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // autoUpdater 的 'error' 事件也会 fire,但有的异常(网络不通、GitHub 限流)
+    // 直接 throw 不给事件。这里兜底保证 renderer 一定收到一条 status。
+    sendUpdateStatus({ state: 'error', message: msg })
+  }
 }
 
 /** 退出并安装更新。 */
