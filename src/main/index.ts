@@ -12,6 +12,7 @@ import {
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
+import { execFileSync } from 'child_process'
 import { writeFile, mkdir } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -296,10 +297,80 @@ app.whenReady().then(() => {
     return gitAddWorktree(cwd, opts)
   })
 
-  // 读取剪贴板中的图片。Electron 原生 clipboard.readImage() 可直接读取
-  // NSPasteboard (macOS) / CF_DIB (Windows) 中的位图,不受 navigator.clipboard
-  // 只能读文本的限制。图片落盘到临时目录,返回绝对路径。
+  // 读取剪贴板中的图片。
+  //
+  // 优先级：
+  // 1. 文件引用（Finder/资源管理器复制图片文件）→ 直接返回原始路径
+  // 2. 位图数据（截图等）→ 落盘为临时 PNG
+  //
+  // Electron 原生 clipboard.readImage() 可直接读取 NSPasteboard (macOS) /
+  // CF_DIB (Windows) 中的位图,不受 navigator.clipboard 只能读文本的限制。
+  // 但 macOS Finder 复制文件时剪贴板存的是 file reference URL
+  // (file:///.file/id=...)，readImage() 拿到的是 Finder 生成的类型图标而非
+  // 文件内容 —— 所以必须优先走文件路径检测。
+  const IMG_EXTS = new Set([
+    'png', 'jpg', 'jpeg', 'gif', 'bmp',
+    'webp', 'svg', 'tiff', 'ico', 'heic', 'heif'
+  ])
+
   ipcMain.handle('clipboard-read-image', async (): Promise<string | null> => {
+    // ── macOS: 文件引用 URL ──────────────────────────────────────────
+    if (process.platform === 'darwin') {
+      try {
+        const fileUrl = clipboard.read('public.file-url') as string | null
+        if (fileUrl && typeof fileUrl === 'string' && fileUrl.startsWith('file://')) {
+          // file:///.file/id=... 是不透明的 macOS file reference URL,需要用
+          // osascript 通过 Foundation 解析为真实 POSIX 路径。
+          const realPath = execFileSync('osascript', [
+            '-e',
+            `get POSIX path of (POSIX file "${fileUrl}")`
+          ], { encoding: 'utf8', timeout: 3000 }).trim()
+          if (realPath && existsSync(realPath)) {
+            const ext = realPath.split('.').pop()?.toLowerCase()
+            if (ext && IMG_EXTS.has(ext)) return realPath
+          }
+        }
+      } catch {
+        // osascript 解析失败或文件不存在,fallthrough 到 readImage
+      }
+    }
+
+    // ── Windows: CF_HDROP ────────────────────────────────────────────
+    if (process.platform === 'win32') {
+      try {
+        const buf = clipboard.readBuffer('FileNameW')
+        if (buf && buf.length > 0) {
+          // FileNameW / CF_HDROP: DROPFILES 头部的 pFiles (DWORD, offset 0)
+          // 指向文件列表起始偏移。列表是 UTF-16LE null-terminated 字符串,
+          // 以双 null 结尾。
+          const pFiles = buf.readUInt32LE(0)
+          let pos = pFiles
+          const paths: string[] = []
+          while (pos < buf.length - 1) {
+            let end = pos
+            while (end < buf.length - 1 && !(buf[end] === 0 && buf[end + 1] === 0)) {
+              end += 2
+            }
+            if (end > pos) {
+              paths.push(buf.toString('utf16le', pos, end))
+            }
+            pos = end + 2
+            // 双 null 表示列表结束
+            if (pos >= buf.length - 1 || (buf[pos] === 0 && buf[pos + 1] === 0)) break
+          }
+          for (const p of paths) {
+            if (existsSync(p)) {
+              const ext = p.split('.').pop()?.toLowerCase()
+              if (ext && IMG_EXTS.has(ext)) return p
+            }
+          }
+        }
+      } catch {
+        // 剪贴板不含 FileNameW 数据,fallthrough 到 readImage
+      }
+    }
+
+    // ── 位图（截图等）─────────────────────────────────────────────────
     const img = clipboard.readImage()
     if (img.isEmpty()) return null
     // macOS 截图进剪贴板是 PNG;Windows 截图一般是 BMP/PNG,统一写 PNG。
