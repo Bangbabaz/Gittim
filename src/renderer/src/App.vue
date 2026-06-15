@@ -10,7 +10,8 @@ import {
   Mic,
   Globe,
   Copy,
-  Check
+  Check,
+  FolderOpen
 } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
@@ -404,6 +405,13 @@ function winClose(): void {
   window.api.winClose()
 }
 
+async function onOpenDirectory(): Promise<void> {
+  const dir = await window.api.selectDirectory()
+  if (dir && activeId.value) {
+    onSplit(activeId.value, 'row', dir)
+  }
+}
+
 const rectStyle = (rect: {
   left: number
   top: number
@@ -513,6 +521,9 @@ onUnmounted(() => {
   <div class="title-bar" :class="{ mac: isMac }">
     <span class="title-bar-text">Gittim</span>
     <div class="title-bar-right">
+      <button class="tb-btn tb-folder" title="打开目录为新面板" @click="onOpenDirectory">
+        <FolderOpen :size="14" />
+      </button>
       <button class="tb-btn tb-settings" title="设置" @click="showSettings = true">
         <SettingsIcon :size="14" />
       </button>
@@ -1023,6 +1034,7 @@ onUnmounted(() => {
   border-left: 1px solid var(--el-border-color);
 }
 
+.tb-folder,
 .tb-settings {
   color: var(--el-text-color-secondary);
 

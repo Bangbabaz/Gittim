@@ -15,7 +15,8 @@ import {
   SplitSquareHorizontal,
   SplitSquareVertical,
   X,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  FolderOpen
 } from 'lucide-vue-next'
 import PaneToolbar from './PaneToolbar.vue'
 import BrowserDrawer from './BrowserDrawer.vue'
@@ -66,7 +67,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'focus', paneId: string): void
-  (e: 'split', paneId: string, direction: 'row' | 'column'): void
+  (e: 'split', paneId: string, direction: 'row' | 'column', cwd?: string): void
   (e: 'close', paneId: string): void
   (
     e: 'createWorktree',
@@ -370,6 +371,10 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
         e.preventDefault()
         emit('split', props.paneId, 'column')
         return false
+      case 'openDirectory':
+        e.preventDefault()
+        void onOpenDirectory()
+        return false
       case 'closePane':
         e.preventDefault()
         requestClose()
@@ -502,6 +507,14 @@ const onSplitRight = (): void => {
 const onSplitDown = (): void => {
   contextMenuVisible.value = false
   emit('split', props.paneId, 'column')
+}
+
+const onOpenDirectory = async (): Promise<void> => {
+  contextMenuVisible.value = false
+  const dir = await window.api.selectDirectory()
+  if (dir) {
+    emit('split', props.paneId, 'row', dir)
+  }
 }
 
 // Closing a pane kills its shell and every child (dev servers, editors).
@@ -833,6 +846,12 @@ onUnmounted(() => {
           </div>
 
           <div class="cm-divider" />
+
+          <div class="cm-item" @click="onOpenDirectory">
+            <FolderOpen :size="14" class="cm-icon" />
+            <span class="cm-label">打开目录…</span>
+            <span class="cm-shortcut">Ctrl+Shift+O</span>
+          </div>
 
           <div class="cm-item" @click="onOpenSettings">
             <SettingsIcon :size="14" class="cm-icon" />

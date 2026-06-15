@@ -1,6 +1,7 @@
 export type ShortcutAction =
   | 'splitRight'
   | 'splitDown'
+  | 'openDirectory'
   | 'closePane'
   | 'search'
   | 'fontSizeUp'
@@ -22,6 +23,7 @@ export interface ShortcutDef {
 export const SHORTCUT_DEFS: ShortcutDef[] = [
   { action: 'splitRight', label: '向右拆分', defaultKeys: 'Ctrl+Shift+D' },
   { action: 'splitDown', label: '向下拆分', defaultKeys: 'Ctrl+Shift+S' },
+  { action: 'openDirectory', label: '打开目录为新面板', defaultKeys: 'Ctrl+Shift+O' },
   { action: 'closePane', label: '关闭面板', defaultKeys: 'Ctrl+Shift+W' },
   { action: 'search', label: '搜索', defaultKeys: 'Ctrl+F' },
   { action: 'fontSizeUp', label: '字体放大', defaultKeys: 'Ctrl+=' },
