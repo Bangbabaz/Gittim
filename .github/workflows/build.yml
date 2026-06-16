@@ -16,8 +16,6 @@ jobs:
             platform: win
           - os: macos-latest
             platform: mac
-          - os: ubuntu-latest
-            platform: linux
     runs-on: ${{ matrix.os }}
 
     env:
@@ -31,10 +29,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Install Linux system deps
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools rpm
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
