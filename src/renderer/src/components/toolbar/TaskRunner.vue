@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { Play, RotateCw, Square, ListChecks, ChevronDown } from 'lucide-vue-next'
 import { useTasks } from '../../composables/useTasks'
 import type { TaskMeta } from '@shared/types'
@@ -11,9 +11,9 @@ import type { TaskMeta } from '@shared/types'
 // 展示和控制当前 pane cwd 下的命令。"npm run dev in folder A" 和 "in folder B"
 // 各自独立。
 //
-// 共享数据来自 useTasks() —— 模块级单例。之前每个 TaskRunner 各自维护 allTasks
-// ref + 各自订阅 onTaskStatus / onTaskRemoved,N 个 pane 就触发 N 次 upsert,
-// task 状态变化时主线程被重复广播打到。现在所有 pane 读同一份 reactive ref。
+// 共享数据来自 useTasks() —— 模块级单例。selectedId 也是共享的,所以一端选中
+// 任务后另一端(TasksDrawer)自动看到同一选中。本组件只在当前 cwd 的任务中寻找
+// 全局 selectedId,找不到就显示"选择命令"。
 
 const props = defineProps<{
   cwd: string
@@ -25,8 +25,7 @@ const emit = defineEmits<{
   manageTasks: [cwd?: string, newDraft?: boolean]
 }>()
 
-const { allTasks } = useTasks()
-const selectedId = ref<string | null>(null)
+const { allTasks, selectedId, selectTask } = useTasks()
 
 const normPath = (p: string | undefined): string => {
   if (!p) return ''
@@ -42,22 +41,12 @@ const samePath = (a: string | undefined, b: string | undefined): boolean => {
 const paneTasks = computed(() =>
   props.cwd ? allTasks.value.filter((t) => samePath(t.cwd, props.cwd)) : []
 )
+// 只在当前 pane 的 paneTasks 中查找全局 selectedId。跨 cwd 的全局选中的任务
+// 不在本 cwd 内时返回 null —— 下拉显示"选择命令",不抢占全局选择。
 const selectedTask = computed<TaskMeta | null>(
   () => paneTasks.value.find((t) => t.id === selectedId.value) || null
 )
 const runningTasks = computed(() => paneTasks.value.filter((t) => t.status === 'running'))
-
-watch(
-  paneTasks,
-  (list) => {
-    if (selectedId.value && !list.some((t) => t.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
-      selectedId.value = list[0].id
-    }
-  },
-  { immediate: true }
-)
 
 const onPickCommand = (cmd: string): void => {
   if (cmd === '__manage__') {
@@ -68,7 +57,7 @@ const onPickCommand = (cmd: string): void => {
     emit('manageTasks', props.cwd, true)
     return
   }
-  selectedId.value = cmd
+  selectTask(cmd)
 }
 
 const runSelected = async (): Promise<void> => {

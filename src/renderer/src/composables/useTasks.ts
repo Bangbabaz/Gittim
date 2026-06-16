@@ -1,7 +1,8 @@
-import { ref, type Ref } from 'vue'
+import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 import type { TaskMeta } from '@shared/types'
 
-// 全局后台任务列表 —— 跨所有 pane 的 TaskRunner、TasksDrawer 共享一份 reactive ref。
+// 全局后台任务列表 + 选中状态 —— 跨所有 pane 的 TaskRunner、TasksDrawer、
+// TaskManagerDialog 共享同一份 reactive ref。
 //
 // 改造前每个 TaskRunner 各自 fetch + 维护 allTasks ref + 订阅 onTaskStatus /
 // onTaskRemoved。N 个 pane 就触发 N 次 upsert + N 次响应式更新,task 状态变化
@@ -9,8 +10,10 @@ import type { TaskMeta } from '@shared/types'
 //
 //   - allTasks   单例 ref,所有消费者订阅同一引用 (Vue reactive 共享 → 一次更新
 //                自动驱动所有依赖它的组件)
+//   - selectedId 单例 ref,TaskRunner / TasksDrawer 共享选中状态,一端选中另一端
+//                自动同步
 //   - init()     幂等,第一次调用时 subscribe + fetch,后续调用复用同一 promise
-//   - 消费者     `const { allTasks } = useTasks()`,无需关心订阅生命周期
+//   - 消费者     `const { allTasks, selectedId } = useTasks()`,无需关心订阅生命周期
 //
 // 为什么用 taskSubscribe 而不是 taskList:main 端 broadcast (`task-status` /
 // `task-removed`) 只发给已 register 的 webContents (subscribers Set)。本 renderer
@@ -22,6 +25,16 @@ import type { TaskMeta } from '@shared/types'
 // 关心点(逐字 chunk 写 xterm),不在这里管理。
 
 const allTasks = ref<TaskMeta[]>([])
+const selectedId = ref<string | null>(null)
+
+// 当已选中的任务从全局列表消失(被删除)时,自动清空选中。
+// 放在模块顶层 —— 只注册一次,不需等 init()。
+watch(allTasks, (tasks) => {
+  if (selectedId.value && !tasks.some((t) => t.id === selectedId.value)) {
+    selectedId.value = null
+  }
+})
+
 let initPromise: Promise<void> | null = null
 
 function upsertTask(m: TaskMeta): void {
@@ -46,9 +59,23 @@ function init(): Promise<void> {
   return initPromise
 }
 
+function selectTask(id: string | null): void {
+  selectedId.value = id
+}
+
+const selectedTask = computed<TaskMeta | null>(
+  () => allTasks.value.find((t) => t.id === selectedId.value) ?? null
+)
+
 export interface UseTasksReturn {
   /** 共享的全局任务列表。所有消费者读同一引用。 */
   allTasks: Ref<TaskMeta[]>
+  /** 共享的全局选中任务 ID。TaskRunner / TasksDrawer 共用。 */
+  selectedId: Ref<string | null>
+  /** 当前选中的 TaskMeta(从 allTasks + selectedId 派生)。 */
+  selectedTask: ComputedRef<TaskMeta | null>
+  /** 更新全局选中。可在任何组件内调用。 */
+  selectTask: (id: string | null) => void
   /**
    * 首次 subscribe + fetch 完成的 promise。需要"已经拿到列表"再 select 的场景
    * (如 TasksDrawer 想自动定位某个 task)await 它。日常列表展示可以不 await,
@@ -58,5 +85,5 @@ export interface UseTasksReturn {
 }
 
 export function useTasks(): UseTasksReturn {
-  return { allTasks, ready: init() }
+  return { allTasks, selectedId, selectedTask, selectTask, ready: init() }
 }

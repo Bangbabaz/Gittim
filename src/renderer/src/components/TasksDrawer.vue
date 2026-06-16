@@ -27,7 +27,6 @@ const { xtermTheme } = useTheme()
 
 const props = defineProps<{
   modelValue: boolean
-  selectTaskId: string | null
   width: number
 }>()
 
@@ -44,11 +43,9 @@ function onResizeEnd(_e: MouseEvent, size: number): void {
   emit('widthChange', size)
 }
 
-// 任务列表来自全局 useTasks() —— 跨 TaskRunner / TasksDrawer 共享一份 reactive
-// ref,task-status / task-removed 广播由 composable 统一处理。这里只 own
-// selectedId 这种 drawer 私有状态。
-const { allTasks: tasks, ready: tasksReady } = useTasks()
-const selectedId = ref<string | null>(null)
+// 任务列表 + 选中状态来自全局 useTasks() —— 跨 TaskRunner / TasksDrawer 共享
+// 一份 reactive ref。selectedId 变化时 watch 自动 bindLog。
+const { allTasks: tasks, ready: tasksReady, selectedId, selectTask: setSelectedId } = useTasks()
 
 const selectedTask = computed(() => tasks.value.find((t) => t.id === selectedId.value) || null)
 
@@ -207,8 +204,9 @@ async function bindLog(id: string | null): Promise<void> {
   syncTaskSize()
 }
 
-function selectTask(id: string): void {
-  selectedId.value = id
+// 选择任务并绑定日志。TasksDrawer 独有日志绑定行为,不放在 composable 里。
+function selectAndBind(id: string): void {
+  setSelectedId(id)
   bindLog(id)
 }
 
@@ -254,8 +252,9 @@ onMounted(() => {
     if (id === selectedId.value && term) term.reset()
   })
   unsubRemoved = window.api.onTaskRemoved(({ id }) => {
+    // selectedId 清理由 composable 的 watch(allTasks) 负责。
+    // 这里只负责清 xterm 显示,避免残留已删除任务的日志。
     if (selectedId.value === id) {
-      selectedId.value = null
       bindLog(null)
     }
   })
@@ -270,22 +269,15 @@ onUnmounted(() => {
   term?.dispose()
 })
 
-// Drawer opened → 等 useTasks ready、init term、fit、honor external selection。
-// useTasks 的列表会被广播持续更新,这里 await ready 是为了首次打开就能基于
-// 最新列表做"selectedId 失效检查"(避免 stale id 残留)。
+// Drawer opened → 等 useTasks ready、init term、fit、bind log if selected。
 watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
     await tasksReady
-    if (selectedId.value && !tasks.value.some((t) => t.id === selectedId.value)) {
-      selectedId.value = null
-    }
     await nextTick()
     ensureTerm()
-    if (props.selectTaskId) {
-      selectTask(props.selectTaskId)
-    } else if (selectedId.value) {
+    if (selectedId.value) {
       bindLog(selectedId.value)
     }
     try {
@@ -297,13 +289,11 @@ watch(
   }
 )
 
-// App passes the id of a task it just auto-opened for.
-watch(
-  () => props.selectTaskId,
-  (id) => {
-    if (id && props.modelValue) selectTask(id)
-  }
-)
+
+// 当选中任务在 drawer 打开期间变化时,自动绑定日志。关闭时不触发(节省 IO)。
+watch(selectedId, (id) => {
+  if (props.modelValue) bindLog(id)
+})
 
 // Re-theme the shared log terminal when the app theme changes.
 watch(xtermTheme, (t) => {
@@ -321,13 +311,13 @@ async function toggleTask(t: TaskMeta): Promise<void> {
     await window.api.taskStop(t.id)
   } else {
     await window.api.taskStart({ id: t.id })
-    selectTask(t.id)
+    selectAndBind(t.id)
   }
 }
 
 async function restartTask(t: TaskMeta): Promise<void> {
   await window.api.taskRestart(t.id)
-  selectTask(t.id)
+  selectAndBind(t.id)
 }
 
 async function removeTask(t: TaskMeta): Promise<void> {
@@ -409,7 +399,7 @@ function closeLogSearch(): void {
                   :key="t.id"
                   class="task-row"
                   :class="{ active: t.id === selectedId }"
-                  @click="selectTask(t.id)"
+                  @click="selectAndBind(t.id)"
                 >
                   <span class="status-dot" :class="t.status" :title="statusText[t.status]" />
                   <div class="task-meta">

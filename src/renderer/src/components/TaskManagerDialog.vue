@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, X, FolderOpen } from 'lucide-vue-next'
-import type { TaskMeta } from '@shared/types'
+import { useTasks } from '../composables/useTasks'
 
 interface EditItem {
   key: string
@@ -92,9 +92,12 @@ const scopeName = computed(() => {
 })
 const dialogTitle = computed(() => (props.scopeCwd ? `管理命令 · ${scopeName.value}` : '管理命令'))
 
-async function reload(): Promise<void> {
-  const list: TaskMeta[] = await window.api.taskList()
-  items.value = list.map((t) => ({
+// 全局共享任务列表。不再用 taskList() 快照 —— 直接读 allTasks,自动反映
+// 其他 pane 的创建/修改/删除。
+const { allTasks, ready: tasksReady } = useTasks()
+
+function buildItems(): void {
+  items.value = allTasks.value.map((t) => ({
     key: nextKey(),
     id: t.id,
     name: t.name,
@@ -109,11 +112,50 @@ async function reload(): Promise<void> {
   selectedKey.value = focus?.key ?? firstInScope?.key ?? null
 }
 
+// 对话框打开期间,外部(其他 pane / TasksDrawer)可能创建、更新或删除任务。
+// 这里把 allTasks 的实时变更同步到本地 items,但不覆盖用户正在编辑的脏行。
+watch(allTasks, (tasks) => {
+  // 新增 + 更新:only sync non-dirty items
+  for (const t of tasks) {
+    const existing = items.value.find((i) => i.id === t.id)
+    if (existing && !existing.dirty) {
+      existing.name = t.name
+      existing.command = t.command
+      existing.cwd = t.cwd
+    } else if (!existing) {
+      items.value.push({
+        key: nextKey(),
+        id: t.id,
+        name: t.name,
+        command: t.command,
+        cwd: t.cwd,
+        isNew: false,
+        dirty: false
+      })
+    }
+  }
+  // 删除:移除已不存在的行,保护未保存草稿(isNew)
+  for (let i = items.value.length - 1; i >= 0; i--) {
+    const item = items.value[i]
+    if (item.isNew) continue
+    if (item.id && !tasks.some((t) => t.id === item.id)) {
+      const wasSelected = selectedKey.value === item.key
+      items.value.splice(i, 1)
+      if (wasSelected) {
+        const sc = props.scopeCwd ? norm(props.scopeCwd) : null
+        const candidates = sc ? items.value.filter((x) => norm(x.cwd) === sc) : items.value
+        selectedKey.value = candidates[0]?.key ?? null
+      }
+    }
+  }
+})
+
 watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
-    await reload()
+    await tasksReady
+    buildItems()
     if (props.newDraft) addDraft(props.scopeCwd || undefined)
   }
 )

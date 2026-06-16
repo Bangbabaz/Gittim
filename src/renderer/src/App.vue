@@ -52,7 +52,6 @@ const appVersion = ref('')
 
 // Tasks drawer + manager dialog
 const showTasks = ref(false)
-const taskSelectId = ref<string | null>(null)
 const showTaskMgr = ref(false)
 const taskMgrFocusId = ref<string | null>(null)
 // 任务管理对话框不再"作用域到单一文件夹",现在按 cwd 分组渲染全部任务。
@@ -379,7 +378,6 @@ const onToggleAutoUpdate = (val: boolean): void => {
 }
 
 const openTasksDrawer = (): void => {
-  taskSelectId.value = null
   showTasks.value = true
 }
 
@@ -478,8 +476,9 @@ onMounted(async () => {
   watch([layout, paneCwd], scheduleSave, { deep: true })
 
   unsubscribeTaskStatus = window.api.onTaskStatus((meta) => {
+    // 任务开始运行时自动打开抽屉。selectedId 在启动前已被
+    // TaskRunner/TasksDrawer 设置,这里只负责展示抽屉。
     if (meta.status === 'running' && autoOpenTasksOnRun.value) {
-      taskSelectId.value = meta.id
       showTasks.value = true
     }
   })
@@ -930,7 +929,6 @@ onUnmounted(() => {
   </el-drawer>
   <TasksDrawer
     v-model="showTasks"
-    :select-task-id="taskSelectId"
     :width="tasksDrawerWidth"
     @width-change="onTasksDrawerWidthChange"
     @edit-task="(id: string, cwd?: string) => openTaskManager(id, cwd ?? null)"
