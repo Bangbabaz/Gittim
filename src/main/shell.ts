@@ -290,6 +290,17 @@ export async function ptyHasRunningProcess(paneId: string): Promise<boolean> {
 }
 
 /**
+ * lsof 在 LANG 未设置或非 UTF-8 时，会把非 ASCII 路径字节输出为
+ * 字面 \\xHH 转义文字（如 \\xe8\\xb4\\xa2 而不是 财）。此函数将
+ * 这些转义序列还原为 UTF-8 字符串。
+ */
+function decodeLsofEscapes(raw: string): string {
+  return raw.replace(/\\x([0-9a-fA-F]{2})/g, (_m, hex) => {
+    return String.fromCharCode(parseInt(hex, 16))
+  })
+}
+
+/**
  * Best-effort lookup of the PTY shell's current working directory by PID.
  * Used to keep the toolbar in sync when the user `cd`s in the shell
  * (the toolbar's cwd prop is set at pane creation and stays stale otherwise).
@@ -312,11 +323,23 @@ export async function getPtyCwd(paneId: string): Promise<string | null> {
     if (process.platform === 'darwin') {
       const { stdout } = await execFileP('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-Fn'], {
         encoding: 'utf8',
-        timeout: 2000
+        timeout: 2000,
+        // 打包后的 Electron 从 Finder/Dock 启动时没有 LANG 环境变量，
+        // lsof 在 LANG 未设置或非 UTF-8 时会把非 ASCII 路径字节输出为
+        // 字面 \\xHH 转义。显式传 C.UTF-8 确保 lsof 输出正确的 UTF-8 字符。
+        env: { ...process.env, LANG: 'C.UTF-8' }
       })
       // -Fn output: lines like "p<pid>\nfcwd\nn/abs/path"
       const match = stdout.match(/^n(.+)$/m)
-      return match ? match[1] : null
+      if (!match) return null
+      let path = match[1]
+      // 兜底：即使设置了 LANG=C.UTF-8，极端情况下（如系统 locale 数据库
+      // 损坏）lsof 仍可能输出 \\xHH 转义。decodeLsofEscapes 把这些字面
+      // 转义还原为 UTF-8 字符串，防止乱码路径覆盖 OSC 7 提供的正确值。
+      if (path.includes('\\x')) {
+        path = decodeLsofEscapes(path)
+      }
+      return path
     }
   } catch {
     // PID gone, permissions denied, lsof missing — silently fall back
