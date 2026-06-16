@@ -909,7 +909,7 @@ onUnmounted(() => {
               </div>
               <div class="about-row">
                 <dt>配置文件</dt>
-                <dd class="mono">~/.Gittim/settings.json</dd>
+                <dd class="mono">~/.gittim/settings.json</dd>
               </div>
             </dl>
             <div class="about-update">

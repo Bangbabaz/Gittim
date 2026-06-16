@@ -33,7 +33,7 @@ function shellName(shellPath: string): string {
 }
 
 function integrationsDir(): string {
-  const dir = join(app.getPath('home'), '.Gittim', 'integrations')
+  const dir = join(app.getPath('home'), '.gittim', 'integrations')
   mkdirSync(dir, { recursive: true })
   return dir
 }
