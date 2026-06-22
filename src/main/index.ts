@@ -38,6 +38,8 @@ import {
   getMergeStatus,
   resolveConflictBySide,
   markConflictResolved,
+  getConflictVersions,
+  saveConflictResolution,
   abortMergeOp,
   continueMergeOp,
   getFileDiff,
@@ -47,6 +49,7 @@ import {
   gitCommitBranches,
   gitMerge,
   gitRebase,
+  gitCreateBranch,
   gitPush,
   gitPull,
   gitDeleteBranch
@@ -258,6 +261,14 @@ app.whenReady().then(() => {
   ipcMain.handle('git-conflict-mark-resolved', (_event, cwd: string, file: string) =>
     markConflictResolved(cwd, file)
   )
+  ipcMain.handle('git-conflict-versions', (_event, cwd: string, file: string) =>
+    getConflictVersions(cwd, file)
+  )
+  ipcMain.handle(
+    'git-conflict-save',
+    (_event, cwd: string, file: string, content: string) =>
+      saveConflictResolution(cwd, file, content)
+  )
   ipcMain.handle(
     'git-merge-abort',
     (_event, cwd: string, kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert') =>
@@ -287,6 +298,10 @@ app.whenReady().then(() => {
   // Branch operations (from the branch context menu)
   ipcMain.handle('git-merge', (_event, cwd: string, ref: string) => gitMerge(cwd, ref))
   ipcMain.handle('git-rebase', (_event, cwd: string, ref: string) => gitRebase(cwd, ref))
+  ipcMain.handle(
+    'git-branch-create',
+    (_event, cwd: string, name: string, startRef: string) => gitCreateBranch(cwd, name, startRef)
+  )
   ipcMain.handle('git-push', (_event, cwd: string, branch: string) => gitPush(cwd, branch))
   ipcMain.handle('git-pull', (_event, cwd: string) => gitPull(cwd))
   ipcMain.handle('git-branch-delete', (_event, cwd: string, branch: string, force?: boolean) =>

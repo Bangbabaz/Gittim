@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Play, RotateCw, Square, ListChecks, ChevronDown } from 'lucide-vue-next'
+import { Play, RotateCw, Square, ChevronDown } from 'lucide-vue-next'
 import { useTasks } from '../../composables/useTasks'
 import type { TaskMeta } from '@shared/types'
 
@@ -20,7 +20,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  openTasks: []
   /** cwd 默认 = 当前 pane;newDraft 表示"为此文件夹新建命令"快捷入口。 */
   manageTasks: [cwd?: string, newDraft?: boolean]
 }>()
@@ -146,12 +145,6 @@ const stopTask = async (id: string): Promise<void> => {
       </el-dropdown-menu>
     </template>
   </el-dropdown>
-
-  <el-tooltip content="查看任务" placement="bottom" :show-after="300">
-    <button class="run-btn view" @click="emit('openTasks')">
-      <ListChecks :size="13" />
-    </button>
-  </el-tooltip>
 </template>
 
 <style scoped lang="scss" src="@renderer/assets/style/components/toolbar/TaskRunner.scss"></style>

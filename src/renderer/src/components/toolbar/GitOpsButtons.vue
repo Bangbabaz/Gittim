@@ -21,6 +21,12 @@ const emit = defineEmits<{
 const showLog = ref(false)
 const showMerge = ref(false)
 
+function openMergePanel(): void {
+  showMerge.value = true
+}
+
+defineExpose({ openMergePanel })
+
 const mergeBadgeLabel = computed(() => {
   const s = props.mergeStatus
   if (!s || (!s.inProgress && !s.conflicts.length)) return ''

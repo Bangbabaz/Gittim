@@ -11,7 +11,8 @@ import {
   Globe,
   Copy,
   Check,
-  FolderOpen
+  FolderOpen,
+  ListChecks
 } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
@@ -520,6 +521,9 @@ onUnmounted(() => {
   <div class="title-bar" :class="{ mac: isMac }">
     <span class="title-bar-text">Gittim</span>
     <div class="title-bar-right">
+      <button class="tb-btn" title="查看任务" @click="openTasksDrawer">
+        <ListChecks :size="14" />
+      </button>
       <button class="tb-btn tb-folder" title="打开目录为新面板" @click="onOpenDirectory">
         <FolderOpen :size="14" />
       </button>
@@ -972,7 +976,6 @@ onUnmounted(() => {
           @cwd-change="onCwdChange"
           @font-size-change="onFontSizeChange"
           @open-settings="showSettings = true"
-          @open-tasks="openTasksDrawer"
           @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
         />
       </div>

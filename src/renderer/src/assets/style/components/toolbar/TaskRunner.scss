@@ -82,10 +82,4 @@
       background: var(--el-color-danger-light-3);
     }
   }
-
-  // view 按钮中性 —— 不是 run/stop 这种语义动作,跟随中性 outlined 风格,在浅色
-  // 主题下白色 icon 不可读时也能可见。
-  &.view {
-    @include neutral-outlined-btn;
-  }
 }

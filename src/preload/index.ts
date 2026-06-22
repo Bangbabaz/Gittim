@@ -11,6 +11,7 @@ import type {
   WorktreeAddOpts,
   MergeStatus,
   MergeOpKind,
+  ConflictVersions,
   CommitInfo,
   CommitDetail,
   CommitLogOpts,
@@ -63,6 +64,10 @@ const api = {
     ipcRenderer.invoke('git-conflict-resolve', cwd, file, side) as Promise<GitResult>,
   gitConflictMarkResolved: (cwd: string, file: string) =>
     ipcRenderer.invoke('git-conflict-mark-resolved', cwd, file) as Promise<GitResult>,
+  gitConflictVersions: (cwd: string, file: string) =>
+    ipcRenderer.invoke('git-conflict-versions', cwd, file) as Promise<ConflictVersions>,
+  gitConflictSave: (cwd: string, file: string, content: string) =>
+    ipcRenderer.invoke('git-conflict-save', cwd, file, content) as Promise<GitResult>,
   gitMergeAbort: (cwd: string, kind: MergeOpKind) =>
     ipcRenderer.invoke('git-merge-abort', cwd, kind) as Promise<GitResult>,
   gitMergeContinue: (cwd: string, kind: MergeOpKind) =>
@@ -77,6 +82,8 @@ const api = {
     ipcRenderer.invoke('git-merge', cwd, ref) as Promise<GitResult>,
   gitRebase: (cwd: string, ref: string) =>
     ipcRenderer.invoke('git-rebase', cwd, ref) as Promise<GitResult>,
+  gitBranchCreate: (cwd: string, name: string, startRef: string) =>
+    ipcRenderer.invoke('git-branch-create', cwd, name, startRef) as Promise<GitResult>,
   gitPush: (cwd: string, branch: string) =>
     ipcRenderer.invoke('git-push', cwd, branch) as Promise<GitResult>,
   gitPull: (cwd: string) => ipcRenderer.invoke('git-pull', cwd) as Promise<GitResult>,

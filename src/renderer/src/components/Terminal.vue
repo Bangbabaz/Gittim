@@ -80,7 +80,6 @@ const emit = defineEmits<{
   (e: 'paneDragStart', paneId: string): void
   (e: 'focusNeighbor', dir: 'up' | 'down' | 'left' | 'right'): void
   (e: 'openSettings'): void
-  (e: 'openTasks'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
 }>()
 
@@ -217,6 +216,9 @@ terminal.parser.registerOscHandler(7, (data) => {
     if (/^\/[A-Za-z]:/.test(path)) path = path.slice(1)
     currentCwd.value = path
   }
+  // Shell integration 每次显示 prompt 都会发送 OSC 7。即使 cwd 没变化，也用
+  // 它作为“上一条命令已结束”的事件，快速刷新 Git 状态。
+  toolbarRef.value?.refreshFast()
   return true
 })
 
@@ -235,6 +237,7 @@ terminal.parser.registerOscHandler(9, (data) => {
   const m = data.match(/^9;9;"?([^"]+?)"?\s*$/)
   if (m) {
     currentCwd.value = m[1]
+    toolbarRef.value?.refreshFast()
     return true
   }
   return false
@@ -557,6 +560,8 @@ const closeContextMenu = (): void => {
 
 const onTerminalFocus = async (): Promise<void> => {
   emit('focus', props.paneId)
+  // Git 状态不必等待 macOS 的 lsof cwd 查询；先刷新当前已知目录。
+  toolbarRef.value?.refreshFast()
   // Best-effort cwd refresh from the PTY's PID (Linux/macOS). OSC sequences
   // are the primary path; this just covers shells that don't emit them.
   try {
@@ -565,7 +570,6 @@ const onTerminalFocus = async (): Promise<void> => {
   } catch {
     // ignore
   }
-  toolbarRef.value?.refresh()
 }
 
 defineExpose({ terminal, fitAddon })
@@ -745,7 +749,6 @@ onUnmounted(() => {
       ref="toolbarRef"
       :cwd="currentCwd"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
-      @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
       @toggle-browser="browserMounted = true; browserOpen = !browserOpen"
     />
@@ -764,25 +767,30 @@ onUnmounted(() => {
       </div>
     </div>
     <!-- 浏览器抽屉 —— el-drawer，overlay 约束在 terminal-wrapper 内 -->
-    <el-drawer
-      :model-value="browserOpen"
-      direction="rtl"
-      :size="browserWidth"
-      resizable
-      :with-header="false"
-      :modal="false"
-      :append-to-body="false"
-      class="browser-drawer-pane"
-      @update:model-value="(v: boolean) => browserOpen = v"
-      @resize-end="onBrowserResizeEnd"
-    >
-      <BrowserDrawer
-        v-if="browserMounted"
-        :pane-id="paneId"
-        @collapse="browserOpen = false"
-        @close="browserOpen = false; browserMounted = false"
-      />
-    </el-drawer>
+    <div class="browser-drawer-host">
+      <el-drawer
+        :model-value="browserOpen"
+        direction="rtl"
+        :size="browserWidth"
+        resizable
+        :with-header="false"
+        :modal="false"
+        modal-penetrable
+        :append-to-body="false"
+        modal-class="browser-drawer-overlay"
+        :lock-scroll="false"
+        class="browser-drawer-pane"
+        @update:model-value="(v: boolean) => browserOpen = v"
+        @resize-end="onBrowserResizeEnd"
+      >
+        <BrowserDrawer
+          v-if="browserMounted"
+          :pane-id="paneId"
+          @collapse="browserOpen = false"
+          @close="browserOpen = false; browserMounted = false"
+        />
+      </el-drawer>
+    </div>
     <Teleport to="body">
       <div
         v-if="contextMenuVisible"

@@ -33,6 +33,10 @@ const emit = defineEmits<{
   changed: []
   /** 用户在右键菜单点击"新工作树",父级负责打开 worktree 对话框并预填 prefill。 */
   worktreeFromBranch: [prefill: string]
+  /** Git 操作进入冲突状态，父级立即打开合并面板。 */
+  conflictDetected: []
+  /** 下拉即将打开，父级完整刷新分支列表。 */
+  refreshBranches: []
 }>()
 
 const showLocal = ref(true)
@@ -57,6 +61,9 @@ const branchMenuOpen = ref(false)
 const branchMenuPos = ref({ x: 0, y: 0 })
 const branchMenuTarget = ref<BranchInfo | null>(null)
 const branchActionLoading = ref(false)
+const showCreateBranch = ref(false)
+const createBranchBase = ref<{ label: string; ref: string } | null>(null)
+const newBranchName = ref('')
 // 边缘 clamp 用:首次显示时 invisible 一帧测真实 size,clamp 完才显示。
 const branchMenuRef = ref<HTMLDivElement>()
 const branchMenuReady = ref(false)
@@ -123,7 +130,11 @@ async function ctxMergeInto(): Promise<void> {
   try {
     const r = await window.api.gitMerge(props.cwd, ref)
     if (r.success) ElMessage.success(`已合并 ${ref} 到 ${props.currentBranch}`)
-    else ElMessage.error(r.error || '合并失败(可能产生冲突,请查看冲突面板)')
+    else {
+      const status = await window.api.gitMergeStatus(props.cwd)
+      if (status.conflicts.length) emit('conflictDetected')
+      else ElMessage.error(r.error || '合并失败')
+    }
   } finally {
     branchActionLoading.value = false
     emit('changed')
@@ -139,7 +150,11 @@ async function ctxRebaseOnto(): Promise<void> {
   try {
     const r = await window.api.gitRebase(props.cwd, ref)
     if (r.success) ElMessage.success(`已将 ${props.currentBranch} 变基到 ${ref}`)
-    else ElMessage.error(r.error || '变基失败(可能产生冲突,请查看冲突面板)')
+    else {
+      const status = await window.api.gitMergeStatus(props.cwd)
+      if (status.conflicts.length) emit('conflictDetected')
+      else ElMessage.error(r.error || '变基失败')
+    }
   } finally {
     branchActionLoading.value = false
     emit('changed')
@@ -152,6 +167,35 @@ function ctxWorktreeFrom(): void {
   const prefill = ctxFromBranchValue(b)
   closeBranchMenu()
   emit('worktreeFromBranch', prefill)
+}
+
+function ctxCreateBranch(): void {
+  const b = branchMenuTarget.value
+  if (!b) return
+  createBranchBase.value = { label: b.name, ref: ctxResolveRef(b) }
+  newBranchName.value = ''
+  closeBranchMenu()
+  showCreateBranch.value = true
+}
+
+async function submitCreateBranch(): Promise<void> {
+  const name = newBranchName.value.trim()
+  const base = createBranchBase.value
+  if (!name || !base || branchActionLoading.value) return
+  branchActionLoading.value = true
+  try {
+    const r = await window.api.gitBranchCreate(props.cwd, name, base.ref)
+    if (!r.success) {
+      ElMessage.error(r.error || '新建分支失败')
+      return
+    }
+    showCreateBranch.value = false
+    optimisticBranch.value = name
+    ElMessage.success(`已从 ${base.label} 新建并切换到 ${name}`)
+    emit('changed')
+  } finally {
+    branchActionLoading.value = false
+  }
 }
 
 async function ctxPush(): Promise<void> {
@@ -326,6 +370,7 @@ const switchWithStash = async (): Promise<void> => {
     :disabled="switching"
     placeholder="(detached HEAD)"
     @change="onBranchChange"
+    @visible-change="(visible: boolean) => visible && emit('refreshBranches')"
   >
     <template #header>
       <div class="branch-filter-header">
@@ -394,6 +439,10 @@ const switchWithStash = async (): Promise<void> => {
           >来自 <b>{{ branchMenuTarget.name }}</b> 的新工作树…</span
         >
       </button>
+      <button class="bm-item" :disabled="branchActionLoading" @click="ctxCreateBranch">
+        <GitBranchPlus :size="13" />
+        <span>从 <b>{{ branchMenuTarget.name }}</b> 新建分支…</span>
+      </button>
       <div v-if="ctxIsLocal" class="bm-sep" />
       <button v-if="ctxIsLocal" class="bm-item" :disabled="branchActionLoading" @click="ctxPush">
         <ArrowUpFromLine :size="13" />
@@ -423,6 +472,34 @@ const switchWithStash = async (): Promise<void> => {
       </button>
     </div>
   </Teleport>
+
+  <el-dialog
+    v-model="showCreateBranch"
+    :title="`从 ${createBranchBase?.label || ''} 新建分支`"
+    width="420px"
+    class="wt-dialog"
+    :close-on-click-modal="false"
+    @closed="createBranchBase = null"
+  >
+    <el-input
+      v-model="newBranchName"
+      placeholder="输入新分支名，例如 feature/login"
+      autofocus
+      @keyup.enter="submitCreateBranch"
+    />
+    <template #footer>
+      <el-button size="small" @click="showCreateBranch = false">取消</el-button>
+      <el-button
+        size="small"
+        type="primary"
+        :disabled="!newBranchName.trim()"
+        :loading="branchActionLoading"
+        @click="submitCreateBranch"
+      >
+        新建并切换
+      </el-button>
+    </template>
+  </el-dialog>
 
   <!-- Branch switch with uncommitted changes: 3-way choice -->
   <el-dialog

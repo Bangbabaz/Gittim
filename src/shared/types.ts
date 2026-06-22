@@ -91,6 +91,14 @@ export interface ConflictedFile {
   description: string
 }
 
+/** 三方合并编辑器所需的索引版本；缺失的一侧表示新增/删除冲突。 */
+export interface ConflictVersions {
+  base: string | null
+  ours: string | null
+  theirs: string | null
+  working: string | null
+}
+
 export interface MergeStatus {
   /** null = 没有进行中的操作。 */
   inProgress: MergeOpKind | null

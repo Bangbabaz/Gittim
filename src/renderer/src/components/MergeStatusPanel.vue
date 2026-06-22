@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GitMerge, GitCommitHorizontal, Eye, AlertTriangle, Check } from 'lucide-vue-next'
+import { GitMerge, GitCommitHorizontal, Eye, AlertTriangle, Check, Columns3 } from 'lucide-vue-next'
 import DiffViewer from './DiffViewer.vue'
+import ManualMergeDialog from './ManualMergeDialog.vue'
 
 type MergeOpKind = 'merge' | 'rebase' | 'cherry-pick' | 'revert'
 
@@ -31,9 +32,10 @@ const emit = defineEmits<{
 
 const status = ref<MergeStatus | null>(null)
 const loading = ref(false)
-const busyFile = ref<string | null>(null)
 const aborting = ref(false)
 const continuing = ref(false)
+const manualFile = ref<ConflictedFile | null>(null)
+const showManualMerge = ref(false)
 
 // Pinned at refresh time so the abort/continue buttons keep working even after
 // status briefly becomes null mid-operation. Without this the kind chip would
@@ -69,17 +71,6 @@ const opClass = computed(() => {
       return ''
   }
 })
-
-// During a rebase, git's --ours/--theirs labels are reversed (vs a merge):
-// --ours = the commit being replayed (the branch you rebased)
-// --theirs = the branch you rebased onto
-// We surface this explicitly so the user picks the right side.
-const oursLabel = computed(() =>
-  status.value?.inProgress === 'rebase' ? '保留被变基侧（--ours）' : '保留我方（--ours）'
-)
-const theirsLabel = computed(() =>
-  status.value?.inProgress === 'rebase' ? '保留变基目标（--theirs）' : '保留对方（--theirs）'
-)
 
 let refreshGen = 0
 
@@ -124,40 +115,15 @@ function invalidateDiffCache(path: string): void {
   }
 }
 
-async function pickSide(file: ConflictedFile, side: 'ours' | 'theirs'): Promise<void> {
-  if (!props.cwd) return
-  busyFile.value = file.path
-  try {
-    const r = await window.api.gitConflictResolve(props.cwd, file.path, side)
-    if (!r.success) {
-      ElMessage.error(r.error || '解决冲突失败')
-      return
-    }
-    ElMessage.success(side === 'ours' ? '已保留我方版本' : '已保留对方版本')
-    invalidateDiffCache(file.path)
-    emit('changed')
-    await refresh()
-  } finally {
-    busyFile.value = null
-  }
+function openManualMerge(file: ConflictedFile): void {
+  manualFile.value = file
+  showManualMerge.value = true
 }
 
-async function markResolved(file: ConflictedFile): Promise<void> {
-  if (!props.cwd) return
-  busyFile.value = file.path
-  try {
-    const r = await window.api.gitConflictMarkResolved(props.cwd, file.path)
-    if (!r.success) {
-      ElMessage.error(r.error || '标记失败')
-      return
-    }
-    ElMessage.success('已标记为解决')
-    invalidateDiffCache(file.path)
-    emit('changed')
-    await refresh()
-  } finally {
-    busyFile.value = null
-  }
+async function onManualSaved(): Promise<void> {
+  if (manualFile.value) invalidateDiffCache(manualFile.value.path)
+  emit('changed')
+  await refresh()
 }
 
 // Inline diff preview — folded in by default so the file list stays scannable.
@@ -293,6 +259,10 @@ const canContinue = computed(() => {
             <span class="ms-status-chip" :title="f.status">{{ f.description }}</span>
             <span class="ms-path" :title="f.path">{{ f.path }}</span>
             <div class="ms-actions">
+              <el-button size="small" type="primary" @click="openManualMerge(f)">
+                <Columns3 :size="13" />
+                手动合并
+              </el-button>
               <el-tooltip content="查看差异" placement="top" :show-after="300">
                 <button
                   class="ms-icon-btn"
@@ -302,20 +272,6 @@ const canContinue = computed(() => {
                   <Eye :size="13" />
                 </button>
               </el-tooltip>
-              <el-button size="small" :loading="busyFile === f.path" @click="pickSide(f, 'ours')">
-                {{ oursLabel }}
-              </el-button>
-              <el-button size="small" :loading="busyFile === f.path" @click="pickSide(f, 'theirs')">
-                {{ theirsLabel }}
-              </el-button>
-              <el-button
-                size="small"
-                type="success"
-                :loading="busyFile === f.path"
-                @click="markResolved(f)"
-              >
-                已解决
-              </el-button>
             </div>
           </div>
           <div v-if="expanded.has(f.path)" class="ms-diff">
@@ -352,6 +308,12 @@ const canContinue = computed(() => {
         继续操作
       </el-button>
     </footer>
+    <ManualMergeDialog
+      v-model="showManualMerge"
+      :cwd="cwd"
+      :file="manualFile"
+      @saved="onManualSaved"
+    />
   </div>
 </template>
 

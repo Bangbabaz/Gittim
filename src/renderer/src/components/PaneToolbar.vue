@@ -17,7 +17,7 @@ import type { BranchInfo, DiffStats, MergeStatus } from '@shared/types'
 //   1. 非 git 目录也渲染工具栏 —— 仅隐藏 BranchSelector / WorktreePanel /
 //      GitOpsButtons,TaskRunner + IdeLauncher 与 git 无关,任意 cwd 都可用。
 //   2. refresh() 节流:Terminal focus 频繁触发,200ms 内合并多次。
-//   3. refreshGen 仍然保留 —— 用户主动切分支等场景能立即中断 in-flight。
+//   3. 快速刷新只查分支头 / diff / 冲突；完整刷新才重扫分支列表。
 
 type WorktreePlacement = 'top' | 'bottom' | 'left' | 'right'
 
@@ -27,7 +27,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
-  openTasks: []
   manageTasks: [cwd?: string, newDraft?: boolean]
   toggleBrowser: []
 }>()
@@ -42,24 +41,28 @@ const mergeStatus = ref<MergeStatus | null>(null)
 // switching / 乐观分支显示都留在 BranchSelector 内部 —— 父级不需要参与切换流程,
 // 切完只关心 refresh,通过子级 emit('changed') 触发。
 
-// 多次 refresh() 用 gen 标记;每次 in-flight call 写状态前都检查自己是不是最新
-// 的 —— 用户快速切分支或快速 focus 不同 pane 时,旧调用的 IPC 结果不会污染
-// 新状态。
-let refreshGen = 0
+// 各字段独立 generation：快速刷新不会取消仍在进行的分支列表刷新，而同一字段
+// 的旧请求又不会覆盖新结果。
+let infoGen = 0
+let branchesGen = 0
+let statsGen = 0
+let mergeGen = 0
 
 // 200ms throttle:窗口 / focus / cwd 变化连续触发时合并。第一次立即跑,后续 200ms
 // 内合并到一次,最末状态最准。
 let throttleTimer: ReturnType<typeof setTimeout> | null = null
 let throttlePending = false
+let pendingMode: 'fast' | 'full' = 'fast'
 let lastRunAt = 0
 const THROTTLE_MS = 200
 
-const refresh = async (): Promise<void> => {
+const refresh = async (mode: 'fast' | 'full' = 'full'): Promise<void> => {
   if (!props.cwd) return
-  const myGen = ++refreshGen
+  const cwd = props.cwd
+  const myInfoGen = ++infoGen
   try {
-    const info = await window.api.getGitInfo(props.cwd)
-    if (myGen !== refreshGen) return
+    const info = await window.api.getGitInfo(cwd)
+    if (myInfoGen !== infoGen || cwd !== props.cwd) return
     if (!info.isRepo) {
       isRepo.value = false
       currentBranch.value = null
@@ -68,19 +71,32 @@ const refresh = async (): Promise<void> => {
       diffStats.value = { added: 0, deleted: 0 }
       return
     }
-    const [list, stats, merge] = await Promise.all([
-      window.api.getGitBranches(props.cwd),
-      window.api.getGitDiffStats(props.cwd),
-      window.api.gitMergeStatus(props.cwd)
-    ])
-    if (myGen !== refreshGen) return
+    // 当前分支先落 UI，不再等待 diff / merge / branches 全部完成。
     isRepo.value = true
     currentBranch.value = info.branch
-    branches.value = list
-    diffStats.value = stats
-    mergeStatus.value = merge
+
+    const myStatsGen = ++statsGen
+    const myMergeGen = ++mergeGen
+    const jobs: Promise<void>[] = [
+      window.api.getGitDiffStats(cwd).then((stats) => {
+        if (myStatsGen === statsGen && cwd === props.cwd) diffStats.value = stats
+      }),
+      window.api.gitMergeStatus(cwd).then((merge) => {
+        if (myMergeGen === mergeGen && cwd === props.cwd) mergeStatus.value = merge
+      })
+    ]
+
+    if (mode === 'full') {
+      const myBranchesGen = ++branchesGen
+      jobs.push(
+        window.api.getGitBranches(cwd).then((list) => {
+          if (myBranchesGen === branchesGen && cwd === props.cwd) branches.value = list
+        })
+      )
+    }
+    await Promise.allSettled(jobs)
   } catch {
-    if (myGen !== refreshGen) return
+    if (myInfoGen !== infoGen || cwd !== props.cwd) return
     isRepo.value = false
     currentBranch.value = null
     branches.value = []
@@ -88,25 +104,33 @@ const refresh = async (): Promise<void> => {
   }
 }
 
-const requestRefresh = (): void => {
+const requestRefresh = (mode: 'fast' | 'full' = 'full'): void => {
   const now = Date.now()
   const elapsed = now - lastRunAt
   if (elapsed >= THROTTLE_MS) {
     lastRunAt = now
-    void refresh()
+    void refresh(mode)
     return
   }
   // 已经在节流窗口内:挂起一次尾随调用,确保最末状态最终落地。
-  if (throttlePending) return
+  if (throttlePending) {
+    if (mode === 'full') pendingMode = 'full'
+    return
+  }
   throttlePending = true
+  pendingMode = mode
   if (throttleTimer) clearTimeout(throttleTimer)
   throttleTimer = setTimeout(() => {
     throttlePending = false
     throttleTimer = null
     lastRunAt = Date.now()
-    void refresh()
+    const modeToRun = pendingMode
+    pendingMode = 'fast'
+    void refresh(modeToRun)
   }, THROTTLE_MS - elapsed)
 }
+
+const requestFastRefresh = (): void => requestRefresh('fast')
 
 // cwd 改变(用户 cd 或者新建 worktree pane)→ 立即触发一次新状态拉取。
 // 通过 requestRefresh 走节流,但 cwd 变化频率不高,实际上等价于立即 refresh。
@@ -116,11 +140,12 @@ watch(
   { immediate: true }
 )
 
-defineExpose({ refresh: requestRefresh })
+defineExpose({ refresh: requestRefresh, refreshFast: requestFastRefresh })
 
 // --- Worktree dialog 入口 -----------------------------------------------
 // BranchSelector 右键"新工作树"→ 父级转发到 WorktreePanel.openWorktreeDialog。
 const worktreePanelRef = ref<InstanceType<typeof WorktreePanel>>()
+const gitOpsRef = ref<InstanceType<typeof GitOpsButtons>>()
 
 function onWorktreeFromBranch(prefill: string): void {
   worktreePanelRef.value?.openWorktreeDialog(prefill)
@@ -128,6 +153,11 @@ function onWorktreeFromBranch(prefill: string): void {
 
 function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
   emit('worktreeCreated', path, placement)
+}
+
+async function onConflictDetected(): Promise<void> {
+  await refresh('fast')
+  gitOpsRef.value?.openMergePanel()
 }
 </script>
 
@@ -141,7 +171,9 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
         :branches="branches"
         :current-branch="currentBranch"
         @changed="requestRefresh"
+        @refresh-branches="requestRefresh"
         @worktree-from-branch="onWorktreeFromBranch"
+        @conflict-detected="onConflictDetected"
       />
       <WorktreePanel
         ref="worktreePanelRef"
@@ -151,7 +183,12 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
         @worktree-created="onWorktreeCreated"
         @changed="requestRefresh"
       />
-      <GitOpsButtons :cwd="props.cwd" :merge-status="mergeStatus" @changed="requestRefresh" />
+      <GitOpsButtons
+        ref="gitOpsRef"
+        :cwd="props.cwd"
+        :merge-status="mergeStatus"
+        @changed="requestRefresh"
+      />
     </template>
 
     <!-- 任务运行 / IDE 启动:无论是否 git 都显示。语音输入只走快捷键(默认 F2),
@@ -160,7 +197,6 @@ function onWorktreeCreated(path: string, placement: WorktreePlacement): void {
          DiffStatsButton 跟在最后,保证 +N -N 在最右。 -->
     <TaskRunner
       :cwd="props.cwd"
-      @open-tasks="emit('openTasks')"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />
     <el-tooltip content="浏览器" placement="bottom" :show-after="300">

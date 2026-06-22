@@ -3,8 +3,8 @@ import { WebContents, app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
-import { readFile, rm } from 'fs/promises'
-import { basename, dirname, join } from 'path'
+import { readFile, rm, writeFile } from 'fs/promises'
+import { basename, dirname, join, relative, resolve } from 'path'
 import { shellIntegration } from './shell-integration'
 import { getMcpPort } from './mcp-server'
 import { killProcessTree } from './proc'
@@ -14,6 +14,7 @@ import type {
   MergeOpKind,
   MergeStatus,
   ConflictedFile,
+  ConflictVersions,
   CommitInfo,
   CommitDetail,
   CommitLogOpts,
@@ -982,6 +983,53 @@ export async function markConflictResolved(cwd: string, file: string): Promise<G
   }
 }
 
+/** 读取 Git index 的 base/ours/theirs 三个 stage，供可视化三方合并器使用。 */
+export async function getConflictVersions(cwd: string, file: string): Promise<ConflictVersions> {
+  const readStage = async (stage: 1 | 2 | 3): Promise<string | null> => {
+    try {
+      const { stdout } = await execFileP('git', ['show', `:${stage}:${file}`], {
+        ...GIT_OPTS,
+        cwd,
+        maxBuffer: 8 * 1024 * 1024,
+        timeout: 10_000
+      })
+      return stdout.includes('\0') ? null : stdout
+    } catch {
+      return null
+    }
+  }
+  const [base, ours, theirs] = await Promise.all([readStage(1), readStage(2), readStage(3)])
+  let working: string | null = null
+  try {
+    working = await readFile(resolve(cwd, file), 'utf8')
+    if (working.includes('\0')) working = null
+  } catch {
+    // 删除冲突可能没有工作区文件。
+  }
+  return { base, ours, theirs, working }
+}
+
+/** 保存人工合并结果并 git add。路径必须留在当前工作树内。 */
+export async function saveConflictResolution(
+  cwd: string,
+  file: string,
+  content: string
+): Promise<GitResult> {
+  const root = resolve(cwd)
+  const target = resolve(root, file)
+  const rel = relative(root, target)
+  if (!rel || rel.startsWith('..') || rel.includes('\0')) {
+    return { success: false, error: '无效的冲突文件路径' }
+  }
+  try {
+    await writeFile(target, content, 'utf8')
+    await execFileP('git', ['add', '--', file], { ...GIT_OPTS, cwd })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
 /**
  * Abort the in-progress operation. The caller's `kind` is normally derived
  * from the most recent `getMergeStatus()` call; we trust it rather than
@@ -1299,6 +1347,29 @@ export async function gitRebase(cwd: string, ref: string): Promise<GitResult> {
       cwd,
       timeout: 60_000,
       env: nonInteractiveEnv()
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: cleanGitError(err) }
+  }
+}
+
+/** Create and check out a local branch from an arbitrary local/remote ref. */
+export async function gitCreateBranch(
+  cwd: string,
+  name: string,
+  startRef: string
+): Promise<GitResult> {
+  if (!isSafeRef(name) || !isSafeRef(startRef)) {
+    return { success: false, error: '无效的分支名或起点' }
+  }
+  try {
+    // 让 Git 自己做完整的 ref 格式校验（重复斜杠、..、@{ 等边界）。
+    await execFileP('git', ['check-ref-format', '--branch', name], { ...GIT_OPTS, cwd })
+    await execFileP('git', ['checkout', '-b', name, startRef], {
+      ...GIT_OPTS,
+      cwd,
+      timeout: 30_000
     })
     return { success: true }
   } catch (err) {
