@@ -22,6 +22,7 @@ import type { BranchInfo, DiffStats, MergeStatus } from '@shared/types'
 type WorktreePlacement = 'top' | 'bottom' | 'left' | 'right'
 
 const props = defineProps<{
+  paneId: string
   cwd: string | undefined
 }>()
 
@@ -196,6 +197,7 @@ async function onConflictDetected(): Promise<void> {
          IdeLauncher 自带 margin-left: auto,把右侧锚定到工具栏末端。
          DiffStatsButton 跟在最后,保证 +N -N 在最右。 -->
     <TaskRunner
+      :pane-id="props.paneId"
       :cwd="props.cwd"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />

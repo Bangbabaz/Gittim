@@ -757,6 +757,7 @@ onUnmounted(() => {
     </div>
     <PaneToolbar
       ref="toolbarRef"
+      :pane-id="props.paneId"
       :cwd="currentCwd"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"

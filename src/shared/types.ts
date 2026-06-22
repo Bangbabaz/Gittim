@@ -214,6 +214,8 @@ export interface Settings {
   theme?: ThemePref
   /** 主工具栏 "在 IDE 中打开" 上次选中的 IDE id。 */
   defaultIde?: string
+  /** 每个终端面板最后选中的后台任务 ID，key 为 paneId。 */
+  paneSelectedTaskIds?: Record<string, string>
   /**
    * 上一次 detectIdes 的结果(含 iconDataUrl)。启动期 hydrate 进 main 的 cache,
    * 让 IdeLauncher 第一帧就能拿到 IDE 列表 + 真实图标,不需要等异步扫描。

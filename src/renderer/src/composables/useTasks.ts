@@ -1,8 +1,8 @@
 import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 import type { TaskMeta } from '@shared/types'
 
-// 全局后台任务列表 + 选中状态 —— 跨所有 pane 的 TaskRunner、TasksDrawer、
-// TaskManagerDialog 共享同一份 reactive ref。
+// 全局后台任务列表 + 分层选中状态。任务数据跨所有 pane 共享；TasksDrawer 使用
+// 一个全局查看项，各 TaskRunner 则按 paneId 保存自己的选择。
 //
 // 改造前每个 TaskRunner 各自 fetch + 维护 allTasks ref + 订阅 onTaskStatus /
 // onTaskRemoved。N 个 pane 就触发 N 次 upsert + N 次响应式更新,task 状态变化
@@ -10,8 +10,8 @@ import type { TaskMeta } from '@shared/types'
 //
 //   - allTasks   单例 ref,所有消费者订阅同一引用 (Vue reactive 共享 → 一次更新
 //                自动驱动所有依赖它的组件)
-//   - selectedId 单例 ref,TaskRunner / TasksDrawer 共享选中状态,一端选中另一端
-//                自动同步
+//   - selectedId 单例 ref,仅表示 TasksDrawer 当前查看的任务
+//   - paneSelectedIds 按 paneId 保存每个 TaskRunner 的独立选择，并持久化到 settings
 //   - init()     幂等,第一次调用时 subscribe + fetch,后续调用复用同一 promise
 //   - 消费者     `const { allTasks, selectedId } = useTasks()`,无需关心订阅生命周期
 //
@@ -26,12 +26,21 @@ import type { TaskMeta } from '@shared/types'
 
 const allTasks = ref<TaskMeta[]>([])
 const selectedId = ref<string | null>(null)
+const paneSelectedIds = ref<Record<string, string>>({})
 
 // 当已选中的任务从全局列表消失(被删除)时,自动清空选中。
 // 放在模块顶层 —— 只注册一次,不需等 init()。
 watch(allTasks, (tasks) => {
   if (selectedId.value && !tasks.some((t) => t.id === selectedId.value)) {
     selectedId.value = null
+  }
+  const validIds = new Set(tasks.map((task) => task.id))
+  const next = Object.fromEntries(
+    Object.entries(paneSelectedIds.value).filter(([, taskId]) => validIds.has(taskId))
+  )
+  if (Object.keys(next).length !== Object.keys(paneSelectedIds.value).length) {
+    paneSelectedIds.value = next
+    window.api.settingsSet({ paneSelectedTaskIds: next })
   }
 })
 
@@ -48,7 +57,12 @@ function init(): Promise<void> {
   initPromise = (async () => {
     // taskSubscribe 同步在 main 端把 webContents 加入 subscribers Set,并返回当前
     // 列表;之后的 task-status / task-removed 广播才会发到本 renderer。
-    allTasks.value = await window.api.taskSubscribe()
+    const [tasks, settings] = await Promise.all([
+      window.api.taskSubscribe(),
+      window.api.settingsGet()
+    ])
+    paneSelectedIds.value = { ...(settings.paneSelectedTaskIds ?? {}) }
+    allTasks.value = tasks
     window.api.onTaskStatus(upsertTask)
     window.api.onTaskRemoved(({ id }) => {
       allTasks.value = allTasks.value.filter((t) => t.id !== id)
@@ -63,6 +77,16 @@ function selectTask(id: string | null): void {
   selectedId.value = id
 }
 
+function selectPaneTask(paneId: string, id: string | null): void {
+  const next = { ...paneSelectedIds.value }
+  if (id) next[paneId] = id
+  else delete next[paneId]
+  paneSelectedIds.value = next
+  window.api.settingsSet({ paneSelectedTaskIds: next })
+  // 工具栏选中的任务同时成为任务抽屉当前项，但不会影响其他 pane 的工具栏。
+  selectedId.value = id
+}
+
 const selectedTask = computed<TaskMeta | null>(
   () => allTasks.value.find((t) => t.id === selectedId.value) ?? null
 )
@@ -70,12 +94,16 @@ const selectedTask = computed<TaskMeta | null>(
 export interface UseTasksReturn {
   /** 共享的全局任务列表。所有消费者读同一引用。 */
   allTasks: Ref<TaskMeta[]>
-  /** 共享的全局选中任务 ID。TaskRunner / TasksDrawer 共用。 */
+  /** TasksDrawer 当前查看的任务 ID。TaskRunner 选择时会同步更新它。 */
   selectedId: Ref<string | null>
   /** 当前选中的 TaskMeta(从 allTasks + selectedId 派生)。 */
   selectedTask: ComputedRef<TaskMeta | null>
+  /** 各 pane 独立的最后选择，key 为 paneId。 */
+  paneSelectedIds: Ref<Record<string, string>>
   /** 更新全局选中。可在任何组件内调用。 */
   selectTask: (id: string | null) => void
+  /** 更新并持久化某个 pane 的任务选择。 */
+  selectPaneTask: (paneId: string, id: string | null) => void
   /**
    * 首次 subscribe + fetch 完成的 promise。需要"已经拿到列表"再 select 的场景
    * (如 TasksDrawer 想自动定位某个 task)await 它。日常列表展示可以不 await,
@@ -85,5 +113,13 @@ export interface UseTasksReturn {
 }
 
 export function useTasks(): UseTasksReturn {
-  return { allTasks, selectedId, selectedTask, selectTask, ready: init() }
+  return {
+    allTasks,
+    selectedId,
+    selectedTask,
+    paneSelectedIds,
+    selectTask,
+    selectPaneTask,
+    ready: init()
+  }
 }

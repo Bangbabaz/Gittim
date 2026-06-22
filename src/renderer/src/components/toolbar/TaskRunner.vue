@@ -11,11 +11,11 @@ import type { TaskMeta } from '@shared/types'
 // 展示和控制当前 pane cwd 下的命令。"npm run dev in folder A" 和 "in folder B"
 // 各自独立。
 //
-// 共享数据来自 useTasks() —— 模块级单例。selectedId 也是共享的,所以一端选中
-// 任务后另一端(TasksDrawer)自动看到同一选中。本组件只在当前 cwd 的任务中寻找
-// 全局 selectedId,找不到就显示"选择命令"。
+// 任务数据来自 useTasks() 的全局单例，但选择按 paneId 隔离并持久化。工具栏选择
+// 仍会同步给 TasksDrawer 作为当前查看项，不会反向覆盖其他 pane。
 
 const props = defineProps<{
+  paneId: string
   cwd: string
 }>()
 
@@ -24,7 +24,7 @@ const emit = defineEmits<{
   manageTasks: [cwd?: string, newDraft?: boolean]
 }>()
 
-const { allTasks, selectedId, selectTask } = useTasks()
+const { allTasks, paneSelectedIds, selectPaneTask } = useTasks()
 
 const normPath = (p: string | undefined): string => {
   if (!p) return ''
@@ -40,8 +40,9 @@ const samePath = (a: string | undefined, b: string | undefined): boolean => {
 const paneTasks = computed(() =>
   props.cwd ? allTasks.value.filter((t) => samePath(t.cwd, props.cwd)) : []
 )
-// 只在当前 pane 的 paneTasks 中查找全局 selectedId。跨 cwd 的全局选中的任务
-// 不在本 cwd 内时返回 null —— 下拉显示"选择命令",不抢占全局选择。
+const selectedId = computed(() => paneSelectedIds.value[props.paneId] ?? null)
+// 只在当前 pane 的 paneTasks 中查找该 pane 最后选中的任务。跨 cwd 时暂时显示
+// "选择命令"，回到原 cwd 后仍可恢复。
 const selectedTask = computed<TaskMeta | null>(
   () => paneTasks.value.find((t) => t.id === selectedId.value) || null
 )
@@ -56,7 +57,7 @@ const onPickCommand = (cmd: string): void => {
     emit('manageTasks', props.cwd, true)
     return
   }
-  selectTask(cmd)
+  selectPaneTask(props.paneId, cmd)
 }
 
 const runSelected = async (): Promise<void> => {

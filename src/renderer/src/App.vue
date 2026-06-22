@@ -47,7 +47,7 @@ const MAX_SCROLLBACK = 200000
 const appScrollback = ref(DEFAULT_SCROLLBACK)
 
 const showSettings = ref(false)
-const settingsTab = ref<'general' | 'shortcuts' | 'about'>('general')
+const settingsTab = ref<'general' | 'mcp' | 'shortcuts' | 'about'>('general')
 const electronVersion = ref('')
 const appVersion = ref('')
 
@@ -596,6 +596,14 @@ onUnmounted(() => {
           </button>
           <button
             class="settings-nav-item"
+            :class="{ active: settingsTab === 'mcp' }"
+            @click="settingsTab = 'mcp'"
+          >
+            <Globe :size="14" class="settings-nav-icon" />
+            <span>MCP</span>
+          </button>
+          <button
+            class="settings-nav-item"
             :class="{ active: settingsTab === 'shortcuts' }"
             @click="settingsTab = 'shortcuts'"
           >
@@ -729,6 +737,56 @@ onUnmounted(() => {
 
           <section class="settings-section">
             <header class="settings-section-header">
+              <Mic :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">语音输入</h3>
+            </header>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">识别语言</label>
+                <el-select
+                  :model-value="sttLanguage"
+                  size="small"
+                  popper-class="settings-select-popper"
+                  style="width: 140px"
+                  @update:model-value="onSttLanguageChange"
+                >
+                  <el-option label="中文" value="zh" />
+                  <el-option label="英文" value="en" />
+                  <el-option label="自动检测" value="auto" />
+                </el-select>
+              </div>
+              <p class="settings-item-desc">语音识别目标语言。"自动检测"让模型自动判断语种。</p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">麦克风</label>
+                <el-select
+                  :model-value="sttDeviceId || '__default__'"
+                  size="small"
+                  popper-class="settings-select-popper"
+                  style="width: 180px"
+                  @update:model-value="onSttDeviceIdChange"
+                  @visible-change="(v: boolean) => v && refreshAudioDevices()"
+                >
+                  <el-option label="系统默认" value="__default__" />
+                  <el-option
+                    v-for="d in audioInputDevices"
+                    :key="d.deviceId"
+                    :label="d.label || `设备 ${d.deviceId.slice(0, 8)}`"
+                    :value="d.deviceId"
+                  />
+                </el-select>
+              </div>
+              <p class="settings-item-desc">
+                用于语音输入的录音设备,可在耳机、内置麦克风等之间切换。
+              </p>
+            </div>
+          </section>
+        </template>
+
+        <template v-else-if="settingsTab === 'mcp'">
+          <section class="settings-section">
+            <header class="settings-section-header">
               <Globe :size="14" class="settings-section-icon" />
               <h3 class="settings-section-title">MCP</h3>
             </header>
@@ -792,54 +850,6 @@ onUnmounted(() => {
               agent_send 支持同时指定多个目标，但会为每个目标建立独立会话；收到消息的 Agent
               能识别发送者，并通过 agent_reply 只回复对应 Agent。
             </p>
-          </section>
-
-          <section class="settings-section">
-            <header class="settings-section-header">
-              <Mic :size="14" class="settings-section-icon" />
-              <h3 class="settings-section-title">语音输入</h3>
-            </header>
-            <div class="settings-item">
-              <div class="settings-item-row">
-                <label class="settings-item-label">识别语言</label>
-                <el-select
-                  :model-value="sttLanguage"
-                  size="small"
-                  popper-class="settings-select-popper"
-                  style="width: 140px"
-                  @update:model-value="onSttLanguageChange"
-                >
-                  <el-option label="中文" value="zh" />
-                  <el-option label="英文" value="en" />
-                  <el-option label="自动检测" value="auto" />
-                </el-select>
-              </div>
-              <p class="settings-item-desc">语音识别目标语言。"自动检测"让模型自动判断语种。</p>
-            </div>
-            <div class="settings-item">
-              <div class="settings-item-row">
-                <label class="settings-item-label">麦克风</label>
-                <el-select
-                  :model-value="sttDeviceId || '__default__'"
-                  size="small"
-                  popper-class="settings-select-popper"
-                  style="width: 180px"
-                  @update:model-value="onSttDeviceIdChange"
-                  @visible-change="(v: boolean) => v && refreshAudioDevices()"
-                >
-                  <el-option label="系统默认" value="__default__" />
-                  <el-option
-                    v-for="d in audioInputDevices"
-                    :key="d.deviceId"
-                    :label="d.label || `设备 ${d.deviceId.slice(0, 8)}`"
-                    :value="d.deviceId"
-                  />
-                </el-select>
-              </div>
-              <p class="settings-item-desc">
-                用于语音输入的录音设备,可在耳机、内置麦克风等之间切换。
-              </p>
-            </div>
           </section>
         </template>
 
