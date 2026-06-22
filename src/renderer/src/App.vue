@@ -80,6 +80,7 @@ const recordingVoice = ref(false)
 // 手动更新检查
 const updateChecking = ref(false)
 const updateResult = ref<string | null>(null)
+const updateProgress = ref<number | null>(null)
 // 后台自动下载完成后显示按钮
 const updateReady = ref<string | null>(null)
 let unsubscribeUpdateStatus: (() => void) | null = null
@@ -323,50 +324,13 @@ const onScrollbackChange = (size: number | undefined): void => {
 }
 
 async function checkForUpdate(): Promise<void> {
-  if (updateChecking.value) return
+  if (updateChecking.value || updateProgress.value !== null) return
   updateChecking.value = true
   updateResult.value = null
-
-  const timeout = new Promise<string>((_r, reject) =>
-    setTimeout(() => reject(new Error('检查超时')), 15_000)
-  )
-
   try {
-    // 监听一次 update-status 事件
-    const result = await new Promise<string>((resolve, reject) => {
-      const unsubscribe = window.api.onUpdateStatus((status) => {
-        if (status.state === 'checking') return
-        unsubscribe()
-        switch (status.state) {
-          case 'not-available':
-            resolve('已是最新版本')
-            break
-          case 'available':
-            resolve(`发现新版本 ${status.version}，下载中…`)
-            break
-          case 'downloading':
-            resolve(`正在下载 ${status.percent}%`)
-            break
-          case 'downloaded':
-            resolve(`新版本 ${status.version} 已就绪，重启以安装`)
-            break
-          case 'error':
-            reject(new Error(status.message || '检查失败'))
-            break
-        }
-      })
-
-      window.api.updateCheck()
-      timeout.catch((e) => {
-        unsubscribe()
-        reject(e)
-      })
-    })
-
-    updateResult.value = result
+    await window.api.updateCheck()
   } catch (e: unknown) {
     updateResult.value = e instanceof Error ? e.message : String(e)
-  } finally {
     updateChecking.value = false
   }
 }
@@ -491,10 +455,39 @@ onMounted(async () => {
     }
   })
 
-  // 后台自动下载完成后，标题栏显示更新按钮
+  // 自动检查和手动检查共用同一条持续状态流，下载进度同步显示在标题栏和关于页。
   unsubscribeUpdateStatus = window.api.onUpdateStatus((status) => {
-    if (status.state === 'downloaded') {
-      updateReady.value = status.version || null
+    switch (status.state) {
+      case 'checking':
+        updateChecking.value = true
+        updateResult.value = null
+        break
+      case 'available':
+        updateChecking.value = false
+        updateProgress.value = 0
+        updateResult.value = `发现新版本 ${status.version}`
+        break
+      case 'downloading':
+        updateChecking.value = false
+        updateProgress.value = status.percent
+        updateResult.value = null
+        break
+      case 'not-available':
+        updateChecking.value = false
+        updateProgress.value = null
+        updateResult.value = '已是最新版本'
+        break
+      case 'downloaded':
+        updateChecking.value = false
+        updateProgress.value = null
+        updateReady.value = status.version || null
+        updateResult.value = `新版本 ${status.version} 已就绪，重启以安装`
+        break
+      case 'error':
+        updateChecking.value = false
+        updateProgress.value = null
+        updateResult.value = status.message || '检查失败'
+        break
     }
   })
 
@@ -526,7 +519,20 @@ onUnmounted(() => {
 
 <template>
   <div class="title-bar" :class="{ mac: isMac }">
-    <span class="title-bar-text">Gittim</span>
+    <div class="title-bar-heading">
+      <span class="title-bar-text">Gittim</span>
+      <span v-if="updateProgress !== null" class="title-update-progress">
+        下载中 {{ updateProgress }}%
+      </span>
+      <button
+        v-else-if="updateReady"
+        class="title-install-update"
+        title="重启并安装新版本"
+        @click="installUpdate"
+      >
+        安装新版本
+      </button>
+    </div>
     <div class="title-bar-right">
       <button class="tb-btn" title="查看任务" @click="openTasksDrawer">
         <ListChecks :size="14" />
@@ -536,14 +542,6 @@ onUnmounted(() => {
       </button>
       <button class="tb-btn tb-settings" title="设置" @click="showSettings = true">
         <SettingsIcon :size="14" />
-      </button>
-      <button
-        v-if="updateReady"
-        class="tb-btn tb-update"
-        title="点击更新"
-        @click="installUpdate"
-      >
-        更新
       </button>
       <div v-if="!isMac" class="title-bar-controls">
         <button class="tb-btn tb-min" title="最小化" @click="winMinimize">
@@ -968,11 +966,14 @@ onUnmounted(() => {
             <div class="about-update">
               <button
                 class="about-update-btn"
-                :disabled="updateChecking"
-                @click="checkForUpdate"
+                :disabled="updateChecking || updateProgress !== null"
+                @click="updateReady ? installUpdate() : checkForUpdate()"
               >
-                {{ updateChecking ? '检查中…' : '检测更新' }}
+                {{ updateReady ? '安装新版本' : updateChecking ? '检查中…' : '检查更新' }}
               </button>
+              <span v-if="updateProgress !== null" class="about-update-progress">
+                下载中 {{ updateProgress }}%
+              </span>
               <span v-if="updateResult" class="about-update-result">{{ updateResult }}</span>
             </div>
           </section>
@@ -1070,6 +1071,39 @@ onUnmounted(() => {
   @include ui-font;
 }
 
+.title-bar-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title-update-progress,
+.about-update-progress {
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  @include ui-font;
+}
+
+.title-install-update {
+  @include btn-reset;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 55%, transparent);
+  border-radius: $radius;
+  background: color-mix(in srgb, var(--el-color-success) 10%, transparent);
+  color: var(--el-color-success);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  @include ui-font;
+
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
+  }
+}
+
 .title-bar-right {
   display: flex;
   align-items: center;
@@ -1090,19 +1124,6 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--el-text-color-primary);
-  }
-}
-
-.tb-update {
-  font-size: 11px;
-  font-weight: 600;
-  @include ui-font;
-  color: var(--el-color-success);
-  padding: 0 8px;
-  width: auto;
-
-  &:hover {
-    background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
   }
 }
 
