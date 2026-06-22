@@ -6,7 +6,7 @@ import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
 import { readFile, rm, writeFile } from 'fs/promises'
 import { basename, dirname, join, relative, resolve } from 'path'
 import { shellIntegration } from './shell-integration'
-import { getMcpPort } from './mcp-server'
+import { getAgentMcpPort, getBrowserMcpPort } from './mcp-server'
 import { killProcessTree } from './proc'
 import type {
   BranchInfo,
@@ -126,10 +126,12 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   // can follow `cd` commands. Falls back to passthrough for unknown shells.
   const { shell, args, env } = shellIntegration(defaultShell())
 
-  // 注入 paneId 和 MCP 端口到 shell 环境，让 Agent 进程 fork 自 shell 时
-  // 能自动继承这些变量，从而发现对应的 MCP 端点。
+  // 注入 paneId 和两个 MCP 端口，让 Agent 子进程能区分协作与浏览器端点。
   env.GITTIM_PANE_ID = opts.paneId
-  env.GITTIM_MCP_PORT = String(getMcpPort())
+  // 兼容旧版本：通用变量仍指向原有的浏览器 MCP 端口。
+  env.GITTIM_MCP_PORT = String(getBrowserMcpPort())
+  env.GITTIM_AGENT_MCP_PORT = String(getAgentMcpPort())
+  env.GITTIM_BROWSER_MCP_PORT = String(getBrowserMcpPort())
 
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
@@ -243,6 +245,13 @@ export function getPtyWebContents(paneId: string): WebContents | null {
   const session = sessions.get(paneId)
   if (!session || session.disposed) return null
   return session.webContents
+}
+
+/** 获取所有仍然存活的终端面板 ID，供内置 MCP 做目标发现。 */
+export function getActivePtyPaneIds(): string[] {
+  return Array.from(sessions.values())
+    .filter((session) => !session.disposed && !session.webContents.isDestroyed())
+    .map((session) => session.paneId)
 }
 
 /**

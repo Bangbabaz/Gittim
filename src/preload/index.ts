@@ -139,6 +139,16 @@ const api = {
     ipcRenderer.on('pty-exit', listener)
     return () => ipcRenderer.removeListener('pty-exit', listener)
   },
+  onTerminalMcpInput: (
+    cb: (payload: { paneId: string; action: 'paste' | 'submit'; text?: string }) => void
+  ) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      payload: { paneId: string; action: 'paste' | 'submit'; text?: string }
+    ): void => cb(payload)
+    ipcRenderer.on('terminal-mcp-input', listener)
+    return () => ipcRenderer.removeListener('terminal-mcp-input', listener)
+  },
 
   // ---- Background tasks --------------------------------------------------
   taskSubscribe: () => ipcRenderer.invoke('task-subscribe') as Promise<TaskMeta[]>,
@@ -198,6 +208,7 @@ const api = {
     ipcRenderer.invoke('browser-unregister', paneId) as Promise<void>,
   browserGetMcpUrl: (paneId: string) =>
     ipcRenderer.invoke('browser-get-mcp-url', paneId) as Promise<string>,
+  agentGetMcpUrl: () => ipcRenderer.invoke('agent-get-mcp-url') as Promise<string>,
   onBrowserActivate: (cb: (paneId: string) => void) => {
     const listener = (_e: IpcRendererEvent, p: string): void => cb(p)
     ipcRenderer.on('browser-activate', listener)

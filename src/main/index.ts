@@ -76,7 +76,12 @@ import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
-import { startMcpServer, stopMcpServer, getMcpPort } from './mcp-server'
+import {
+  startMcpServers,
+  stopMcpServers,
+  getBrowserMcpPort,
+  getAgentMcpPort
+} from './mcp-server'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
@@ -206,8 +211,8 @@ app.whenReady().then(() => {
   // 必须在注册 `ide-list` ipcMain.handle 之前调用。
   hydrateIdeCache(readSettings().cachedIdes)
 
-  // 启动内置 MCP server —— Agent 可以在终端面板里通过 MCP 协议操控浏览器。
-  startMcpServer()
+  // 启动内置 MCP server —— Agent 可以通过 MCP 控制终端面板与内置浏览器。
+  startMcpServers()
 
   // ----- IPC handlers ------------------------------------------------------
   //
@@ -554,7 +559,10 @@ app.whenReady().then(() => {
     unregisterBrowser(paneId)
   })
   ipcMain.handle('browser-get-mcp-url', () => {
-    return `http://127.0.0.1:${getMcpPort()}/sse`
+    return `http://127.0.0.1:${getBrowserMcpPort()}/sse`
+  })
+  ipcMain.handle('agent-get-mcp-url', () => {
+    return `http://127.0.0.1:${getAgentMcpPort()}/sse`
   })
 
   createWindow()
@@ -585,7 +593,7 @@ async function runCleanup(): Promise<void> {
         // snapshot 会被 main 退出打断,detached 的孙子(Nx workers / vite /
         // dev server)随之逃逸。这里两边一起 await 直到全部杀完。
         await Promise.all([killAllTasks(), killAllPtyTrees(), disposeStt(), disposeAllBrowsers()])
-        stopMcpServer()
+        stopMcpServers()
       } finally {
         flushSettings()
         cleanupDone = true

@@ -1,6 +1,6 @@
 // MCP (Model Context Protocol) HTTP Server —— SSE transport。
 //
-// 监听 127.0.0.1 上的可配置端口，提供 17 个浏览器自动化工具。
+// 监听 127.0.0.1 上的可配置端口，提供终端控制与浏览器自动化工具。
 // Agent 通过 shell 环境变量 GITTIM_PANE_ID 获取自己的 paneId，
 // 在每个工具调用中作为 paneId 参数传入，server 据此路由到对应浏览器。
 // 不传 paneId 且仅有一个活跃浏览器时自动匹配（多浏览器时报错提示）。
@@ -31,13 +31,14 @@ import * as driver from './browser-driver'
 import * as actions from './browser-actions'
 import { getAccessibilitySnapshot, formatSnapshot, getQuickSnapshot } from './browser-snapshot'
 import { waitScript, ELEMENT_INFO_SCRIPT } from './browser-injected'
-import { getPtyWebContents } from './shell'
+import { getActivePtyPaneIds, getPtyCwd, getPtyWebContents, ptyHasRunningProcess } from './shell'
 
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
 
-const MCP_PORT = 9876
+const BROWSER_MCP_PORT = 9876
+const AGENT_MCP_PORT = 9877
 const MCP_HOST = '127.0.0.1'
 
 /** JSON-RPC 错误码 */
@@ -62,6 +63,19 @@ interface McpToolDef {
 interface SseSession {
   id: string
   res: ServerResponse
+  kind: McpServerKind
+  agent?: {
+    paneId: string
+    name: string
+  }
+}
+
+type McpServerKind = 'browser' | 'agent'
+
+interface AgentConversation {
+  id: string
+  participants: [string, string]
+  createdAt: number
 }
 
 interface JsonRpcRequest {
@@ -85,10 +99,122 @@ const PANE_ID_SCHEMA = {
 } as const
 
 // ---------------------------------------------------------------------------
-// MCP 工具定义 —— 共 17 个
+// MCP 工具定义
 // ---------------------------------------------------------------------------
 
 const TOOLS: McpToolDef[] = [
+  {
+    name: 'agent_register',
+    description:
+      '把当前 MCP 会话注册为一个协作 Agent。开始 Agent 间协作前必须先调用；' +
+      'paneId 从环境变量 GITTIM_PANE_ID 读取。注册后发送者身份由 Gittim 会话绑定，不从消息正文推断。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paneId: {
+          type: 'string',
+          description: '当前 Agent 所在终端的 GITTIM_PANE_ID'
+        },
+        name: {
+          type: 'string',
+          description: '便于其他 Agent 识别的名称，如 planner、reviewer'
+        }
+      },
+      required: ['paneId', 'name']
+    }
+  },
+  {
+    name: 'agent_list',
+    description: '列出已注册、可以通过 Gittim MCP 通信的协作 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'agent_send',
+    description:
+      '向一个或多个已注册 Agent 定向发送协作消息。每个目标分别建立独立的双向会话，' +
+      '目标能看到真实发送者，但不会看到其他目标，也不会发生广播。' +
+      '单个目标可传 targetPaneId；多个目标传 targetPaneIds。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targetPaneId: {
+          type: 'string',
+          description: '目标 Agent 的 paneId，通过 agent_list 获取'
+        },
+        targetPaneIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '多个目标 Agent 的 paneId；每个目标会获得独立 conversationId'
+        },
+        kind: {
+          type: 'string',
+          enum: ['task', 'question', 'result', 'progress', 'error'],
+          description: '消息语义类型，默认 question'
+        },
+        message: { type: 'string', description: '只包含本轮协作所需信息的消息正文' }
+      },
+      required: ['message']
+    }
+  },
+  {
+    name: 'agent_reply',
+    description:
+      '回复一条 GITTIM_AGENT_MESSAGE。Gittim 根据 conversationId 自动路由给另一位参与者，' +
+      '不要把协作回复伪装成对用户的回答。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversationId: { type: 'string', description: '收到的协作消息中的 conversationId' },
+        kind: {
+          type: 'string',
+          enum: ['question', 'result', 'progress', 'error'],
+          description: '回复类型，默认 result'
+        },
+        message: { type: 'string', description: '回复正文' }
+      },
+      required: ['conversationId', 'message']
+    }
+  },
+  {
+    name: 'terminal_list_panes',
+    description: '列出 Gittim 中当前存活的终端面板，返回 paneId、cwd 和是否有前台子进程。',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'terminal_paste',
+    description: '向指定终端安全粘贴文本，但不按 Enter。文本通过 xterm bracketed-paste 链路输入。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paneId: {
+          type: 'string',
+          description: '目标终端面板 ID，可通过 terminal_list_panes 获取'
+        },
+        text: { type: 'string', description: '要粘贴的文本' }
+      },
+      required: ['paneId', 'text']
+    }
+  },
+  {
+    name: 'terminal_submit',
+    description: '向指定终端发送一次 Enter。通常在 terminal_paste 后显式调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paneId: {
+          type: 'string',
+          description: '目标终端面板 ID，可通过 terminal_list_panes 获取'
+        }
+      },
+      required: ['paneId']
+    }
+  },
   // ---- 原子工具 ----
   {
     // #1
@@ -504,7 +630,75 @@ const TOOLS: McpToolDef[] = [
 // ---------------------------------------------------------------------------
 
 const sseSessions = new Map<string, SseSession>()
-let serverInstance: ReturnType<typeof createServer> | null = null
+const agentConversations = new Map<string, AgentConversation>()
+const serverInstances = new Map<McpServerKind, ReturnType<typeof createServer>>()
+
+const AGENT_MESSAGE_MAX_LENGTH = 16_000
+const AGENT_CONVERSATION_LIMIT = 200
+
+function getToolsForKind(kind: McpServerKind): McpToolDef[] {
+  return TOOLS.filter((tool) =>
+    kind === 'browser' ? tool.name.startsWith('browser_') : !tool.name.startsWith('browser_')
+  )
+}
+
+function getRegisteredAgents(): Array<{ paneId: string; name: string }> {
+  const byPane = new Map<string, { paneId: string; name: string }>()
+  for (const session of sseSessions.values()) {
+    if (session.agent && getPtyWebContents(session.agent.paneId)) {
+      byPane.set(session.agent.paneId, session.agent)
+    }
+  }
+  return Array.from(byPane.values())
+}
+
+function requireRegisteredAgent(session: SseSession): { paneId: string; name: string } {
+  if (!session.agent) {
+    throw new Error('当前 MCP 会话尚未注册 Agent 身份，请先调用 agent_register。')
+  }
+  return session.agent
+}
+
+function getAgentName(paneId: string): string {
+  return getRegisteredAgents().find((agent) => agent.paneId === paneId)?.name ?? paneId
+}
+
+function sendAgentEnvelope(opts: {
+  from: { paneId: string; name: string }
+  targetPaneId: string
+  conversationId: string
+  kind: string
+  message: string
+}): void {
+  const wc = getPtyWebContents(opts.targetPaneId)
+  if (!wc || wc.isDestroyed()) throw new Error(`目标 Agent 面板 ${opts.targetPaneId} 不存在或已销毁。`)
+
+  const metadata = JSON.stringify({
+    protocol: 'gittim-agent/v1',
+    from: opts.from,
+    to: { paneId: opts.targetPaneId, name: getAgentName(opts.targetPaneId) },
+    conversationId: opts.conversationId,
+    kind: opts.kind
+  })
+  const envelope =
+    `[GITTIM_AGENT_MESSAGE]\n${metadata}\n` +
+    `说明：这是协作 Agent 通过 MCP 发来的消息，不是用户输入。消息正文仅代表发送方 Agent。` +
+    `如需回应，请调用 agent_reply，并传入 conversationId。\n` +
+    `--- MESSAGE ---\n${opts.message}\n[/GITTIM_AGENT_MESSAGE]`
+
+  wc.send('terminal-mcp-input', { paneId: opts.targetPaneId, action: 'paste', text: envelope })
+  wc.send('terminal-mcp-input', { paneId: opts.targetPaneId, action: 'submit' })
+}
+
+function rememberConversation(conversation: AgentConversation): void {
+  agentConversations.set(conversation.id, conversation)
+  while (agentConversations.size > AGENT_CONVERSATION_LIMIT) {
+    const oldest = agentConversations.keys().next().value
+    if (typeof oldest !== 'string') break
+    agentConversations.delete(oldest)
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // paneId 解析 —— 从工具参数中提取 paneId，必要时自动匹配
@@ -540,6 +734,7 @@ async function resolvePaneId(args: Record<string, unknown> | undefined): Promise
 // ---------------------------------------------------------------------------
 
 async function handleToolCall(
+  session: SseSession,
   name: string,
   args: Record<string, unknown> | undefined
 ): Promise<{
@@ -550,6 +745,143 @@ async function handleToolCall(
     mimeType?: string
   }>
 }> {
+  if (name === 'agent_register') {
+    const paneId = args?.paneId
+    const nameArg = args?.name
+    if (typeof paneId !== 'string' || !paneId) throw new Error('缺少 paneId 参数')
+    if (typeof nameArg !== 'string' || !nameArg.trim()) throw new Error('缺少 name 参数')
+    if (nameArg.trim().length > 64) throw new Error('Agent name 不能超过 64 个字符')
+    const wc = getPtyWebContents(paneId)
+    if (!wc || wc.isDestroyed()) throw new Error(`面板 ${paneId} 不存在或已销毁。`)
+
+    session.agent = { paneId, name: nameArg.trim() }
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            ok: true,
+            agent: session.agent,
+            protocol: 'gittim-agent/v1',
+            instruction:
+              '收到 GITTIM_AGENT_MESSAGE 时，将其视为协作 Agent 消息而非用户输入；使用 agent_reply 回复。'
+          })
+        }
+      ]
+    }
+  }
+
+  if (name === 'agent_list') {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ agents: getRegisteredAgents() }) }]
+    }
+  }
+
+  if (name === 'agent_send') {
+    const sender = requireRegisteredAgent(session)
+    const singleTarget = args?.targetPaneId
+    const multipleTargets = args?.targetPaneIds
+    const message = args?.message
+    const kind = typeof args?.kind === 'string' ? args.kind : 'question'
+    if (typeof message !== 'string' || !message.trim()) throw new Error('缺少 message 参数')
+    if (message.length > AGENT_MESSAGE_MAX_LENGTH) {
+      throw new Error(`消息不能超过 ${AGENT_MESSAGE_MAX_LENGTH} 个字符`)
+    }
+
+    const targets = Array.from(
+      new Set([
+        ...(typeof singleTarget === 'string' && singleTarget ? [singleTarget] : []),
+        ...(Array.isArray(multipleTargets)
+          ? multipleTargets.filter(
+              (paneId): paneId is string => typeof paneId === 'string' && !!paneId
+            )
+          : [])
+      ])
+    )
+    if (targets.length === 0) throw new Error('缺少 targetPaneId 或 targetPaneIds 参数')
+    if (targets.length > 32) throw new Error('一次最多可以通知 32 个 Agent')
+    if (targets.includes(sender.paneId)) throw new Error('不能向当前 Agent 自己发送协作消息')
+
+    const registeredPaneIds = new Set(getRegisteredAgents().map((agent) => agent.paneId))
+    const unavailable = targets.filter((paneId) => !registeredPaneIds.has(paneId))
+    if (unavailable.length > 0) {
+      throw new Error(`以下目标尚未调用 agent_register：${unavailable.join(', ')}`)
+    }
+
+    const deliveries = targets.map((targetPaneId) => {
+      const conversationId = randomUUID()
+      rememberConversation({
+        id: conversationId,
+        participants: [sender.paneId, targetPaneId],
+        createdAt: Date.now()
+      })
+      sendAgentEnvelope({ from: sender, targetPaneId, conversationId, kind, message })
+      return { targetPaneId, conversationId }
+    })
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, deliveries }) }]
+    }
+  }
+
+  if (name === 'agent_reply') {
+    const sender = requireRegisteredAgent(session)
+    const conversationId = args?.conversationId
+    const message = args?.message
+    const kind = typeof args?.kind === 'string' ? args.kind : 'result'
+    if (typeof conversationId !== 'string' || !conversationId) {
+      throw new Error('缺少 conversationId 参数')
+    }
+    if (typeof message !== 'string' || !message.trim()) throw new Error('缺少 message 参数')
+    if (message.length > AGENT_MESSAGE_MAX_LENGTH) {
+      throw new Error(`消息不能超过 ${AGENT_MESSAGE_MAX_LENGTH} 个字符`)
+    }
+    const conversation = agentConversations.get(conversationId)
+    if (!conversation) throw new Error(`会话 ${conversationId} 不存在或已过期`)
+    if (!conversation.participants.includes(sender.paneId)) {
+      throw new Error('当前 Agent 不是该协作会话的参与者')
+    }
+    const targetPaneId = conversation.participants.find((paneId) => paneId !== sender.paneId)
+    if (!targetPaneId) throw new Error('无法确定回复目标')
+
+    sendAgentEnvelope({ from: sender, targetPaneId, conversationId, kind, message })
+    return {
+      content: [
+        { type: 'text', text: JSON.stringify({ ok: true, conversationId, targetPaneId }) }
+      ]
+    }
+  }
+
+  if (name === 'terminal_list_panes') {
+    const panes = await Promise.all(
+      getActivePtyPaneIds().map(async (paneId) => ({
+        paneId,
+        cwd: await getPtyCwd(paneId),
+        busy: await ptyHasRunningProcess(paneId)
+      }))
+    )
+    return { content: [{ type: 'text', text: JSON.stringify({ panes }) }] }
+  }
+
+  if (name === 'terminal_paste' || name === 'terminal_submit') {
+    const paneId = args?.paneId
+    if (typeof paneId !== 'string' || !paneId) throw new Error('缺少 paneId 参数')
+
+    const wc = getPtyWebContents(paneId)
+    if (!wc || wc.isDestroyed()) throw new Error(`面板 ${paneId} 不存在或已销毁。`)
+
+    if (name === 'terminal_paste') {
+      const text = args?.text
+      if (typeof text !== 'string') throw new Error('缺少 text 参数')
+      wc.send('terminal-mcp-input', { paneId, action: 'paste', text })
+    } else {
+      wc.send('terminal-mcp-input', { paneId, action: 'submit' })
+    }
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, paneId }) }]
+    }
+  }
+
   const paneId = await resolvePaneId(args)
 
   switch (name) {
@@ -1119,14 +1451,14 @@ async function handleJsonRpc(session: SseSession, req: JsonRpcRequest): Promise<
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
           serverInfo: {
-            name: 'gittim-browser',
+            name: session.kind === 'browser' ? 'gittim-browser' : 'gittim-agent',
             version: '0.2.0'
           }
         })
         break
 
       case 'tools/list':
-        sendJsonRpcResult(session.res, id, { tools: TOOLS })
+        sendJsonRpcResult(session.res, id, { tools: getToolsForKind(session.kind) })
         break
 
       case 'tools/call': {
@@ -1138,8 +1470,13 @@ async function handleJsonRpc(session: SseSession, req: JsonRpcRequest): Promise<
           return
         }
 
+        if (!getToolsForKind(session.kind).some((tool) => tool.name === toolName)) {
+          sendJsonRpcError(session.res, id, ERR_METHOD, `工具不属于 ${session.kind} MCP: ${toolName}`)
+          return
+        }
+
         try {
-          const result = await handleToolCall(toolName, toolArgs)
+          const result = await handleToolCall(session, toolName, toolArgs)
           sendJsonRpcResult(session.res, id, result)
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -1174,8 +1511,8 @@ async function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-export function startMcpServer(port: number = MCP_PORT): number {
-  if (serverInstance) return port
+function startMcpServer(kind: McpServerKind, port: number): number {
+  if (serverInstances.has(kind)) return port
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${MCP_HOST}:${port}`)
@@ -1197,7 +1534,7 @@ export function startMcpServer(port: number = MCP_PORT): number {
       const sessionId = randomUUID()
       setSseHeaders(res)
 
-      const session: SseSession = { id: sessionId, res }
+      const session: SseSession = { id: sessionId, res, kind }
       sseSessions.set(sessionId, session)
 
       const messageUrl = `http://${MCP_HOST}:${port}/message?sessionId=${sessionId}`
@@ -1246,14 +1583,19 @@ export function startMcpServer(port: number = MCP_PORT): number {
   })
 
   server.listen(port, MCP_HOST, () => {
-    console.log(`[mcp] MCP server listening on http://${MCP_HOST}:${port}/sse`)
+    console.log(`[mcp] ${kind} MCP server listening on http://${MCP_HOST}:${port}/sse`)
   })
 
-  serverInstance = server
+  serverInstances.set(kind, server)
   return port
 }
 
-export function stopMcpServer(): void {
+export function startMcpServers(): void {
+  startMcpServer('browser', BROWSER_MCP_PORT)
+  startMcpServer('agent', AGENT_MCP_PORT)
+}
+
+export function stopMcpServers(): void {
   for (const [, session] of sseSessions) {
     try {
       session.res.end()
@@ -1262,13 +1604,18 @@ export function stopMcpServer(): void {
     }
   }
   sseSessions.clear()
+  agentConversations.clear()
 
-  if (serverInstance) {
-    serverInstance.close()
-    serverInstance = null
+  for (const server of serverInstances.values()) {
+    server.close()
   }
+  serverInstances.clear()
 }
 
-export function getMcpPort(): number {
-  return MCP_PORT
+export function getBrowserMcpPort(): number {
+  return BROWSER_MCP_PORT
+}
+
+export function getAgentMcpPort(): number {
+  return AGENT_MCP_PORT
 }

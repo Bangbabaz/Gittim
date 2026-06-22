@@ -222,15 +222,22 @@ watch(showSettings, (open) => {
 
 watch(recordingAction, watchRecording)
 
-// MCP 注册命令
-const MCP_CMD_CLAUDE = 'claude mcp add -s user -t sse gittim-browser http://127.0.0.1:9876/sse'
-const MCP_CMD_CODEX = 'codex mcp add gittim-browser http://127.0.0.1:9876/sse'
-const mcpCopied = ref<'claude' | 'codex' | null>(null)
+// 浏览器自动化与 Agent 协作使用两个独立 MCP，避免无关工具进入同一个上下文。
+const BROWSER_MCP_URL = 'http://127.0.0.1:9876/sse'
+const AGENT_MCP_URL = 'http://127.0.0.1:9877/sse'
+const MCP_CONFIGS = {
+  browserClaude: `claude mcp add -s user -t sse gittim-browser ${BROWSER_MCP_URL}`,
+  browserCodex: `codex mcp add gittim-browser --url ${BROWSER_MCP_URL}`,
+  agentClaude: `claude mcp add -s user -t sse gittim-agent ${AGENT_MCP_URL}`,
+  agentCodex: `codex mcp add gittim-agent --url ${AGENT_MCP_URL}`
+} as const
+type McpCopyTarget = keyof typeof MCP_CONFIGS
+const mcpCopied = ref<McpCopyTarget | null>(null)
 
-async function copyMcpCmd(which: 'claude' | 'codex'): Promise<void> {
-  const cmd = which === 'claude' ? MCP_CMD_CLAUDE : MCP_CMD_CODEX
+async function copyMcpConfig(which: McpCopyTarget): Promise<void> {
+  const content = MCP_CONFIGS[which]
   try {
-    await navigator.clipboard.writeText(cmd)
+    await navigator.clipboard.writeText(content)
     mcpCopied.value = which
     setTimeout(() => {
       if (mcpCopied.value === which) mcpCopied.value = null
@@ -726,33 +733,65 @@ onUnmounted(() => {
               <h3 class="settings-section-title">MCP</h3>
             </header>
             <p class="settings-item-desc" style="margin-bottom: 10px">
-              注册浏览器自动化 MCP 服务，让 Agent 在终端面板中操控内置浏览器。
-              在终端中运行以下命令即可完成注册。
+              浏览器自动化和 Agent 协作已拆成两个独立服务，可按需注册。
             </p>
+            <div class="settings-item-label" style="margin-bottom: 6px">浏览器 MCP · 9876</div>
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Claude Code</label>
-                <button class="settings-copy-btn" @click="copyMcpCmd('claude')">
-                  <Check v-if="mcpCopied === 'claude'" :size="12" />
+                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('browserClaude')">
+                  <Check v-if="mcpCopied === 'browserClaude'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
               </div>
               <p class="settings-item-desc">
-                <code class="settings-cmd">{{ MCP_CMD_CLAUDE }}</code>
+                <code class="settings-cmd">{{ MCP_CONFIGS.browserClaude }}</code>
               </p>
             </div>
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Codex</label>
-                <button class="settings-copy-btn" @click="copyMcpCmd('codex')">
-                  <Check v-if="mcpCopied === 'codex'" :size="12" />
+                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('browserCodex')">
+                  <Check v-if="mcpCopied === 'browserCodex'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
               </div>
               <p class="settings-item-desc">
-                <code class="settings-cmd">{{ MCP_CMD_CODEX }}</code>
+                <code class="settings-cmd">{{ MCP_CONFIGS.browserCodex }}</code>
               </p>
             </div>
+            <div class="settings-item-label" style="margin: 12px 0 6px">Agent 协作 MCP · 9877</div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Claude Code</label>
+                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('agentClaude')">
+                  <Check v-if="mcpCopied === 'agentClaude'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CONFIGS.agentClaude }}</code>
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Codex</label>
+                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('agentCodex')">
+                  <Check v-if="mcpCopied === 'agentCodex'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CONFIGS.agentCodex }}</code>
+              </p>
+            </div>
+            <p class="settings-item-desc">
+              注册完成后，请重新启动或刷新 Agent，使其重新加载 MCP 工具列表。
+              两个 Agent 需要分别调用 agent_register 注册自己的 GITTIM_PANE_ID，之后使用
+              agent_list、agent_send 和 agent_reply 建立协作会话。
+              agent_send 支持同时指定多个目标，但会为每个目标建立独立会话；收到消息的 Agent
+              能识别发送者，并通过 agent_reply 只回复对应 Agent。
+            </p>
           </section>
 
           <section class="settings-section">

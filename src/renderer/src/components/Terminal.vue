@@ -595,6 +595,7 @@ function onBrowserResizeEnd(_e: MouseEvent, size: number): void {
 let unsubscribeData: (() => void) | null = null
 let unsubscribeExit: (() => void) | null = null
 let unsubscribeBrowserActivate: (() => void) | null = null
+let unsubscribeTerminalMcpInput: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
 // Captured at open() so we can explicitly removeEventListener on unmount.
 // terminal.dispose() also tears down its DOM, but binding to the captured
@@ -658,6 +659,14 @@ onMounted(async () => {
   unsubscribeData = window.api.onPtyData(props.paneId, (chunk) => terminal.write(chunk))
   unsubscribeExit = window.api.onPtyExit(props.paneId, (code) => {
     terminal.writeln(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m`)
+  })
+  unsubscribeTerminalMcpInput = window.api.onTerminalMcpInput((payload) => {
+    if (payload.paneId !== props.paneId) return
+    if (payload.action === 'paste') {
+      terminal.paste(payload.text ?? '')
+    } else if (payload.action === 'submit') {
+      window.api.ptyWrite(props.paneId, '\r')
+    }
   })
 
   // ptyStart 失败的真实原因(ENOENT 找不到 shell、EACCES 权限拒绝、cwd 不存在
@@ -726,6 +735,7 @@ onUnmounted(() => {
   unsubscribeData?.()
   unsubscribeExit?.()
   unsubscribeBrowserActivate?.()
+  unsubscribeTerminalMcpInput?.()
   void voiceCancel()
   if (indicatorTimer) {
     clearTimeout(indicatorTimer)
