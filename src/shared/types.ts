@@ -267,6 +267,8 @@ export interface PtyStartOpts {
 export interface PtyDataPayload {
   paneId: string
   data: string
+  sessionId: number
+  sequence: number
 }
 
 export interface PtyExitPayload {
@@ -281,6 +283,12 @@ export interface PtyExitPayload {
 export interface TaskDataPayload {
   id: string
   chunk: string
+  sequence: number
+}
+
+export interface TaskOutputSnapshot {
+  output: string
+  sequence: number
 }
 
 export interface TaskIdPayload {

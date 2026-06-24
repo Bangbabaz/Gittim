@@ -3,6 +3,7 @@ import { ref, shallowRef, watch, computed, onMounted, onUnmounted, nextTick } fr
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
+import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
 import { ElMessageBox } from 'element-plus'
 import {
   Play,
@@ -20,7 +21,7 @@ import {
 import SearchOverlay from './SearchOverlay.vue'
 import { useTheme } from '../composables/useTheme'
 import { useTasks } from '../composables/useTasks'
-import type { TaskMeta } from '@shared/types'
+import type { TaskDataPayload, TaskMeta } from '@shared/types'
 import '@xterm/xterm/css/xterm.css'
 
 const { xtermTheme } = useTheme()
@@ -126,6 +127,9 @@ const logRef = ref<HTMLDivElement>()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let logResizeObserver: ResizeObserver | null = null
+let bindGeneration = 0
+let renderedSequence = 0
+let loadingSnapshot: { id: string; generation: number; pending: TaskDataPayload[] } | null = null
 
 // Log search overlay. The box, query, count and highlight logic live in the
 // shared SearchOverlay; here we only own the visibility and the addon ref it
@@ -167,9 +171,36 @@ function ensureTerm(): void {
   term.loadAddon(fit)
   term.loadAddon(sa)
   term.open(logRef.value)
+  enableWebglRenderer(term)
+  void waitForTerminalFonts().then(() => {
+    if (!term || !logRef.value?.isConnected) return
+    try {
+      fit?.fit()
+    } catch {
+      return
+    }
+    term.refresh(0, term.rows - 1)
+    syncTaskSize()
+  })
   // Interactive: forward keystrokes/paste to whichever task is selected AND
   // running. The one terminal is reused across tasks, so resolve the target
   // at call time; idle/exited tasks are no-ops (backend guards too).
+  term.attachCustomKeyEventHandler((e) => {
+    if (
+      e.type === 'keydown' &&
+      e.code === 'Enter' &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      ((e.shiftKey && !e.altKey) || (e.altKey && !e.shiftKey))
+    ) {
+      e.preventDefault()
+      const id = selectedId.value
+      const task = tasks.value.find((x) => x.id === id)
+      if (id && task?.status === 'running') window.api.taskInput(id, '\n')
+      return false
+    }
+    return true
+  })
   term.onData((d) => {
     const id = selectedId.value
     if (!id) return
@@ -190,11 +221,22 @@ function ensureTerm(): void {
 async function bindLog(id: string | null): Promise<void> {
   ensureTerm()
   if (!term) return
+  const generation = ++bindGeneration
   term.reset()
+  renderedSequence = 0
+  loadingSnapshot = id ? { id, generation, pending: [] } : null
   if (!id) return
-  const out = await window.api.taskOutput(id)
-  if (selectedId.value !== id) return // selection changed while awaiting
-  if (out) term.write(out)
+  const snapshot = await window.api.taskOutput(id)
+  if (selectedId.value !== id || generation !== bindGeneration) return
+  if (snapshot.output) term.write(snapshot.output)
+  renderedSequence = snapshot.sequence
+  const pending = loadingSnapshot?.generation === generation ? loadingSnapshot.pending : []
+  loadingSnapshot = null
+  for (const event of pending) {
+    if (event.sequence <= renderedSequence) continue
+    term.write(event.chunk)
+    renderedSequence = event.sequence
+  }
   await nextTick()
   try {
     fit?.fit()
@@ -241,8 +283,15 @@ let unsubCleared: (() => void) | null = null
 let unsubRemoved: (() => void) | null = null
 
 onMounted(() => {
-  unsubData = window.api.onTaskData(({ id, chunk }) => {
-    if (id === selectedId.value && term) term.write(chunk)
+  unsubData = window.api.onTaskData((payload) => {
+    if (payload.id !== selectedId.value || !term) return
+    if (loadingSnapshot?.id === payload.id) {
+      loadingSnapshot.pending.push(payload)
+      return
+    }
+    if (payload.sequence <= renderedSequence) return
+    term.write(payload.chunk)
+    renderedSequence = payload.sequence
   })
   unsubStatus = window.api.onTaskStatus((meta) => {
     // A task we're viewing just started — match its PTY to the viewer size.
@@ -288,7 +337,6 @@ watch(
     syncTaskSize()
   }
 )
-
 
 // 当选中任务在 drawer 打开期间变化时,自动绑定日志。关闭时不触发(节省 IO)。
 watch(selectedId, (id) => {

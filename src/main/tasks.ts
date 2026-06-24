@@ -4,6 +4,7 @@ import { statSync } from 'fs'
 import { readSettings, updateSettings } from './settings'
 import { killProcessTree } from './proc'
 import type { TaskDef, TaskMeta, TaskStatus } from '@shared/types'
+import type { TaskOutputSnapshot } from '@shared/types'
 
 export type { TaskDef, TaskMeta, TaskStatus }
 
@@ -15,6 +16,7 @@ interface Task extends TaskMeta {
   // a chatty dev server can't grow memory unbounded.
   output: string[]
   outputBytes: number
+  outputSequence: number
   // Last known PTY grid size. Tracks the log viewer so full-screen TUIs
   // (Next.js overlay, vite menu) render aligned, and a re-run respawns at the
   // same size instead of the 120×30 default.
@@ -116,6 +118,7 @@ export function loadPersistedTasks(): void {
       pty: null,
       output: [],
       outputBytes: 0,
+      outputSequence: 0,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS
     })
@@ -126,9 +129,9 @@ export function listTasks(): TaskMeta[] {
   return Array.from(tasks.values()).map(toMeta)
 }
 
-export function getTaskOutput(id: string): string {
+export function getTaskOutput(id: string): TaskOutputSnapshot {
   const t = tasks.get(id)
-  return t ? t.output.join('') : ''
+  return t ? { output: t.output.join(''), sequence: t.outputSequence } : { output: '', sequence: 0 }
 }
 
 /**
@@ -222,7 +225,7 @@ function spawnPty(t: Task): void {
   pty.onData((data) => {
     if (t.pty !== pty) return
     appendOutput(t, data)
-    broadcast('task-data', { id: t.id, chunk: data })
+    broadcast('task-data', { id: t.id, chunk: data, sequence: ++t.outputSequence })
   })
 
   pty.onExit(({ exitCode }) => {
@@ -265,6 +268,7 @@ export async function startTask(opts: {
       pty: null,
       output: [],
       outputBytes: 0,
+      outputSequence: 0,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS
     }
@@ -289,6 +293,7 @@ export function createTask(opts: { name?: string; command: string; cwd: string }
     pty: null,
     output: [],
     outputBytes: 0,
+    outputSequence: 0,
     cols: DEFAULT_COLS,
     rows: DEFAULT_ROWS
   }

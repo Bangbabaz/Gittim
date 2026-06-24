@@ -49,6 +49,14 @@ interface Session {
   wcId: number
   paneId: string
   disposed: boolean
+  sessionId: number
+  sequence: number
+  pendingData: string[]
+  pendingLength: number
+  flushTimer: ReturnType<typeof setTimeout> | null
+  unacked: Map<number, number>
+  unackedLength: number
+  paused: boolean
 }
 
 // One session per pane. Multiple panes can live on a single webContents.
@@ -59,6 +67,11 @@ const sessionsByWebContents = new Map<number, Set<string>>()
 // webContents.id we've already wired a 'destroyed' handler on, so we don't
 // stack duplicate handlers when multiple panes spawn on the same renderer.
 const destroyHandlerInstalled = new Set<number>()
+let nextSessionId = 1
+const OUTPUT_BATCH_DELAY_MS = 5
+const OUTPUT_BATCH_MAX_CHARS = 64 * 1024
+const OUTPUT_PAUSE_HIGH_WATER = 1024 * 1024
+const OUTPUT_RESUME_LOW_WATER = 256 * 1024
 
 // Common options for synchronous-style git invocations. encoding:'utf8' makes
 // stdout/stderr come back as strings instead of Buffers.
@@ -143,7 +156,21 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   })
 
   const wcId = webContents.id
-  const session: Session = { pty, webContents, wcId, paneId, disposed: false }
+  const session: Session = {
+    pty,
+    webContents,
+    wcId,
+    paneId,
+    disposed: false,
+    sessionId: nextSessionId++,
+    sequence: 0,
+    pendingData: [],
+    pendingLength: 0,
+    flushTimer: null,
+    unacked: new Map(),
+    unackedLength: 0,
+    paused: false
+  }
   sessions.set(paneId, session)
 
   let set = sessionsByWebContents.get(wcId)
@@ -167,13 +194,43 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     })
   }
 
+  const flushOutput = (): void => {
+    if (session.flushTimer) {
+      clearTimeout(session.flushTimer)
+      session.flushTimer = null
+    }
+    if (!session.pendingLength || session.disposed || webContents.isDestroyed()) return
+    const data = session.pendingData.join('')
+    session.pendingData = []
+    session.pendingLength = 0
+    const sequence = ++session.sequence
+    session.unacked.set(sequence, data.length)
+    session.unackedLength += data.length
+    webContents.send('pty-data', {
+      paneId,
+      data,
+      sessionId: session.sessionId,
+      sequence
+    })
+    if (!session.paused && session.unackedLength >= OUTPUT_PAUSE_HIGH_WATER) {
+      session.paused = true
+      session.pty.pause()
+    }
+  }
+
   pty.onData((data) => {
-    if (!session.disposed && !webContents.isDestroyed()) {
-      webContents.send('pty-data', { paneId, data })
+    if (session.disposed || webContents.isDestroyed()) return
+    session.pendingData.push(data)
+    session.pendingLength += data.length
+    if (session.pendingLength >= OUTPUT_BATCH_MAX_CHARS) {
+      flushOutput()
+    } else if (!session.flushTimer) {
+      session.flushTimer = setTimeout(flushOutput, OUTPUT_BATCH_DELAY_MS)
     }
   })
 
   pty.onExit(({ exitCode }) => {
+    flushOutput()
     if (!session.disposed && !webContents.isDestroyed()) {
       webContents.send('pty-exit', { paneId, exitCode })
     }
@@ -181,6 +238,19 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     sessions.delete(paneId)
     sessionsByWebContents.get(wcId)?.delete(paneId)
   })
+}
+
+export function acknowledgePtyData(paneId: string, sessionId: number, sequence: number): void {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed || session.sessionId !== sessionId) return
+  const length = session.unacked.get(sequence)
+  if (length === undefined) return
+  session.unacked.delete(sequence)
+  session.unackedLength = Math.max(0, session.unackedLength - length)
+  if (session.paused && session.unackedLength <= OUTPUT_RESUME_LOW_WATER) {
+    session.paused = false
+    session.pty.resume()
+  }
 }
 
 export function writePty(paneId: string, data: string): void {
@@ -205,6 +275,10 @@ export async function killPty(paneId: string): Promise<void> {
   const session = sessions.get(paneId)
   if (!session) return
   session.disposed = true
+  if (session.flushTimer) {
+    clearTimeout(session.flushTimer)
+    session.flushTimer = null
+  }
   const pid = session.pty.pid
   // Reap the descendant tree FIRST. On Windows we need a live snapshot of
   // the process tree before pty.kill() reparents detached grandchildren

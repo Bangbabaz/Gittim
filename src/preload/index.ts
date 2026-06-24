@@ -23,6 +23,7 @@ import type {
   SttResult,
   TaskDataPayload,
   TaskIdPayload,
+  TaskOutputSnapshot,
   IdeInfo,
   UpdateStatus
 } from '@shared/types'
@@ -125,9 +126,16 @@ const api = {
     ipcRenderer.invoke('pty-get-cwd', paneId) as Promise<string | null>,
   ptyHasRunningProcess: (paneId: string) =>
     ipcRenderer.invoke('pty-has-running-process', paneId) as Promise<boolean>,
-  onPtyData: (paneId: string, cb: (data: string) => void) => {
+  onPtyData: (paneId: string, cb: (data: string, acknowledge: () => void) => void) => {
     const listener = (_event: IpcRendererEvent, payload: PtyDataPayload): void => {
-      if (payload && payload.paneId === paneId) cb(payload.data)
+      if (payload && payload.paneId === paneId) {
+        let acknowledged = false
+        cb(payload.data, () => {
+          if (acknowledged) return
+          acknowledged = true
+          ipcRenderer.send('pty-data-ack', paneId, payload.sessionId, payload.sequence)
+        })
+      }
     }
     ipcRenderer.on('pty-data', listener)
     return () => ipcRenderer.removeListener('pty-data', listener)
@@ -153,7 +161,7 @@ const api = {
   // ---- Background tasks --------------------------------------------------
   taskSubscribe: () => ipcRenderer.invoke('task-subscribe') as Promise<TaskMeta[]>,
   taskList: () => ipcRenderer.invoke('task-list') as Promise<TaskMeta[]>,
-  taskOutput: (id: string) => ipcRenderer.invoke('task-output', id) as Promise<string>,
+  taskOutput: (id: string) => ipcRenderer.invoke('task-output', id) as Promise<TaskOutputSnapshot>,
   taskStart: (opts: { id?: string; name?: string; command?: string; cwd?: string }) =>
     ipcRenderer.invoke('task-start', opts) as Promise<TaskMeta>,
   taskCreate: (opts: { name?: string; command: string; cwd: string }) =>

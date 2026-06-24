@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
 import {
   Copy,
   ClipboardPaste,
@@ -95,6 +96,16 @@ const MAX_BROWSER_WIDTH = 2000
 const browserMounted = ref(false)
 const browserOpen = ref(false)
 const browserWidth = ref(DEFAULT_BROWSER_WIDTH)
+
+const toggleBrowser = (): void => {
+  browserMounted.value = true
+  browserOpen.value = !browserOpen.value
+}
+
+const closeBrowser = (): void => {
+  browserOpen.value = false
+  browserMounted.value = false
+}
 
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
@@ -359,6 +370,21 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
     return false
   }
   if (e.type !== 'keydown') return true
+
+  // Codex uses LF as an explicit newline in its composer. xterm normally
+  // collapses Shift+Enter to the same CR as plain Enter, while Option+Enter
+  // becomes ESC+CR, so Codex cannot reliably distinguish either combination.
+  // Normalize both to LF and leave plain Enter to xterm for submission.
+  if (
+    e.code === 'Enter' &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    ((e.shiftKey && !e.altKey) || (e.altKey && !e.shiftKey))
+  ) {
+    e.preventDefault()
+    window.api.ptyWrite(props.paneId, '\n')
+    return false
+  }
 
   const effective = { ...DEFAULT_SHORTCUTS, ...props.shortcuts }
 
@@ -644,6 +670,7 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value)
+  enableWebglRenderer(terminal)
   try {
     fitAddon.fit()
   } catch {
@@ -656,7 +683,9 @@ onMounted(async () => {
   termElement?.addEventListener('contextmenu', onContextMenu)
   termTextarea?.addEventListener('focus', onTerminalFocus)
 
-  unsubscribeData = window.api.onPtyData(props.paneId, (chunk) => terminal.write(chunk))
+  unsubscribeData = window.api.onPtyData(props.paneId, (chunk, acknowledge) =>
+    terminal.write(chunk, acknowledge)
+  )
   unsubscribeExit = window.api.onPtyExit(props.paneId, (code) => {
     terminal.writeln(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m`)
   })
@@ -693,6 +722,14 @@ onMounted(async () => {
   resizeObserver = new ResizeObserver(() => scheduleResize())
   resizeObserver.observe(terminalRef.value)
 
+  // The configured monospace font may finish loading after the first fit.
+  // Recalculate the grid and redraw once metrics stabilize to prevent glyph
+  // drift, stale rows and PTY wrapping at a different column than xterm.
+  await waitForTerminalFonts()
+  if (!terminalRef.value?.isConnected) return
+  sendResize()
+  terminal.refresh(0, terminal.rows - 1)
+
   terminal.focus()
 
   // 加载浏览器抽屉宽度（持久化）
@@ -700,10 +737,7 @@ onMounted(async () => {
     const settings = await window.api.settingsGet()
     if (typeof settings.browserDrawerWidth === 'number') {
       const w = settings.browserDrawerWidth
-      browserWidth.value = Math.max(
-        MIN_BROWSER_WIDTH,
-        Math.min(MAX_BROWSER_WIDTH, Math.round(w))
-      )
+      browserWidth.value = Math.max(MIN_BROWSER_WIDTH, Math.min(MAX_BROWSER_WIDTH, Math.round(w)))
     }
   } catch {
     // ignore
@@ -761,7 +795,7 @@ onUnmounted(() => {
       :cwd="currentCwd"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
-      @toggle-browser="browserMounted = true; browserOpen = !browserOpen"
+      @toggle-browser="toggleBrowser"
     />
     <div class="pane-body">
       <div class="terminal-area">
@@ -791,14 +825,14 @@ onUnmounted(() => {
         modal-class="browser-drawer-overlay"
         :lock-scroll="false"
         class="browser-drawer-pane"
-        @update:model-value="(v: boolean) => browserOpen = v"
+        @update:model-value="(v: boolean) => (browserOpen = v)"
         @resize-end="onBrowserResizeEnd"
       >
         <BrowserDrawer
           v-if="browserMounted"
           :pane-id="paneId"
           @collapse="browserOpen = false"
-          @close="browserOpen = false; browserMounted = false"
+          @close="closeBrowser"
         />
       </el-drawer>
     </div>

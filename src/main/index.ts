@@ -20,6 +20,7 @@ import {
   writePty,
   resizePty,
   killPty,
+  acknowledgePtyData,
   killAllPtyTrees,
   getCurrentDir,
   getPtyCwd,
@@ -76,12 +77,7 @@ import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
-import {
-  startMcpServers,
-  stopMcpServers,
-  getBrowserMcpPort,
-  getAgentMcpPort
-} from './mcp-server'
+import { startMcpServers, stopMcpServers, getBrowserMcpPort, getAgentMcpPort } from './mcp-server'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
@@ -269,10 +265,8 @@ app.whenReady().then(() => {
   ipcMain.handle('git-conflict-versions', (_event, cwd: string, file: string) =>
     getConflictVersions(cwd, file)
   )
-  ipcMain.handle(
-    'git-conflict-save',
-    (_event, cwd: string, file: string, content: string) =>
-      saveConflictResolution(cwd, file, content)
+  ipcMain.handle('git-conflict-save', (_event, cwd: string, file: string, content: string) =>
+    saveConflictResolution(cwd, file, content)
   )
   ipcMain.handle(
     'git-merge-abort',
@@ -303,9 +297,8 @@ app.whenReady().then(() => {
   // Branch operations (from the branch context menu)
   ipcMain.handle('git-merge', (_event, cwd: string, ref: string) => gitMerge(cwd, ref))
   ipcMain.handle('git-rebase', (_event, cwd: string, ref: string) => gitRebase(cwd, ref))
-  ipcMain.handle(
-    'git-branch-create',
-    (_event, cwd: string, name: string, startRef: string) => gitCreateBranch(cwd, name, startRef)
+  ipcMain.handle('git-branch-create', (_event, cwd: string, name: string, startRef: string) =>
+    gitCreateBranch(cwd, name, startRef)
   )
   ipcMain.handle('git-push', (_event, cwd: string, branch: string) => gitPush(cwd, branch))
   ipcMain.handle('git-pull', (_event, cwd: string) => gitPull(cwd))
@@ -329,8 +322,17 @@ app.whenReady().then(() => {
   // (file:///.file/id=...)，readImage() 拿到的是 Finder 生成的类型图标而非
   // 文件内容 —— 所以必须优先走文件路径检测。
   const IMG_EXTS = new Set([
-    'png', 'jpg', 'jpeg', 'gif', 'bmp',
-    'webp', 'svg', 'tiff', 'ico', 'heic', 'heif'
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'bmp',
+    'webp',
+    'svg',
+    'tiff',
+    'ico',
+    'heic',
+    'heif'
   ])
 
   ipcMain.handle('clipboard-read-image', async (): Promise<string | null> => {
@@ -341,10 +343,11 @@ app.whenReady().then(() => {
         if (fileUrl && typeof fileUrl === 'string' && fileUrl.startsWith('file://')) {
           // file:///.file/id=... 是不透明的 macOS file reference URL,需要用
           // osascript 通过 Foundation 解析为真实 POSIX 路径。
-          const realPath = execFileSync('osascript', [
-            '-e',
-            `get POSIX path of (POSIX file "${fileUrl}")`
-          ], { encoding: 'utf8', timeout: 3000 }).trim()
+          const realPath = execFileSync(
+            'osascript',
+            ['-e', `get POSIX path of (POSIX file "${fileUrl}")`],
+            { encoding: 'utf8', timeout: 3000 }
+          ).trim()
           if (realPath && existsSync(realPath)) {
             const ext = realPath.split('.').pop()?.toLowerCase()
             if (ext && IMG_EXTS.has(ext)) return realPath
@@ -453,6 +456,10 @@ app.whenReady().then(() => {
 
   ipcMain.on('pty-resize', (_event, paneId: string, cols: number, rows: number) => {
     resizePty(paneId, cols, rows)
+  })
+
+  ipcMain.on('pty-data-ack', (_event, paneId: string, sessionId: number, sequence: number) => {
+    acknowledgePtyData(paneId, sessionId, sequence)
   })
 
   ipcMain.on('pty-kill', (_event, paneId: string) => {
