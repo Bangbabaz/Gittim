@@ -30,7 +30,7 @@ function manage(): void {
   <el-popover
     v-model:visible="visible"
     placement="bottom-end"
-    :width="240"
+    :width="228"
     trigger="click"
     popper-class="quick-command-popper"
   >

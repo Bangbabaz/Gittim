@@ -8,11 +8,11 @@ $font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 $font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
 $font-term: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
 
-$radius-sm: 3px;
-$radius: 4px;
-$radius-md: 5px;
-$radius-lg: 6px;
+$radius-sm: var(--el-border-radius-small);
+$radius: var(--el-border-radius-base);
+$radius-md: var(--el-border-radius-base);
+$radius-lg: var(--el-border-radius-base);
 
 // Chrome strip height shared by the title bar and the tasks-drawer header so
 // the two read as one continuous bar.
-$titlebar-h: 32px;
+$titlebar-h: 36px;

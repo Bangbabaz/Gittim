@@ -157,6 +157,7 @@ function ensureTerm(): void {
   if (term || !logRef.value) return
   term = new Terminal({
     fontSize: 12,
+    lineHeight: 1.2,
     fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace",
     cursorBlink: false,
     convertEol: true,
@@ -602,7 +603,7 @@ function closeLogSearch(): void {
 .task-list {
   flex: 1;
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px 6px;
 }
 
 .task-empty {
@@ -617,7 +618,7 @@ function closeLogSearch(): void {
   align-items: center;
   gap: 8px;
   // 多一点左 padding,让 row 内容相对分组头的 caret + folder icon 有视觉缩进
-  padding: 8px 8px 8px 22px;
+  padding: 5px 8px 5px 22px;
   border-radius: $radius-md;
   cursor: pointer;
 
@@ -680,8 +681,8 @@ function closeLogSearch(): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px 4px;
-  margin-top: 6px;
+  padding: 4px 8px 3px;
+  margin-top: 3px;
   cursor: pointer;
   user-select: none;
   color: var(--el-text-color-secondary);
@@ -872,7 +873,7 @@ function closeLogSearch(): void {
 .log-body {
   flex: 1;
   min-height: 0;
-  padding: 6px 8px;
+  padding: 8px 10px;
 }
 
 .log-search-pos {

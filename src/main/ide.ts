@@ -614,7 +614,9 @@ async function resolveAppBundle(command: string): Promise<string | undefined> {
   try {
     const real = realpathSync(command)
     if (real !== command) return tryExtract(real)
-  } catch {}
+  } catch {
+    // Broken or inaccessible symlink: keep the direct extraction result.
+  }
   return undefined
 }
 
@@ -682,11 +684,9 @@ async function extractIconMac(command: string, ideId?: string): Promise<string |
 async function resolveBundleIcns(bundle: string): Promise<string | undefined> {
   for (const key of ['CFBundleIconFile', 'CFBundleIconName']) {
     try {
-      const { stdout } = await execFileP(
-        'defaults',
-        ['read', join(bundle, 'Contents/Info'), key],
-        { timeout: 2000 }
-      )
+      const { stdout } = await execFileP('defaults', ['read', join(bundle, 'Contents/Info'), key], {
+        timeout: 2000
+      })
       let iconName = stdout.trim().replace(/^"|"$/g, '')
       if (!iconName) continue
       if (!/\.icns$/i.test(iconName)) iconName += '.icns'
@@ -710,7 +710,9 @@ async function resolveBundleIcns(bundle: string): Promise<string | undefined> {
           bestSize = s.size
           best = f
         }
-      } catch {}
+      } catch {
+        // Ignore malformed icon filenames and continue with the best match.
+      }
     }
     return join(resDir, best)
   } catch {
@@ -773,11 +775,11 @@ let scanning: Promise<IdeInfo[]> | null = null
 export function hydrateIdeCache(persisted: IdeInfo[] | undefined | null): void {
   if (cache) return
   if (!persisted || !Array.isArray(persisted) || persisted.length === 0) return
-  cache = persisted
+  cache = withSystemEntries(persisted)
 }
 
 export async function detectIdes(force = false): Promise<IdeInfo[]> {
-  if (cache && !force) return cache
+  if (cache && !force) return withSystemEntries(cache)
   // 并发去重:多个 IdeLauncher 同时 onMounted 时只跑一次实际扫描。
   if (!force && scanning) return scanning
   if (force) {
@@ -862,7 +864,7 @@ async function runDetect(): Promise<IdeInfo[]> {
   // Add the OS file manager BEFORE icon extraction so its icon is fetched in
   // the same parallel batch (Finder.app / explorer.exe). Always last in the
   // list so it doesn't outrank a real editor in the picker's default position.
-  found.push(osFolderEntry())
+  found.push(osTerminalEntry(), osFolderEntry())
 
   // Extract icons in parallel — getFileIcon is async per-target and we don't
   // want N serial round-trips to the OS shell.
@@ -903,6 +905,65 @@ function osFolderEntry(): IdeInfo {
   return { id: 'os-folder', name, command: '' }
 }
 
+function osTerminalEntry(): IdeInfo {
+  return { id: 'os-terminal', name: '终端', command: '' }
+}
+
+function withSystemEntries(items: IdeInfo[]): IdeInfo[] {
+  const ordinary = items.filter((item) => item.id !== 'os-terminal' && item.id !== 'os-folder')
+  return [...ordinary, osTerminalEntry(), osFolderEntry()]
+}
+
+function openSystemTerminal(cwd: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const folder = isWindows ? cwd.replace(/\//g, '\\') : cwd
+    let settled = false
+    const finish = (result: { success: boolean; error?: string }): void => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
+    const launch = (cmd: string, args: string[], options: { cwd?: string } = {}): void => {
+      const proc = spawn(cmd, args, {
+        cwd: options.cwd,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false
+      })
+      proc.once('error', (err) => finish({ success: false, error: err.message }))
+      proc.once('spawn', () => {
+        proc.unref()
+        finish({ success: true })
+      })
+    }
+
+    if (isWindows) {
+      const proc = spawn('wt.exe', ['-d', folder], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false
+      })
+      proc.once('spawn', () => {
+        proc.unref()
+        finish({ success: true })
+      })
+      proc.once('error', () => launch('cmd.exe', ['/k'], { cwd: folder }))
+      return
+    }
+    if (isMac) {
+      launch('open', ['-a', 'Terminal', folder])
+      return
+    }
+
+    const terminal = process.env.TERMINAL?.trim()
+    if (terminal) {
+      launch(terminal, [], { cwd: folder })
+      return
+    }
+    launch('x-terminal-emulator', [], { cwd: folder })
+  })
+}
+
 /**
  * Launch the picked IDE on `cwd`. Detection (detectIdes) resolves launcher
  * paths to .exe on Windows so we can spawn the GUI process directly without
@@ -911,6 +972,7 @@ function osFolderEntry(): IdeInfo {
  * Detached + stdio 'ignore' so closing Gittim doesn't drag the IDE down.
  */
 export function openIde(ideId: string, cwd: string): Promise<{ success: boolean; error?: string }> {
+  if (ideId === 'os-terminal') return openSystemTerminal(cwd)
   return new Promise((resolve) => {
     // OS file manager doesn't need spawn — Electron's shell.openPath handles
     // the per-platform open command (explorer.exe / Finder / xdg-open) and

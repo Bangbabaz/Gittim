@@ -39,40 +39,6 @@
   }
 }
 
-/* Always-present grab strip at the very top of every pane (repo or not) so
-   the pane can be dragged onto another to re-split the layout. */
-.pane-drag-strip {
-  height: 7px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--el-fill-color-light);
-  cursor: grab;
-  -webkit-app-region: no-drag;
-
-  &:hover {
-    background: var(--el-fill-color);
-
-    .pds-grip {
-      opacity: 0.95;
-    }
-  }
-
-  &:active {
-    cursor: grabbing;
-  }
-}
-
-.pds-grip {
-  width: 26px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--el-border-color);
-  opacity: 0.5;
-  transition: opacity 0.1s;
-}
-
 .terminal-container {
   flex: 1;
   min-height: 0;

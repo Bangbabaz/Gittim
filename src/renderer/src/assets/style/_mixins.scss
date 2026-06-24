@@ -56,6 +56,43 @@
   flex-shrink: 0;
 }
 
+@mixin toolbar-icon-button($size: 26px) {
+  @include btn-reset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: $size;
+  height: $size;
+  flex-shrink: 0;
+  border-radius: var(--el-border-radius-small);
+  color: var(--el-text-color-secondary);
+
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@mixin toolbar-control {
+  @include btn-reset;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--el-border-radius-small);
+  color: var(--el-text-color-regular);
+
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
+}
+
 // Shared shell for Element Plus dropdowns we teleport to <body> (task picker,
 // IDE picker, …). Sets the panel chrome + per-item layout / hover / picked /
 // empty-state rules so both droowndowns stay visually identical without
@@ -64,7 +101,9 @@
   .el-dropdown-menu {
     background: var(--el-bg-color-overlay);
     border: 1px solid var(--el-border-color);
-    padding: 4px;
+    padding: 5px;
+    border-radius: var(--el-border-radius-base);
+    box-shadow: var(--el-box-shadow-light);
   }
 
   .el-dropdown-menu__item {
@@ -78,8 +117,8 @@
     line-height: 1.4;
 
     &:not(.is-disabled):hover {
-      background: var(--el-color-primary);
-      color: #fff;
+      background: var(--el-fill-color);
+      color: var(--el-text-color-primary);
     }
 
     &.picked {

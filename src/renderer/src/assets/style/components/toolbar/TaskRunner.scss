@@ -1,22 +1,9 @@
 .cmd-pick {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
+  @include toolbar-control;
   gap: 5px;
   max-width: 150px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--el-border-color);
-  border-radius: $radius-sm;
-  color: var(--el-text-color-regular);
+  padding: 0 8px;
   font-size: 12px;
-  margin-left: 2px;
-  flex-shrink: 0;
-
-  &:hover {
-    border-color: var(--el-text-color-secondary);
-    background: var(--el-fill-color);
-  }
 }
 
 .cmd-pick-name {
@@ -56,30 +43,23 @@
 // light-3 是为了 light 主题下也能保证 WCAG AA 对比度 —— light-3 在浅色背景上
 // 是几乎不可见的极淡填充。
 .run-btn {
-  @include btn-reset;
-  background: var(--el-color-success);
-  color: #fff;
-  width: 20px;
-  height: 20px;
-  border-radius: $radius-sm;
+  @include toolbar-icon-button;
+  color: var(--el-color-success);
   font-size: 10px;
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 2px;
-  flex-shrink: 0;
 
-  &:hover {
-    background: var(--el-color-success-light-3);
-    color: #fff;
+  &:hover:not(:disabled) {
+    background: var(--el-color-success-light-9);
+    color: var(--el-color-success);
   }
 
   &.stop {
-    background: var(--el-color-danger);
+    background: transparent;
+    color: var(--el-color-danger);
 
-    &:hover {
-      background: var(--el-color-danger-light-3);
+    &:hover:not(:disabled) {
+      background: var(--el-color-danger-light-9);
+      color: var(--el-color-danger);
     }
   }
 }

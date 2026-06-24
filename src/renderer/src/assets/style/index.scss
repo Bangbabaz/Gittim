@@ -1,3 +1,4 @@
 // Single global style entry. main.ts imports this once.
+@use 'theme';
 @use 'base';
 @use 'overlays';

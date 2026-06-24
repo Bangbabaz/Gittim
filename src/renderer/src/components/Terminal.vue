@@ -789,13 +789,6 @@ onUnmounted(() => {
 
 <template>
   <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
-    <div
-      class="pane-drag-strip"
-      title="拖拽以重排面板"
-      @mousedown.left.prevent="emit('paneDragStart', props.paneId)"
-    >
-      <span class="pds-grip" />
-    </div>
     <PaneToolbar
       ref="toolbarRef"
       :pane-id="props.paneId"
@@ -803,6 +796,7 @@ onUnmounted(() => {
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
       @toggle-browser="toggleBrowser"
+      @pane-drag-start="emit('paneDragStart', props.paneId)"
     />
     <div class="pane-body">
       <div class="terminal-area">

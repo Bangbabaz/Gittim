@@ -506,25 +506,9 @@ defineExpose({ openWorktreeDialog })
 }
 
 .wt-btn {
-  @include btn-reset;
-  border: 1px solid var(--el-border-color);
-  color: var(--el-text-color-regular);
-  width: 20px;
-  height: 20px;
-  border-radius: $radius-sm;
+  @include toolbar-icon-button;
   font-size: 14px;
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 2px;
-  flex-shrink: 0;
-
-  &:hover {
-    border-color: var(--el-text-color-secondary);
-    color: var(--el-color-primary);
-    background: var(--el-fill-color);
-  }
 
   &.icon {
     font-size: 0;

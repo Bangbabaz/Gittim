@@ -1128,7 +1128,8 @@ onUnmounted(() => {
 <style lang="scss">
 .title-bar {
   height: $titlebar-h;
-  background: var(--el-bg-color);
+  background: var(--el-bg-color-page);
+  border-bottom: 1px solid var(--el-border-color-light);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1142,8 +1143,9 @@ onUnmounted(() => {
 }
 
 .title-bar-text {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
+  color: var(--el-text-color-primary);
+  font-size: 12.5px;
+  font-weight: 600;
   @include ui-font;
 }
 
@@ -1209,7 +1211,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   width: 34px;
-  height: 24px;
+  height: 28px;
   color: var(--el-text-color-regular);
   border-radius: $radius;
 
@@ -1227,7 +1229,7 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   height: calc(100vh - #{$titlebar-h});
-  background: var(--el-bg-color);
+  background: var(--el-bg-color-page);
 
   &.dragging {
     user-select: none;
@@ -1267,18 +1269,33 @@ onUnmounted(() => {
   position: absolute;
   overflow: clip;
   box-sizing: border-box;
-  border: 1px solid transparent;
-  transition: border-color 0.08s;
+  background: var(--el-bg-color);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow 0.1s;
 
   &.active {
-    border-color: var(--el-color-primary);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 58%, transparent);
+
+    .pane-toolbar {
+      background: color-mix(in srgb, var(--el-color-primary) 7%, var(--el-fill-color-light));
+      box-shadow: inset 0 2px 0 var(--el-color-primary);
+    }
   }
 }
 
 .divider {
   position: absolute;
-  background: var(--el-border-color);
+  background: var(--el-bg-color-page);
   z-index: 1;
+  transition: background-color 0.12s ease;
+
+  &:hover {
+    background: var(--el-color-primary);
+  }
+
+  .dragging & {
+    background: var(--el-color-primary);
+  }
 
   &.row {
     cursor: col-resize;

@@ -1,21 +1,5 @@
 .wt-btn {
-  @include btn-reset;
-  border: 1px solid var(--el-border-color);
-  color: var(--el-text-color-regular);
-  width: 20px;
-  height: 20px;
-  border-radius: $radius-sm;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 2px;
-  flex-shrink: 0;
-
-  &:hover {
-    border-color: var(--el-text-color-secondary);
-    color: var(--el-color-primary);
-    background: var(--el-fill-color);
-  }
+  @include toolbar-icon-button;
 
   &.icon {
     font-size: 0;
@@ -29,17 +13,16 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  height: 26px;
   padding: 0 7px;
   background: color-mix(in srgb, var(--el-color-danger) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--el-color-danger) 45%, transparent);
   color: var(--el-color-danger);
-  border-radius: $radius-sm;
+  border-radius: var(--el-border-radius-small);
   font-size: 11px;
   @include ui-font;
   font-weight: 600;
   flex-shrink: 0;
-  margin-left: 2px;
 
   &:hover {
     background: color-mix(in srgb, var(--el-color-danger) 22%, transparent);

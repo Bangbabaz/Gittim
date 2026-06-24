@@ -441,7 +441,9 @@ const switchWithStash = async (): Promise<void> => {
       </button>
       <button class="bm-item" :disabled="branchActionLoading" @click="ctxCreateBranch">
         <GitBranchPlus :size="13" />
-        <span>从 <b>{{ branchMenuTarget.name }}</b> 新建分支…</span>
+        <span
+          >从 <b>{{ branchMenuTarget.name }}</b> 新建分支…</span
+        >
       </button>
       <div v-if="ctxIsLocal" class="bm-sep" />
       <button v-if="ctxIsLocal" class="bm-item" :disabled="branchActionLoading" @click="ctxPush">
@@ -521,5 +523,8 @@ const switchWithStash = async (): Promise<void> => {
   </el-dialog>
 </template>
 
-<style scoped lang="scss" src="@renderer/assets/style/components/toolbar/BranchSelector.scss"></style>
-<style lang="scss" src="@renderer/assets/style/components/toolbar/BranchSelector.global.scss"></style>
+<style
+  scoped
+  lang="scss"
+  src="@renderer/assets/style/components/toolbar/BranchSelector.scss"
+></style>

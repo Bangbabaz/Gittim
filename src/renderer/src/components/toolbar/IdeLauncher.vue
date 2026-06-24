@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ChevronDown, FolderClosed, RefreshCw } from 'lucide-vue-next'
+import { ChevronDown, FolderClosed, RefreshCw, SquareTerminal } from 'lucide-vue-next'
 import { iconFor } from '../ideIcons'
 import type { IdeInfo } from '@shared/types'
 
@@ -102,6 +102,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
           alt=""
           draggable="false"
         />
+        <SquareTerminal v-else-if="defaultIde?.id === 'os-terminal'" :size="12" />
         <svg
           v-else-if="defaultIdeIcon && defaultIdeIcon.path"
           class="ide-chip-svg"
@@ -140,6 +141,7 @@ const onPickIde = async (cmd: string): Promise<void> => {
               :style="ide.iconDataUrl ? undefined : { background: iconFor(ide.id, ide.name).color }"
             >
               <img v-if="ide.iconDataUrl" :src="ide.iconDataUrl" alt="" draggable="false" />
+              <SquareTerminal v-else-if="ide.id === 'os-terminal'" :size="12" />
               <svg
                 v-else-if="iconFor(ide.id, ide.name).path"
                 viewBox="0 0 24 24"
@@ -167,4 +169,3 @@ const onPickIde = async (cmd: string): Promise<void> => {
 </template>
 
 <style scoped lang="scss" src="@renderer/assets/style/components/toolbar/IdeLauncher.scss"></style>
-<style lang="scss" src="@renderer/assets/style/components/toolbar/IdeLauncher.global.scss"></style>

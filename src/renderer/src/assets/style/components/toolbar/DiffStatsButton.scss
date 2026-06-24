@@ -1,21 +1,10 @@
 .diff-stats {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
+  @include toolbar-control;
   gap: 6px;
-  height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   font-size: 11px;
   line-height: 1;
   @include mono-font;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  border-radius: $radius-sm;
-
-  &:hover {
-    border-color: var(--el-border-color);
-    background: var(--el-fill-color);
-  }
 }
 
 .diff-added {

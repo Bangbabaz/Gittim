@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Globe } from 'lucide-vue-next'
+import { Globe, GripHorizontal } from 'lucide-vue-next'
 import BranchSelector from './toolbar/BranchSelector.vue'
 import WorktreePanel from './toolbar/WorktreePanel.vue'
 import GitOpsButtons from './toolbar/GitOpsButtons.vue'
@@ -30,6 +30,7 @@ const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   manageTasks: [cwd?: string, newDraft?: boolean]
   toggleBrowser: []
+  paneDragStart: []
 }>()
 
 // --- Git 状态(从 IPC 拉取的快照,下发给 BranchSelector / WorktreePanel /
@@ -166,6 +167,13 @@ async function onConflictDetected(): Promise<void> {
   <!-- 工具栏 v-if 仅在 cwd 已知时渲染;不再以 isRepo 为条件,非 git 目录也展示
        TaskRunner + IdeLauncher。 -->
   <div v-if="props.cwd" class="pane-toolbar" @click.stop>
+    <button
+      class="pane-drag-handle"
+      title="拖拽以重排面板"
+      @mousedown.left.prevent.stop="emit('paneDragStart')"
+    >
+      <GripHorizontal :size="14" />
+    </button>
     <template v-if="isRepo">
       <BranchSelector
         :cwd="props.cwd"
@@ -203,7 +211,7 @@ async function onConflictDetected(): Promise<void> {
     />
     <el-tooltip content="浏览器" placement="bottom" :show-after="300">
       <button class="browser-btn" @click="emit('toggleBrowser')">
-        <Globe :size="13" />
+        <Globe :size="14" />
       </button>
     </el-tooltip>
     <IdeLauncher :cwd="props.cwd" />

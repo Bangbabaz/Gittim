@@ -2,8 +2,17 @@
   margin-left: auto;
   display: inline-flex;
   align-items: stretch;
-  height: 20px;
+  height: 26px;
   flex-shrink: 0;
+  overflow: hidden;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--el-border-radius-small);
+
+  &:hover {
+    border-color: var(--el-border-color);
+    background: var(--el-fill-color);
+  }
 }
 
 .ide-chip {
@@ -11,18 +20,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 20px;
-  border: 1px solid var(--el-border-color);
-  border-right: none;
-  border-radius: $radius-sm 0 0 $radius-sm;
-  background: var(--el-fill-color-blank);
+  width: 26px;
+  height: 24px;
+  border-radius: var(--el-border-radius-small) 0 0 var(--el-border-radius-small);
+  background: transparent;
   color: var(--el-text-color-regular);
   flex-shrink: 0;
   transition: filter 0.12s;
 
   &:hover:not(:disabled) {
-    filter: brightness(1.1);
+    filter: brightness(1.08);
   }
 
   &:disabled {
@@ -32,25 +39,24 @@
 
   &.has-real-icon {
     background: transparent !important;
-    border-color: var(--el-border-color);
   }
 }
 
 .ide-chip-svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   display: block;
 }
 
 .ide-chip-img {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: block;
   image-rendering: -webkit-optimize-contrast;
 }
 
 .ide-chip-letter {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   color: #fff;
@@ -62,18 +68,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 20px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color);
-  border-radius: 0 $radius-sm $radius-sm 0;
+  width: 16px;
+  height: 24px;
+  background: transparent;
+  border-radius: 0 var(--el-border-radius-small) var(--el-border-radius-small) 0;
   color: var(--el-text-color-secondary);
+  border-left: 1px solid var(--el-border-color-light);
   flex-shrink: 0;
 
   &:hover:not(:disabled) {
     background: var(--el-fill-color);
-    color: var(--el-color-primary);
-    border-color: var(--el-text-color-secondary);
+    color: var(--el-text-color-primary);
   }
 
   &:disabled {

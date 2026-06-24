@@ -1,30 +1,25 @@
 .pane-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
+  gap: 3px;
+  height: 34px;
+  padding: 0 7px 0 5px;
   background: var(--el-fill-color-light);
-  border-bottom: 1px solid var(--el-border-color);
+  border-bottom: 1px solid var(--el-border-color-light);
   flex-shrink: 0;
   user-select: none;
 }
 
+.pane-drag-handle,
 .browser-btn {
-  @include btn-reset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--el-border-color);
-  border-radius: $radius-sm;
-  color: var(--el-text-color-regular);
-  flex-shrink: 0;
+  @include toolbar-icon-button;
+}
 
-  &:hover {
-    border-color: var(--el-text-color-secondary);
-    color: var(--el-color-primary);
-    background: var(--el-fill-color);
+.pane-drag-handle {
+  cursor: grab;
+  color: var(--el-text-color-placeholder);
+
+  &:active {
+    cursor: grabbing;
   }
 }

@@ -1,0 +1,120 @@
+/*
+ * Element Plus variables are Gittim's only runtime design tokens.
+ * Keep theme changes here instead of adding an application-specific layer.
+ */
+:root {
+  color-scheme: light;
+
+  --el-color-primary: #2563eb;
+  --el-color-success: #16a34a;
+  --el-color-warning: #d97706;
+  --el-color-danger: #dc2626;
+  --el-color-info: #64748b;
+  --el-color-primary-light-3: color-mix(in srgb, var(--el-color-primary) 70%, var(--el-bg-color));
+  --el-color-primary-light-5: color-mix(in srgb, var(--el-color-primary) 50%, var(--el-bg-color));
+  --el-color-primary-light-7: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-bg-color));
+  --el-color-primary-light-8: color-mix(in srgb, var(--el-color-primary) 20%, var(--el-bg-color));
+  --el-color-primary-light-9: color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color));
+  --el-color-primary-dark-2: color-mix(in srgb, var(--el-color-primary) 80%, #000);
+  --el-color-success-light-8: color-mix(in srgb, var(--el-color-success) 20%, var(--el-bg-color));
+  --el-color-success-light-9: color-mix(in srgb, var(--el-color-success) 10%, var(--el-bg-color));
+  --el-color-warning-light-8: color-mix(in srgb, var(--el-color-warning) 20%, var(--el-bg-color));
+  --el-color-warning-light-9: color-mix(in srgb, var(--el-color-warning) 10%, var(--el-bg-color));
+  --el-color-danger-light-8: color-mix(in srgb, var(--el-color-danger) 20%, var(--el-bg-color));
+  --el-color-danger-light-9: color-mix(in srgb, var(--el-color-danger) 10%, var(--el-bg-color));
+
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f1f3f6;
+  --el-bg-color-overlay: #ffffff;
+  --el-fill-color: #e9edf3;
+  --el-fill-color-light: #f4f6f9;
+  --el-fill-color-lighter: #f8fafc;
+  --el-fill-color-extra-light: #fbfcfd;
+  --el-fill-color-dark: #dfe4eb;
+  --el-fill-color-darker: #d4dae3;
+  --el-fill-color-blank: #ffffff;
+
+  --el-text-color-primary: #172033;
+  --el-text-color-regular: #3f4b60;
+  --el-text-color-secondary: #69758a;
+  --el-text-color-placeholder: #929bad;
+  --el-text-color-disabled: #b2bac8;
+
+  --el-border-color: #d7dce5;
+  --el-border-color-light: #e3e7ed;
+  --el-border-color-lighter: #eceff3;
+  --el-border-color-extra-light: #f3f5f7;
+  --el-border-color-dark: #c8ced8;
+  --el-border-color-darker: #b7bfcc;
+
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 5px;
+  --el-border-radius-round: 999px;
+
+  --el-box-shadow-light: 0 8px 24px rgb(15 23 42 / 10%);
+  --el-box-shadow: 0 12px 36px rgb(15 23 42 / 14%);
+  --el-box-shadow-dark: 0 18px 48px rgb(15 23 42 / 20%);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --el-color-primary: #6c9eff;
+  --el-color-success: #48b774;
+  --el-color-warning: #dca24c;
+  --el-color-danger: #ef6b73;
+  --el-color-info: #8993a4;
+
+  --el-bg-color: #111318;
+  --el-bg-color-page: #0d0f13;
+  --el-bg-color-overlay: #20232a;
+  --el-fill-color: #2a2e36;
+  --el-fill-color-light: #1b1e24;
+  --el-fill-color-lighter: #171a20;
+  --el-fill-color-extra-light: #15181d;
+  --el-fill-color-dark: #333842;
+  --el-fill-color-darker: #3b414c;
+  --el-fill-color-blank: #171a20;
+
+  --el-text-color-primary: #eef1f6;
+  --el-text-color-regular: #c8ced8;
+  --el-text-color-secondary: #9099a8;
+  --el-text-color-placeholder: #687180;
+  --el-text-color-disabled: #4f5764;
+
+  --el-border-color: #30353e;
+  --el-border-color-light: #292e36;
+  --el-border-color-lighter: #24282f;
+  --el-border-color-extra-light: #20242a;
+  --el-border-color-dark: #3b414b;
+  --el-border-color-darker: #474e5a;
+
+  --el-box-shadow-light: 0 8px 24px rgb(0 0 0 / 24%);
+  --el-box-shadow: 0 14px 40px rgb(0 0 0 / 34%);
+  --el-box-shadow-dark: 0 20px 56px rgb(0 0 0 / 45%);
+}
+
+.el-popper,
+.el-dialog,
+.el-message-box {
+  border-color: var(--el-border-color-light);
+}
+
+.el-button,
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
+}
+
+.el-button:not(.is-text) {
+  border-color: var(--el-border-color);
+}
+
+.el-button--primary {
+  border-color: var(--el-color-primary);
+}
