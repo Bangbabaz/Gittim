@@ -1,3 +1,5 @@
+@use 'abstracts' as *;
+
 /*
  * Element Plus variables are Gittim's only runtime design tokens.
  * Keep theme changes here instead of adding an application-specific layer.
@@ -117,4 +119,32 @@ html.dark {
 
 .el-button--primary {
   border-color: var(--el-color-primary);
+}
+
+.pane-toolbar .toolbar-select {
+  --el-select-input-font-size: 12px;
+}
+
+.pane-toolbar .toolbar-select .el-select__wrapper {
+  min-height: 26px;
+  padding: 0 8px;
+  background: var(--el-fill-color-blank);
+  border-radius: var(--el-border-radius-small);
+  box-shadow: 0 0 0 1px var(--el-border-color-light) inset;
+}
+
+.pane-toolbar .toolbar-select .el-select__wrapper:hover {
+  background: var(--el-fill-color);
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
+}
+
+.pane-toolbar .toolbar-select .el-select__wrapper.is-focused {
+  background: var(--el-fill-color);
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.pane-toolbar .toolbar-select .el-select__selected-item,
+.pane-toolbar .toolbar-select .el-select__placeholder {
+  font-size: 12px;
+  font-family: $font-ui;
 }

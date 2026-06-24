@@ -740,6 +740,28 @@ async function extractIcon(command: string, id?: string): Promise<string | undef
     return undefined
   }
 
+  if (id === 'os-terminal') {
+    if (isMac) return extractIconMac('/System/Applications/Utilities/Terminal.app')
+    if (isWindows) {
+      const target = windowsCmdPath()
+      try {
+        const img = await app.getFileIcon(target, { size: 'large' })
+        if (img.isEmpty()) return undefined
+        return img.resize({ width: 48, height: 48, quality: 'best' }).toDataURL()
+      } catch {
+        return undefined
+      }
+    }
+    const target = process.env.TERMINAL ? await findInPath(process.env.TERMINAL) : null
+    if (!target) return undefined
+    try {
+      const img = await app.getFileIcon(target, { size: 'large' })
+      return img.isEmpty() ? undefined : img.resize({ width: 48, height: 48 }).toDataURL()
+    } catch {
+      return undefined
+    }
+  }
+
   if (isMac) return extractIconMac(command, id)
 
   try {
@@ -754,6 +776,10 @@ async function extractIcon(command: string, id?: string): Promise<string | undef
   } catch {
     return undefined
   }
+}
+
+function windowsCmdPath(): string {
+  return join(process.env.WINDIR || 'C:\\Windows', 'System32', 'cmd.exe')
 }
 
 // ---------------------------------------------------------------------------
@@ -779,7 +805,10 @@ export function hydrateIdeCache(persisted: IdeInfo[] | undefined | null): void {
 }
 
 export async function detectIdes(force = false): Promise<IdeInfo[]> {
-  if (cache && !force) return withSystemEntries(cache)
+  if (cache && !force) {
+    cache = await ensureSystemEntries(cache)
+    return cache
+  }
   // 并发去重:多个 IdeLauncher 同时 onMounted 时只跑一次实际扫描。
   if (!force && scanning) return scanning
   if (force) {
@@ -910,8 +939,28 @@ function osTerminalEntry(): IdeInfo {
 }
 
 function withSystemEntries(items: IdeInfo[]): IdeInfo[] {
+  const terminal = items.find((item) => item.id === 'os-terminal') ?? osTerminalEntry()
+  const folder = items.find((item) => item.id === 'os-folder') ?? osFolderEntry()
   const ordinary = items.filter((item) => item.id !== 'os-terminal' && item.id !== 'os-folder')
-  return [...ordinary, osTerminalEntry(), osFolderEntry()]
+  return [...ordinary, terminal, folder]
+}
+
+async function ensureSystemEntries(items: IdeInfo[]): Promise<IdeInfo[]> {
+  const next = withSystemEntries(items)
+  let changed = false
+  await Promise.all(
+    next
+      .filter((item) => item.id === 'os-terminal' || (item.id === 'os-folder' && !item.iconDataUrl))
+      .map(async (item) => {
+        const icon = await extractIcon(item.command, item.id)
+        if (!icon) return
+        if (item.iconDataUrl === icon) return
+        item.iconDataUrl = icon
+        changed = true
+      })
+  )
+  if (changed) updateSettings({ cachedIdes: next })
+  return next
 }
 
 function openSystemTerminal(cwd: string): Promise<{ success: boolean; error?: string }> {
@@ -938,7 +987,8 @@ function openSystemTerminal(cwd: string): Promise<{ success: boolean; error?: st
     }
 
     if (isWindows) {
-      const proc = spawn('wt.exe', ['-d', folder], {
+      const proc = spawn(windowsCmdPath(), ['/k'], {
+        cwd: folder,
         detached: true,
         stdio: 'ignore',
         windowsHide: false
@@ -947,7 +997,7 @@ function openSystemTerminal(cwd: string): Promise<{ success: boolean; error?: st
         proc.unref()
         finish({ success: true })
       })
-      proc.once('error', () => launch('cmd.exe', ['/k'], { cwd: folder }))
+      proc.once('error', (err) => finish({ success: false, error: err.message }))
       return
     }
     if (isMac) {

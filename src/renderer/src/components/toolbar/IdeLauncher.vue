@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChevronDown, FolderClosed, RefreshCw, SquareTerminal } from 'lucide-vue-next'
 import { iconFor } from '../ideIcons'
-import type { IdeInfo } from '@shared/types'
+import { useIdes } from '../../composables/useIdes'
 
 // "在 IDE 中打开"控件 —— 左边一个品牌色 chip(打开默认 IDE)+ 右边小 caret
 // (下拉切换 IDE)。chosen IDE 持久化到 settings.defaultIde,下次启动直接命中。
@@ -15,37 +15,20 @@ const props = defineProps<{
   cwd: string
 }>()
 
-const ides = ref<IdeInfo[]>([])
-const ideLoading = ref(false)
-const defaultIdeId = ref<string | null>(null)
-
-const defaultIde = computed<IdeInfo | null>(() => {
-  if (!ides.value.length) return null
-  const persisted = defaultIdeId.value ? ides.value.find((i) => i.id === defaultIdeId.value) : null
-  return persisted || ides.value[0]
-})
+const {
+  ides,
+  loading: ideLoading,
+  defaultIde,
+  init: initIdes,
+  load: loadIdes,
+  setDefault
+} = useIdes()
 
 const defaultIdeIcon = computed(() =>
   defaultIde.value ? iconFor(defaultIde.value.id, defaultIde.value.name) : null
 )
 
-async function loadIdes(force = false): Promise<void> {
-  ideLoading.value = true
-  try {
-    ides.value = await window.api.ideList(force)
-  } catch {
-    ides.value = []
-  } finally {
-    ideLoading.value = false
-  }
-}
-
-onMounted(async () => {
-  const [settings] = await Promise.all([window.api.settingsGet(), loadIdes(false)])
-  if (typeof settings.defaultIde === 'string') {
-    defaultIdeId.value = settings.defaultIde
-  }
-})
+onMounted(() => void initIdes())
 
 async function openWithIde(id: string): Promise<void> {
   if (!props.cwd) return
@@ -54,10 +37,7 @@ async function openWithIde(id: string): Promise<void> {
     ElMessage.error(r.error || '打开 IDE 失败')
     return
   }
-  if (defaultIdeId.value !== id) {
-    defaultIdeId.value = id
-    window.api.settingsSet({ defaultIde: id })
-  }
+  setDefault(id)
 }
 
 const openDefaultIde = async (): Promise<void> => {
@@ -67,8 +47,8 @@ const openDefaultIde = async (): Promise<void> => {
 
 const onPickIde = async (cmd: string): Promise<void> => {
   if (cmd === '__refresh__') {
-    await loadIdes(true)
-    ElMessage.success(ides.value.length ? `检测到 ${ides.value.length} 个 IDE` : '未检测到任何 IDE')
+    const list = await loadIdes(true)
+    ElMessage.success(list.length ? `检测到 ${list.length} 个打开方式` : '未检测到打开方式')
     return
   }
   await openWithIde(cmd)

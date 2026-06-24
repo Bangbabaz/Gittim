@@ -1,20 +1,16 @@
-.cmd-pick {
-  @include toolbar-control;
-  gap: 5px;
-  max-width: 150px;
-  padding: 0 8px;
-  font-size: 12px;
+.task-select {
+  width: 150px;
 }
 
-.cmd-pick-name {
-  flex: 1;
+.task-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  @include ellipsis;
 }
 
-.cmd-pick-caret {
-  opacity: 0.65;
-  flex-shrink: 0;
+.task-option-label {
+  @include ellipsis;
 }
 
 .status-dot {

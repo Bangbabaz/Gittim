@@ -37,7 +37,6 @@ const emit = defineEmits<{
 
 const items = ref<EditItem[]>([])
 const selectedKey = ref<string | null>(null)
-const pkgScripts = ref<Record<string, string>>({})
 
 const MIN_LIST_WIDTH = 120
 const MAX_LIST_WIDTH = 500
@@ -160,15 +159,6 @@ watch(
   }
 )
 
-watch(
-  () => selected.value?.cwd,
-  async (c) => {
-    pkgScripts.value = c ? await window.api.readPackageScripts(c) : {}
-  }
-)
-
-const pkgScriptNames = computed(() => Object.keys(pkgScripts.value))
-
 function select(i: EditItem): void {
   selectedKey.value = i.key
 }
@@ -188,13 +178,6 @@ function addDraft(cwd?: string): void {
 
 function markDirty(): void {
   if (selected.value) selected.value.dirty = true
-}
-
-function applyScript(name: string): void {
-  if (!selected.value) return
-  selected.value.command = `npm run ${name}`
-  if (!selected.value.name.trim()) selected.value.name = name
-  selected.value.dirty = true
 }
 
 async function browseCwd(): Promise<void> {
@@ -259,7 +242,7 @@ async function save(): Promise<void> {
   <el-dialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="760px"
+    width="840px"
     :with-header="true"
     class="task-mgr-dialog"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
@@ -267,7 +250,10 @@ async function save(): Promise<void> {
     <div class="tm-body">
       <aside class="tm-list" :style="{ width: listWidth + 'px' }">
         <div class="tm-list-head">
-          <span class="tm-list-title">命令</span>
+          <div>
+            <span class="tm-list-title">命令</span>
+            <span class="tm-list-count">{{ visibleItems.length }}</span>
+          </div>
           <button class="tm-add" title="新建命令" @click="addDraft()">
             <Plus :size="14" />
           </button>
@@ -281,7 +267,10 @@ async function save(): Promise<void> {
             :class="{ active: i.key === selectedKey }"
             @click="select(i)"
           >
-            <span class="tm-item-label">{{ itemLabel(i) }}</span>
+            <span class="tm-item-content">
+              <span class="tm-item-label">{{ itemLabel(i) }}</span>
+              <span class="tm-item-command">{{ i.command || '尚未填写命令' }}</span>
+            </span>
             <span v-if="i.isNew" class="tm-badge new">未保存</span>
             <span v-else-if="i.dirty" class="tm-dot" title="有未保存的修改" />
             <button class="tm-del" title="删除" @click.stop="deleteItem(i)">
@@ -295,6 +284,13 @@ async function save(): Promise<void> {
 
       <section class="tm-detail">
         <template v-if="selected">
+          <div class="tm-detail-head">
+            <div>
+              <div class="tm-detail-title">{{ itemLabel(selected) }}</div>
+              <div class="tm-detail-subtitle">配置命令、工作目录和显示名称</div>
+            </div>
+            <span v-if="selected.isNew || selected.dirty" class="tm-unsaved">未保存</span>
+          </div>
           <label class="tm-field">
             <span class="tm-label">名称</span>
             <input
@@ -327,18 +323,6 @@ async function save(): Promise<void> {
               </button>
             </div>
           </label>
-          <div v-if="pkgScriptNames.length" class="tm-scripts">
-            <span class="tm-scripts-label">package.json:</span>
-            <button
-              v-for="s in pkgScriptNames"
-              :key="s"
-              class="tm-chip"
-              :title="pkgScripts[s]"
-              @click="applyScript(s)"
-            >
-              {{ s }}
-            </button>
-          </div>
           <div class="tm-actions">
             <span class="tm-hint">未保存的更改关闭后会丢弃</span>
             <button class="tm-save" :disabled="!selected.command.trim()" @click="save">保存</button>
@@ -362,21 +346,25 @@ async function save(): Promise<void> {
 
 .tm-body {
   display: flex;
-  height: 420px;
+  height: 460px;
   gap: 0;
+  margin: -14px -16px -16px;
 }
 
 .tm-list {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  padding: 14px 10px;
+  background: var(--el-fill-color-extra-light);
+  border-right: 1px solid var(--el-border-color-light);
 }
 
 .tm-list-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 12px;
+  padding: 0 4px 10px;
 }
 
 .tm-list-title {
@@ -385,6 +373,12 @@ async function save(): Promise<void> {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--el-text-color-secondary);
+}
+
+.tm-list-count {
+  margin-left: 6px;
+  color: var(--el-text-color-placeholder);
+  font-size: 10px;
 }
 
 .tm-add {
@@ -407,7 +401,7 @@ async function save(): Promise<void> {
 .tm-list-scroll {
   flex: 1;
   overflow-y: auto;
-  padding-right: 6px;
+  padding-right: 2px;
 }
 
 .tm-empty {
@@ -420,7 +414,7 @@ async function save(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 8px;
+  padding: 8px 7px;
   border-radius: $radius-md;
   cursor: pointer;
 
@@ -434,14 +428,28 @@ async function save(): Promise<void> {
 
   &.active {
     background: var(--el-color-primary-light-9);
+    box-shadow: inset 2px 0 0 var(--el-color-primary);
   }
 }
 
-.tm-item-label {
+.tm-item-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tm-item-label {
   font-size: 12.5px;
   color: var(--el-text-color-primary);
+  @include ellipsis;
+}
+
+.tm-item-command {
+  color: var(--el-text-color-placeholder);
+  font-size: 10.5px;
+  @include mono-font;
   @include ellipsis;
 }
 
@@ -480,7 +488,7 @@ async function save(): Promise<void> {
 }
 
 .tm-resizer {
-  width: 5px;
+  width: 4px;
   flex-shrink: 0;
   cursor: col-resize;
   background: transparent;
@@ -496,10 +504,39 @@ async function save(): Promise<void> {
 .tm-detail {
   flex: 1;
   min-width: 0;
-  padding: 0 2px 0 20px;
+  padding: 20px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.tm-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.tm-detail-title {
+  color: var(--el-text-color-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tm-detail-subtitle {
+  margin-top: 2px;
+  color: var(--el-text-color-placeholder);
+  font-size: 11px;
+}
+
+.tm-unsaved {
+  padding: 2px 7px;
+  border-radius: var(--el-border-radius-round);
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+  font-size: 10px;
 }
 
 .tm-field {
@@ -551,32 +588,6 @@ async function save(): Promise<void> {
   &:hover {
     background: var(--el-fill-color);
     color: var(--el-text-color-primary);
-  }
-}
-
-.tm-scripts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-}
-
-.tm-scripts-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
-
-.tm-chip {
-  @include btn-reset;
-  background: color-mix(in srgb, var(--el-color-primary) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
-  color: var(--el-color-primary);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-
-  &:hover {
-    background: color-mix(in srgb, var(--el-color-primary) 33%, transparent);
   }
 }
 

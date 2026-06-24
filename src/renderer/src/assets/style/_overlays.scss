@@ -76,11 +76,7 @@
 
 // --- Task command picker dropdown (el-dropdown → body) --------------------
 .task-pick-dropdown {
-  @include teleported-picker-dropdown;
-
-  .el-dropdown-menu {
-    max-width: 360px;
-  }
+  min-width: 240px !important;
 
   .status-dot {
     width: 7px;
@@ -97,6 +93,42 @@
     &.failed {
       background: var(--el-color-danger);
     }
+  }
+
+  .el-select-dropdown__item {
+    font-size: 12px;
+  }
+
+  .el-select-dropdown__footer {
+    display: flex;
+    gap: 4px;
+    padding: 5px;
+    border-top: 1px solid var(--el-border-color-light);
+  }
+
+  .task-select-action {
+    @include btn-reset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    flex: 1;
+    height: 28px;
+    border-radius: var(--el-border-radius-small);
+    color: var(--el-text-color-secondary);
+    font-size: 11px;
+
+    &:hover {
+      background: var(--el-fill-color);
+      color: var(--el-text-color-primary);
+    }
+  }
+
+  .task-select-empty {
+    padding: 14px;
+    color: var(--el-text-color-placeholder);
+    font-size: 11px;
+    text-align: center;
   }
 }
 

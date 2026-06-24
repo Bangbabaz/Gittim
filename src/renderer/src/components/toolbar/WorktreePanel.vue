@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderGit2, Trash2, SplitSquareHorizontal } from 'lucide-vue-next'
+import {
+  FolderGit2,
+  Trash2,
+  SplitSquareHorizontal,
+  RefreshCw,
+  GitBranch,
+  LockKeyhole,
+  HardDrive
+} from 'lucide-vue-next'
 import type { BranchInfo, WorktreeInfo } from '@shared/types'
 
 // 工作树:新建对话框 + 管理对话框 + 两个工具栏按钮。
@@ -454,22 +462,47 @@ defineExpose({ openWorktreeDialog })
     </template>
   </el-dialog>
 
-  <el-dialog v-model="showWtManage" title="管理工作树" width="640px" class="wt-dialog">
+  <el-dialog
+    v-model="showWtManage"
+    title="管理工作树"
+    width="720px"
+    class="wt-dialog wt-manage-dialog"
+  >
+    <div class="wt-manage-head">
+      <div>
+        <div class="wt-manage-summary">{{ wtList.length }} 个工作树</div>
+        <div class="wt-manage-desc">在新面板中打开，或移除不再使用的工作树</div>
+      </div>
+      <button class="wt-refresh-btn" :disabled="wtLoading" @click="loadWorktrees">
+        <RefreshCw :size="13" :class="{ spinning: wtLoading }" />
+        刷新
+      </button>
+    </div>
     <div v-if="wtLoading" class="wt-manage-empty">加载中…</div>
     <div v-else-if="!wtList.length" class="wt-manage-empty">没有工作树</div>
     <div v-else class="wt-manage-list">
       <div v-for="w in wtList" :key="w.path" class="wt-manage-row">
+        <div class="wt-manage-icon" :class="{ main: w.isMain }">
+          <HardDrive v-if="w.isMain" :size="16" />
+          <FolderGit2 v-else :size="16" />
+        </div>
         <div class="wt-manage-info">
-          <div class="wt-manage-path" :title="w.path">{{ w.path }}</div>
           <div class="wt-manage-meta">
-            <span v-if="w.isMain" class="br-tag local">主</span>
-            <span v-if="w.locked" class="br-tag worktree">已锁定</span>
-            <span v-if="w.detached" class="br-tag remote">分离 HEAD</span>
-            <span v-else-if="w.branch" class="wt-manage-branch">{{ w.branch }}</span>
+            <GitBranch :size="12" />
+            <span class="wt-manage-branch">
+              {{ w.detached ? '分离 HEAD' : w.branch || '未知分支' }}
+            </span>
+            <span v-if="w.isMain" class="br-tag local">主工作树</span>
+            <span v-if="w.locked" class="br-tag worktree">
+              <LockKeyhole :size="10" />
+              已锁定
+            </span>
           </div>
+          <div class="wt-manage-path" :title="w.path">{{ w.path }}</div>
         </div>
         <button class="wt-open-btn" title="在右侧新面板打开" @click="openWorktree(w)">
           <SplitSquareHorizontal :size="14" />
+          <span>打开</span>
         </button>
         <button
           v-if="!w.isMain"
@@ -480,7 +513,6 @@ defineExpose({ openWorktreeDialog })
         >
           <Trash2 :size="14" />
         </button>
-        <span v-else class="wt-main-hint">不可删除</span>
       </div>
     </div>
     <template #footer>
@@ -570,10 +602,63 @@ defineExpose({ openWorktreeDialog })
   text-align: center;
 }
 
+.wt-manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+
+.wt-manage-summary {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wt-manage-desc {
+  margin-top: 2px;
+  color: var(--el-text-color-placeholder);
+  font-size: 11px;
+}
+
+.wt-refresh-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--el-border-color);
+  border-radius: var(--el-border-radius-small);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+
+  &:hover:not(:disabled) {
+    background: var(--el-fill-color);
+    color: var(--el-text-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+  }
+}
+
+.spinning {
+  animation: wt-spin 0.8s linear infinite;
+}
+
+@keyframes wt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .wt-manage-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-height: 52vh;
   overflow-y: auto;
 }
@@ -581,11 +666,33 @@ defineExpose({ openWorktreeDialog })
 .wt-manage-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 11px 12px;
   background: var(--el-fill-color-lighter);
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--el-border-color-light);
   border-radius: $radius-md;
+
+  &:hover {
+    background: var(--el-fill-color-light);
+    border-color: var(--el-border-color);
+  }
+}
+
+.wt-manage-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+
+  &.main {
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+  }
 }
 
 .wt-manage-info {
@@ -594,8 +701,9 @@ defineExpose({ openWorktreeDialog })
 }
 
 .wt-manage-path {
-  font-size: 12px;
-  color: var(--el-text-color-primary);
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
   @include mono-font;
   @include ellipsis;
 }
@@ -604,16 +712,21 @@ defineExpose({ openWorktreeDialog })
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  color: var(--el-text-color-secondary);
 }
 
 .wt-manage-branch {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-primary);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .wt-open-btn {
   @include wt-action-btn(var(--el-color-primary));
+  width: auto;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 11px;
 
   &:hover {
     background: color-mix(in srgb, var(--el-color-primary) 13%, transparent);
@@ -633,11 +746,5 @@ defineExpose({ openWorktreeDialog })
     opacity: 0.5;
     cursor: not-allowed;
   }
-}
-
-.wt-main-hint {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  flex-shrink: 0;
 }
 </style>

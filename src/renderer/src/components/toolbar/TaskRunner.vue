@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Play, RotateCw, Square, ChevronDown } from 'lucide-vue-next'
+import { Play, RotateCw, Square, Plus, Settings2 } from 'lucide-vue-next'
 import { useTasks } from '../../composables/useTasks'
 import type { TaskMeta } from '@shared/types'
 
@@ -48,17 +48,7 @@ const selectedTask = computed<TaskMeta | null>(
 )
 const runningTasks = computed(() => paneTasks.value.filter((t) => t.status === 'running'))
 
-const onPickCommand = (cmd: string): void => {
-  if (cmd === '__manage__') {
-    emit('manageTasks', props.cwd)
-    return
-  }
-  if (cmd === '__new_here__') {
-    emit('manageTasks', props.cwd, true)
-    return
-  }
-  selectPaneTask(props.paneId, cmd)
-}
+const onPickCommand = (id: string | null): void => selectPaneTask(props.paneId, id)
 
 const runSelected = async (): Promise<void> => {
   if (selectedTask.value) await window.api.taskStart({ id: selectedTask.value.id })
@@ -70,38 +60,37 @@ const stopTask = async (id: string): Promise<void> => {
 </script>
 
 <template>
-  <el-dropdown
-    trigger="click"
-    placement="bottom-start"
+  <el-select
+    :model-value="selectedId"
+    class="toolbar-select task-select"
     popper-class="task-pick-dropdown"
-    @command="onPickCommand"
+    size="small"
+    placeholder="选择命令"
+    @update:model-value="onPickCommand"
   >
-    <button class="cmd-pick" :title="selectedTask?.command || '选择命令'">
+    <template #prefix>
       <span class="status-dot" :class="selectedTask?.status || 'none'" />
-      <span class="cmd-pick-name">{{
-        selectedTask ? selectedTask.name || selectedTask.command : '选择命令'
-      }}</span>
-      <ChevronDown :size="12" class="cmd-pick-caret" />
-    </button>
-    <template #dropdown>
-      <el-dropdown-menu>
-        <el-dropdown-item
-          v-for="t in paneTasks"
-          :key="t.id"
-          :command="t.id"
-          :class="{ picked: t.id === selectedId }"
-        >
-          <span class="status-dot" :class="t.status" />
-          <span class="td-label">{{ t.name || t.command }}</span>
-        </el-dropdown-item>
-        <el-dropdown-item v-if="!paneTasks.length" disabled class="cmd-empty">
-          该文件夹暂无命令
-        </el-dropdown-item>
-        <el-dropdown-item divided command="__new_here__">为此文件夹新建命令…</el-dropdown-item>
-        <el-dropdown-item command="__manage__">管理命令…</el-dropdown-item>
-      </el-dropdown-menu>
     </template>
-  </el-dropdown>
+    <el-option v-for="t in paneTasks" :key="t.id" :value="t.id" :label="t.name || t.command">
+      <span class="task-option">
+        <span class="status-dot" :class="t.status" />
+        <span class="task-option-label">{{ t.name || t.command }}</span>
+      </span>
+    </el-option>
+    <template #empty>
+      <div class="task-select-empty">该文件夹暂无命令</div>
+    </template>
+    <template #footer>
+      <button class="task-select-action" @click.stop="emit('manageTasks', props.cwd, true)">
+        <Plus :size="13" />
+        新建命令
+      </button>
+      <button class="task-select-action" @click.stop="emit('manageTasks', props.cwd)">
+        <Settings2 :size="13" />
+        管理命令
+      </button>
+    </template>
+  </el-select>
 
   <el-tooltip
     v-if="selectedTask"

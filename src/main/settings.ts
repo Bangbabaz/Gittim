@@ -1,10 +1,8 @@
 import { app } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs'
+import { cpSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { Settings, TaskDef, SavedLayout } from '@shared/types'
 
-// 共享类型 re-export,方便 main/tasks.ts 这种本来从 settings.ts 拿 TaskDef 的旧
-// import 不必再到处改路径。
 export type { Settings, TaskDef, SavedLayout }
 
 const DEFAULTS: Settings = {
@@ -31,11 +29,8 @@ const home = app.getPath('home')
 const NEW_DIR = '.gittim'
 const OLD_DIR = '.Gittim'
 
-// Store under ~/.gittim/ instead of Electron's userData. userData lives at
-// %APPDATA%/<productName> / ~/Library/Application Support/<productName> /
-// ~/.config/<productName>, which is per-installation and gets clobbered if
-// productName ever changes or another app picks the same name. A dot-dir in
-// $HOME is portable, predictable, and easy for the user to back up or wipe.
+// 配置使用固定的用户目录，而不是 Electron userData。这样产品名变化或重装应用时，
+// 布局、任务和偏好仍然位于可预测、便于备份的 ~/.gittim/settings.json。
 function settingsDir(): string {
   return join(home, NEW_DIR)
 }
@@ -45,30 +40,45 @@ function settingsPath(): string {
 }
 
 /**
- * 迁移旧的大写目录到小写。模块加载时执行一次 —— 在 readSettings() 之前。
- * 如果旧目录 ~/.Gittim/ 存在且新目录 ~/.gittim/ 不存在,直接 rename;
- * 如果两者都存在,不覆盖(用户可能手动创建了新的),只在日志里提示。
+ * 将旧的 ~/.Gittim 迁移为 ~/.gittim。
+ *
+ * Windows 默认不区分文件名大小写，直接检查两个路径会把同一个目录误判成
+ * “新旧目录并存”。这里枚举 HOME 下的真实目录名，并通过临时目录完成大小写改名。
+ *
+ * 在大小写敏感的文件系统上，如果新旧目录确实同时存在，则将旧配置合并到新目录，
+ * 复制成功后再删除旧目录。旧配置优先，避免升级时生成的默认值覆盖用户数据。
  */
 function migrateOldConfigDir(): void {
+  const oldPath = join(home, OLD_DIR)
+  const newPath = join(home, NEW_DIR)
+
   try {
-    const oldPath = join(home, OLD_DIR)
-    const newPath = join(home, NEW_DIR)
-    if (!existsSync(oldPath)) return
-    if (existsSync(newPath)) {
-      // 新旧目录并存 —— rename 会失败(EISDIR/ENOTEMPTY 取决于平台)。
-      // 用户可能已手动迁移,或者旧目录是残留的空壳。不做破坏性操作。
-      console.warn(`[Gittim] 新旧配置目录并存: ${oldPath}, ${newPath} —— 请手动检查并删除旧目录`)
+    const dirs = readdirSync(home, { withFileTypes: true })
+    const hasOld = dirs.some((entry) => entry.isDirectory() && entry.name === OLD_DIR)
+    const hasNew = dirs.some((entry) => entry.isDirectory() && entry.name === NEW_DIR)
+    if (!hasOld) return
+
+    if (hasNew) {
+      cpSync(oldPath, newPath, { recursive: true, force: true })
+      rmSync(oldPath, { recursive: true, force: true })
+      console.info(`[Gittim] 已合并并删除旧配置目录: ${oldPath} → ${newPath}`)
       return
     }
-    renameSync(oldPath, newPath)
+
+    const tempPath = join(home, `.gittim-migrate-${process.pid}-${Date.now()}`)
+    renameSync(oldPath, tempPath)
+    try {
+      renameSync(tempPath, newPath)
+    } catch (err) {
+      renameSync(tempPath, oldPath)
+      throw err
+    }
     console.info(`[Gittim] 配置目录已迁移: ${oldPath} → ${newPath}`)
   } catch (err) {
     console.error('[Gittim] 配置目录迁移失败:', err)
   }
 }
 
-// 模块加载时执行迁移。readSettings() / shell-integration 都在这之后才访问
-// 目录,所以 rename 是安全的。
 migrateOldConfigDir()
 
 export function readSettings(): Settings {
@@ -77,7 +87,6 @@ export function readSettings(): Settings {
     const raw = readFileSync(settingsPath(), 'utf8')
     cache = { ...DEFAULTS, ...JSON.parse(raw) }
   } catch {
-    // File missing on first run, or unreadable — start from defaults.
     cache = { ...DEFAULTS }
   }
   return cache!
@@ -87,18 +96,15 @@ function flush(): void {
   if (!cache) return
   try {
     mkdirSync(settingsDir(), { recursive: true })
-    // Atomic write: a crash mid-write would otherwise leave a truncated
-    // settings.json and lose the saved layout + every task definition.
+    // 先写临时文件再重命名，避免异常退出留下半截 JSON。
     const tmp = settingsPath() + '.tmp'
     writeFileSync(tmp, JSON.stringify(cache, null, 2))
     renameSync(tmp, settingsPath())
   } catch {
-    // disk full / permissions — settings will simply not persist
+    // 磁盘已满或无写入权限时保留内存状态，本次运行仍可继续。
   }
 }
 
-// Debounce: window-resize/move fire dozens of events per drag. We only need
-// the final state, so coalesce writes within a short window.
 export function updateSettings(patch: Partial<Settings>): void {
   cache = { ...readSettings(), ...patch }
   if (writeTimer) clearTimeout(writeTimer)

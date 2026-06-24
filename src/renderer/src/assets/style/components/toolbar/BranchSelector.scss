@@ -1,37 +1,7 @@
 // git 图标本身不再用 danger 红色;统一中性 secondary,避免被误读为告警。
-.git-icon {
-  color: var(--el-text-color-secondary);
-  flex-shrink: 0;
-  margin: 0 1px 0 2px;
-}
-
 .branch-select {
   width: 168px;
   --el-select-input-font-size: 12px;
-
-  :deep(.el-select__wrapper) {
-    min-height: 26px;
-    padding: 0 8px;
-    background: var(--el-fill-color-blank);
-    border-radius: var(--el-border-radius-small);
-    box-shadow: 0 0 0 1px var(--el-border-color-light) inset;
-
-    &:hover {
-      background: var(--el-fill-color);
-      box-shadow: 0 0 0 1px var(--el-border-color) inset;
-    }
-
-    &.is-focused {
-      background: var(--el-fill-color);
-      box-shadow: 0 0 0 1px var(--el-color-primary) inset;
-    }
-  }
-
-  :deep(.el-select__selected-item),
-  :deep(.el-select__placeholder) {
-    font-size: 12px;
-    @include ui-font;
-  }
 }
 
 .switch-msg {

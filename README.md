@@ -1,135 +1,188 @@
 # Gittim
 
 <p align="center">
-  <img src="resources/icon.png" width="128" alt="Gittim" />
+  <img src="resources/icon.png" width="120" alt="Gittim logo" />
 </p>
 
 <p align="center">
-  <strong>Git + tmux 风格的终端模拟器</strong>
+  <strong>为 Git、多任务开发和 AI Agent 工作流设计的桌面终端。</strong>
 </p>
 
 <p align="center">
-  无限分屏 · 原生 Git 集成 · 一键工作树 · 内置浏览器 · 后台任务 · 语音输入
+  分屏终端 · Git 工作树 · 后台命令 · 内置浏览器 · MCP 自动化 · 离线语音输入
 </p>
 
 ---
 
-## ⚡ 为什么用 Gittim
+Gittim 是一个基于 Electron 和 xterm.js 的跨平台终端应用。它把常用的 Git 操作、
+工作树、长期运行命令、浏览器预览和 AI Agent 协作集中在一个窗口中，适合同时维护
+多个分支、多个开发服务或多个编码 Agent 的工作方式。
 
-Gittim 把终端的日常操作搬到图形界面里。不用记 tmux 快捷键、不用切窗口跑 `git worktree`、不用另开浏览器看页面效果 —— 所有事情在一个窗口里完成。
+## 主要功能
 
-| 你需要的 | Gittim 怎么做 |
-|----------|--------------|
-| 多窗格终端 | `Ctrl+Shift+D` / `Ctrl+Shift+S` 无限分割，拖拽调大小 |
-| 切换分支 | 工具栏下拉直接切，远程分支自动 track |
-| 创建工作树 | 弹窗选分支 → 新窗格自动打开到工作树目录 |
-| 同时看终端+浏览器 | 右侧抽屉内置 webview，agent 可通过 MCP 操控 |
-| 跑后台任务 | `npm run dev` 开在后台，日志随时翻看 |
-| 语音输入命令 | 按住 `F2` 说话，松开自动转写并粘贴 |
+### 分屏终端
 
-## 🖥️ 分屏终端
+- 横向或纵向拆分任意数量的终端面板
+- 拖动分隔线调整面板大小，拖动面板工具栏重新排列布局
+- 每个面板拥有独立的 shell、工作目录和命令选择
+- 自动跟踪 shell 中的 `cd`，重启后恢复布局和目录
+- 支持终端搜索、链接识别、Unicode 11 和 WebGL 渲染
 
-类似 tmux 的递归二叉树布局，一个窗口想开几个终端就开几个。每个窗格独立 Shell，自动跟随 `cd` 切换工作目录。
+### Git 工作流
 
-- **无限分割** — 水平 / 垂直随意切，布局重启后自动恢复
-- **拖拽调整** — 拖动窗格之间的分割条改变大小
-- **拖拽重排** — 拖住窗格顶部的把手可以重新排列布局
+- 显示并切换当前仓库的本地、远程分支
+- 远程分支自动建立 tracking 分支
+- 切换前检测未提交修改，可选择暂存后继续
+- 查看改动统计、文件 diff、提交历史和提交详情
+- 创建、删除和管理 Git worktree
+- 新建工作树后自动拆分面板并进入对应目录
+- 支持 merge、rebase、push、pull、分支创建与删除
+- 提供冲突状态查看和冲突文件处理入口
 
-## 🌿 Git 深度集成
+### 后台命令
 
-每个终端窗格顶部都有 Git 工具栏：
+将开发服务器、构建监听器等长期命令从可见终端中独立出来：
 
-- **当前分支** — 实时显示，`cd` 到其他仓库时自动切换
-- **分支列表** — 本地 + 远程 + 工作树，一目了然
-- **一键切换** — 有未提交更改时自动提示暂存
-- **Diff 查看器** — 改动统计 + 语法高亮 + 文件级跳转
-- **合并/变基** — 右键菜单快捷操作
+- 按工作目录保存命令定义
+- 启动、停止、重启、编辑和删除命令
+- 多个终端面板共享实时运行状态
+- 使用独立 PTY 保留彩色输出和交互能力
+- 日志使用环形缓冲区保存，并支持搜索
+- 应用重启后保留命令定义，但不会自动启动进程
 
-### 工作树
+### 内置浏览器
 
-选中任意分支，一键创建 Git 工作树：
+每个终端面板都可以打开独立的浏览器抽屉，用于预览本地页面或调试 Web 应用。
+浏览器支持地址导航、刷新、前进后退，并可通过内置 MCP 服务交给 AI Agent 操作。
 
-1. 点击工具栏的 `+` 按钮
-2. 选择基准分支（可选新建分支）
-3. 确认后自动拆分新窗格，`cd` 到工作树目录
-4. 新建分支自动 `push -u` 到远程
+### MCP 与 Agent 协作
 
-## 🌐 内置浏览器
+Gittim 内置两个本地 MCP 服务：
 
-每个终端面板都可以从右侧滑出内置浏览器。MCP Server 暴露 20 个自动化工具，终端里的 AI Agent（Claude Code、Codex 等）可以直接操控浏览器：
+| 服务 | 地址 | 用途 |
+| --- | --- | --- |
+| Browser MCP | `http://127.0.0.1:9876/sse` | 页面导航、点击、输入、截图和浏览器状态读取 |
+| Agent MCP | `http://127.0.0.1:9877/sse` | 终端发现、安全粘贴以及多个 Agent 之间的消息协作 |
 
-- **导航与截图** — 打开页面、截取全页或元素
-- **表单操作** — 填表（兼容 React/Vue 受控组件）、勾选、选择下拉
-- **模拟交互** — 点击、悬停、键盘、滚动、文件上传
-- **页面感知** — 语义化快照（比截图省 token）、元素属性、Console 日志
-- **等待与复合** — 等待元素出现、批量填表、等待后点击
-
-一行命令注册 MCP：
+Claude Code 示例：
 
 ```bash
 claude mcp add -s user -t sse gittim-browser http://127.0.0.1:9876/sse
+claude mcp add -s user -t sse gittim-agent http://127.0.0.1:9877/sse
 ```
 
-## ⚙️ 后台任务
-
-把 `npm run dev`、`docker compose up` 这类长时间运行的命令交给后台：
-
-- 每个任务独立运行，输出实时流式回放
-- 停止、重启、删除，随时管理
-- 自动读取 `package.json` 的 scripts，一键填入
-- 应用重启后任务定义保留，按需启动
-
-## 🎤 语音输入
-
-按住 `F2` 说话，松开自动转写并粘贴到终端。完全离线运行，基于 whisper.cpp，模型内置在安装包中，无需网络。
-
-- 中英混说（语言设为 `auto`）
-- 录音时显示音量电平条
-- 麦克风设备可在设置中切换
-
-## ⌨️ 快捷键
-
-| 快捷键 | 功能 |
-|---|---|
-| `Ctrl+Shift+D` | 向右分割 |
-| `Ctrl+Shift+S` | 向下分割 |
-| `Ctrl+Shift+W` | 关闭窗格 |
-| `Ctrl+F` | 搜索终端 |
-| `F2` (按住) | 语音输入 |
-| `Ctrl+=` | 放大字号 |
-| `Ctrl+-` | 缩小字号 |
-| `Ctrl+0` | 重置字号 |
-
-所有快捷键可在设置中自定义。
-
-## 🎨 主题
-
-跟随系统自动切换暗色/亮色，也可手动固定。
-
-## 📦 安装
-
-从 [Releases](https://github.com/Bangbabaz/Gittim/releases) 下载最新版本：
-
-- **Windows** — `.exe` NSIS 安装包
-- **macOS** — `.dmg`
-- **Linux** — `.AppImage` / `.snap` / `.deb`
-
-## 🛠 开发
+Codex 示例：
 
 ```bash
-yarn              # 安装依赖
-yarn dev          # 启动开发服务 (HMR)
-yarn typecheck    # TypeScript 检查
-yarn lint         # ESLint
-yarn build:win    # 构建 Windows
-yarn build:mac    # 构建 macOS
-yarn build:linux  # 构建 Linux
+codex mcp add gittim-browser --url http://127.0.0.1:9876/sse
+codex mcp add gittim-agent --url http://127.0.0.1:9877/sse
 ```
 
-## 🏗 技术栈
+也可以在 Gittim 的“设置 → MCP”中直接复制对应命令。
 
-Electron · Vue 3 · xterm.js · TypeScript · Element Plus · node-pty · whisper.cpp
+### 离线语音输入
 
-## 📄 协议
+按住 `F2` 录音，松开后将识别结果安全粘贴到当前终端：
 
-[MIT](LICENSE)
+- 基于 whisper.cpp，本地离线运行
+- 内置量化模型，无需在运行时下载
+- 支持中英文混合识别
+- 可选择麦克风设备
+- 通过 xterm bracketed paste 写入，避免多行文本被 shell 意外逐行执行
+
+### 快捷指令与外部工具
+
+- 为常用命令配置快捷指令，并发送到当前终端
+- 自动检测常见 IDE，可从当前目录直接打开
+- 支持使用系统文件管理器打开当前目录
+- Windows 上可使用系统 `cmd.exe` 在当前目录打开终端
+
+## 快捷键
+
+| 快捷键 | 功能 |
+| --- | --- |
+| `Ctrl+Shift+D` | 向右拆分面板 |
+| `Ctrl+Shift+S` | 向下拆分面板 |
+| `Ctrl+Shift+W` | 关闭当前面板 |
+| `Ctrl+F` | 搜索终端内容 |
+| `Ctrl+=` / `Ctrl++` | 增大终端字号 |
+| `Ctrl+-` | 减小终端字号 |
+| `Ctrl+0` | 重置终端字号 |
+| `Ctrl+C` | 有选区时复制，否则发送中断信号 |
+| `Ctrl+V` | 安全粘贴 |
+| 按住 `F2` | 语音输入 |
+
+快捷键可以在设置中调整。
+
+## 安装
+
+从 [GitHub Releases](https://github.com/Bangbabaz/Gittim/releases) 下载对应平台的安装包：
+
+- Windows：NSIS 安装程序
+- macOS：DMG
+- Linux：AppImage、Snap 或 Deb
+
+## 本地开发
+
+需要 Node.js、Yarn 1.x，以及平台对应的原生模块编译环境。
+
+```bash
+git clone https://github.com/Bangbabaz/Gittim.git
+cd Gittim
+```
+
+Windows 首次安装依赖时必须使用包装脚本，它会为 MSVC 设置 UTF-8 编译参数：
+
+```powershell
+powershell ./scripts/install.ps1
+```
+
+macOS 和 Linux：
+
+```bash
+yarn install
+```
+
+常用命令：
+
+```bash
+yarn dev          # 启动开发环境
+yarn typecheck    # TypeScript 类型检查
+yarn lint         # ESLint
+yarn format       # Prettier
+yarn build        # 类型检查并构建
+yarn build:win    # Windows 安装包
+yarn build:mac    # macOS 安装包
+yarn build:linux  # Linux 安装包
+```
+
+首次运行开发或构建命令时会自动下载离线语音模型。中国大陆网络环境可设置
+`HF_MIRROR=hf-mirror.com`。
+
+## 配置与数据
+
+用户配置保存在：
+
+```text
+~/.gittim/settings.json
+```
+
+其中包括窗口状态、面板布局、后台命令、快捷指令、主题和其他偏好。旧版本使用的
+`~/.Gittim` 会在应用启动时自动迁移到全小写目录。
+
+语音模型存放在 `resources/models`，不提交到 Git，由下载脚本和打包流程管理。
+
+## 技术栈
+
+- Electron
+- Vue 3 + TypeScript
+- Element Plus
+- xterm.js + node-pty
+- electron-vite
+- Shiki + diff2html
+- whisper.cpp / smart-whisper
+
+## 项目状态
+
+Gittim 仍在持续开发中。欢迎通过
+[Issues](https://github.com/Bangbabaz/Gittim/issues) 提交问题、功能建议或平台兼容性反馈。

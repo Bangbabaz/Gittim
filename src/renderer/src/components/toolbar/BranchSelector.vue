@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  GitBranch,
   GitMerge,
   GitBranchPlus,
   ArrowUpFromLine,
@@ -359,10 +358,9 @@ const switchWithStash = async (): Promise<void> => {
 </script>
 
 <template>
-  <GitBranch class="git-icon" :size="14" />
   <el-select
     :model-value="displayBranch"
-    class="branch-select"
+    class="toolbar-select branch-select"
     popper-class="branch-select-dropdown"
     size="small"
     filterable
