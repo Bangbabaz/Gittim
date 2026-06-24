@@ -189,6 +189,12 @@ export interface IdeInfo {
 
 export type ThemePref = 'system' | 'dark' | 'light'
 
+export interface QuickCommand {
+  id: string
+  name: string
+  command: string
+}
+
 export interface WindowBounds {
   x?: number
   y?: number
@@ -232,6 +238,8 @@ export interface Settings {
   voiceShortcut?: string
   /** 自动更新开关,默认 true。关闭后不检查也不下载。 */
   autoUpdate?: boolean
+  /** 点击后向当前激活终端执行或填入的快捷指令。 */
+  quickCommands?: QuickCommand[]
 }
 
 // ---------------------------------------------------------------------------

@@ -20,7 +20,8 @@ const DEFAULTS: Settings = {
   sttLanguage: 'zh',
   sttDeviceId: '',
   voiceShortcut: 'F2',
-  autoUpdate: true
+  autoUpdate: true,
+  quickCommands: []
 }
 
 let cache: Settings | null = null
@@ -56,9 +57,7 @@ function migrateOldConfigDir(): void {
     if (existsSync(newPath)) {
       // 新旧目录并存 —— rename 会失败(EISDIR/ENOTEMPTY 取决于平台)。
       // 用户可能已手动迁移,或者旧目录是残留的空壳。不做破坏性操作。
-      console.warn(
-        `[Gittim] 新旧配置目录并存: ${oldPath}, ${newPath} —— 请手动检查并删除旧目录`
-      )
+      console.warn(`[Gittim] 新旧配置目录并存: ${oldPath}, ${newPath} —— 请手动检查并删除旧目录`)
       return
     }
     renameSync(oldPath, newPath)

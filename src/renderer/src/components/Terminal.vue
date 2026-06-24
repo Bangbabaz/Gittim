@@ -598,7 +598,14 @@ const onTerminalFocus = async (): Promise<void> => {
   }
 }
 
-defineExpose({ terminal, fitAddon })
+const runQuickCommand = (command: string, execute: boolean): void => {
+  if (!command) return
+  terminal.focus()
+  terminal.paste(command)
+  if (execute) window.api.ptyWrite(props.paneId, '\r')
+}
+
+defineExpose({ terminal, fitAddon, runQuickCommand })
 
 // 点击终端区域自动收起浏览器抽屉（不销毁）
 function onTerminalClick(): void {

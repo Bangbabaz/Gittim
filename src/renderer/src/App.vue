@@ -12,14 +12,18 @@ import {
   Copy,
   Check,
   FolderOpen,
-  ListChecks
+  ListChecks,
+  Zap
 } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
+import QuickCommandMenu from './components/QuickCommandMenu.vue'
+import QuickCommandsSettings from './components/QuickCommandsSettings.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
+import type { QuickCommand } from '@shared/types'
 
 // App.vue 作为"屋顶":标题栏 + 设置抽屉 + 任务抽屉 / 管理对话框 + Layout 渲染。
 // 布局算法、pane tree、divider 拖拽、pane 拖拽都搬到 useLayout —— App 这里只
@@ -47,9 +51,10 @@ const MAX_SCROLLBACK = 200000
 const appScrollback = ref(DEFAULT_SCROLLBACK)
 
 const showSettings = ref(false)
-const settingsTab = ref<'general' | 'mcp' | 'shortcuts' | 'about'>('general')
+const settingsTab = ref<'general' | 'commands' | 'mcp' | 'shortcuts' | 'about'>('general')
 const electronVersion = ref('')
 const appVersion = ref('')
+const quickCommands = ref<QuickCommand[]>([])
 
 // Tasks drawer + manager dialog
 const showTasks = ref(false)
@@ -303,6 +308,31 @@ const activeCwd = computed(() => {
   return (id && paneCwd.value[id]) || cwd.value || ''
 })
 
+type TerminalViewInstance = InstanceType<typeof TerminalView>
+const terminalRefs = new Map<string, TerminalViewInstance>()
+
+const setTerminalRef = (paneId: string, instance: unknown): void => {
+  if (instance) terminalRefs.set(paneId, instance as TerminalViewInstance)
+  else terminalRefs.delete(paneId)
+}
+
+const runQuickCommand = (command: QuickCommand, execute: boolean): void => {
+  if (!command.command.trim()) return
+  const id = activeId.value
+  if (!id) return
+  terminalRefs.get(id)?.runQuickCommand(command.command, execute)
+}
+
+const updateQuickCommands = (commands: QuickCommand[]): void => {
+  quickCommands.value = commands
+  window.api.settingsSet({ quickCommands: commands })
+}
+
+const openQuickCommandSettings = (): void => {
+  settingsTab.value = 'commands'
+  showSettings.value = true
+}
+
 // ----------- 字号 / 滚动行数 -----------
 const onFontSizeChange = (size: number): void => {
   const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
@@ -442,6 +472,15 @@ onMounted(async () => {
   if (typeof settings.sttLanguage === 'string') sttLanguage.value = settings.sttLanguage
   if (typeof settings.sttDeviceId === 'string') sttDeviceId.value = settings.sttDeviceId
   if (typeof settings.voiceShortcut === 'string') voiceShortcut.value = settings.voiceShortcut
+  if (Array.isArray(settings.quickCommands)) {
+    quickCommands.value = settings.quickCommands.filter(
+      (item): item is QuickCommand =>
+        !!item &&
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        typeof item.command === 'string'
+    )
+  }
 
   restoreFromSaved(settings.paneLayout)
 
@@ -534,6 +573,12 @@ onUnmounted(() => {
       </button>
     </div>
     <div class="title-bar-right">
+      <QuickCommandMenu
+        :commands="quickCommands"
+        :disabled="!activeId"
+        @run="runQuickCommand"
+        @manage="openQuickCommandSettings"
+      />
       <button class="tb-btn" title="查看任务" @click="openTasksDrawer">
         <ListChecks :size="14" />
       </button>
@@ -591,6 +636,14 @@ onUnmounted(() => {
           >
             <Layout :size="14" class="settings-nav-icon" />
             <span>通用</span>
+          </button>
+          <button
+            class="settings-nav-item"
+            :class="{ active: settingsTab === 'commands' }"
+            @click="settingsTab = 'commands'"
+          >
+            <Zap :size="14" class="settings-nav-icon" />
+            <span>快捷指令</span>
           </button>
           <button
             class="settings-nav-item"
@@ -782,6 +835,12 @@ onUnmounted(() => {
           </section>
         </template>
 
+        <QuickCommandsSettings
+          v-else-if="settingsTab === 'commands'"
+          :model-value="quickCommands"
+          @update:model-value="updateQuickCommands"
+        />
+
         <template v-else-if="settingsTab === 'mcp'">
           <section class="settings-section">
             <header class="settings-section-header">
@@ -795,7 +854,11 @@ onUnmounted(() => {
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Claude Code</label>
-                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('browserClaude')">
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('browserClaude')"
+                >
                   <Check v-if="mcpCopied === 'browserClaude'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
@@ -807,7 +870,11 @@ onUnmounted(() => {
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Codex</label>
-                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('browserCodex')">
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('browserCodex')"
+                >
                   <Check v-if="mcpCopied === 'browserCodex'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
@@ -820,7 +887,11 @@ onUnmounted(() => {
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Claude Code</label>
-                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('agentClaude')">
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('agentClaude')"
+                >
                   <Check v-if="mcpCopied === 'agentClaude'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
@@ -832,7 +903,11 @@ onUnmounted(() => {
             <div class="settings-item">
               <div class="settings-item-row">
                 <label class="settings-item-label">Codex</label>
-                <button class="settings-copy-btn" title="复制注册命令" @click="copyMcpConfig('agentCodex')">
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('agentCodex')"
+                >
                   <Check v-if="mcpCopied === 'agentCodex'" :size="12" />
                   <Copy v-else :size="12" />
                 </button>
@@ -842,10 +917,10 @@ onUnmounted(() => {
               </p>
             </div>
             <p class="settings-item-desc">
-              注册完成后，请重新启动或刷新 Agent，使其重新加载 MCP 工具列表。
-              两个 Agent 需要分别调用 agent_register 注册自己的 GITTIM_PANE_ID，之后使用
-              agent_list、agent_send 和 agent_reply 建立协作会话。
-              agent_send 支持同时指定多个目标，但会为每个目标建立独立会话；收到消息的 Agent
+              注册完成后，请重新启动或刷新 Agent，使其重新加载 MCP 工具列表。 两个 Agent
+              需要分别调用 agent_register 注册自己的 GITTIM_PANE_ID，之后使用 agent_list、agent_send
+              和 agent_reply 建立协作会话。 agent_send
+              支持同时指定多个目标，但会为每个目标建立独立会话；收到消息的 Agent
               能识别发送者，并通过 agent_reply 只回复对应 Agent。
             </p>
           </section>
@@ -1008,6 +1083,7 @@ onUnmounted(() => {
         :style="rectStyle(pane.rect)"
       >
         <TerminalView
+          :ref="(instance: unknown) => setTerminalRef(pane.id, instance)"
           :pane-id="pane.id"
           :cwd="paneCwd[pane.id] ?? cwd"
           :font-size="appFontSize"
