@@ -325,7 +325,7 @@ const runQuickCommand = (command: QuickCommand, execute: boolean): void => {
 
 const updateQuickCommands = (commands: QuickCommand[]): void => {
   quickCommands.value = commands
-  window.api.settingsSet({ quickCommands: commands })
+  void window.api.settingsSetNow({ quickCommands: commands })
 }
 
 const openQuickCommandSettings = (): void => {

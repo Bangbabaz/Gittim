@@ -72,6 +72,10 @@ const ZONE_MAP: Record<DropZone, { direction: 'row' | 'column'; newFirst: boolea
   bottom: { direction: 'column', newFirst: false }
 }
 
+function isSavedPaneId(id: unknown): id is string {
+  return typeof id === 'string' && /^pane-[A-Za-z0-9_-]+-\d+$/.test(id)
+}
+
 // ---------------------------------------------------------------------------
 // 纯函数:tree 操作 / rect 计算
 // ---------------------------------------------------------------------------
@@ -555,7 +559,11 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   // ---- 序列化 ------------------------------------------------------------
   const serializeNode = (node: LayoutNode): SavedLayout => {
     if (node.type === 'pane') {
-      return { type: 'pane', cwd: paneCwd.value[node.id] || opts.defaultCwd.value || '' }
+      return {
+        type: 'pane',
+        id: node.id,
+        cwd: paneCwd.value[node.id] || opts.defaultCwd.value || ''
+      }
     }
     return {
       type: 'split',
@@ -578,13 +586,15 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   const deserializeNode = (
     saved: SavedLayout,
     paneCwdAcc: Record<string, string>,
+    usedPaneIds: Set<string>,
     depth = 0
   ): LayoutNode => {
     if (depth >= MAX_LAYOUT_DEPTH || !saved || typeof saved !== 'object') {
       return { type: 'pane', id: newPaneId() }
     }
     if (saved.type === 'pane') {
-      const id = newPaneId()
+      const id = isSavedPaneId(saved.id) && !usedPaneIds.has(saved.id) ? saved.id : newPaneId()
+      usedPaneIds.add(id)
       if (saved.cwd && typeof saved.cwd === 'string') paneCwdAcc[id] = saved.cwd
       return { type: 'pane', id }
     }
@@ -599,8 +609,8 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
         typeof saved.ratio === 'number' && saved.ratio > MIN_RATIO && saved.ratio < MAX_RATIO
           ? saved.ratio
           : 0.5,
-      a: deserializeNode(saved.a, paneCwdAcc, depth + 1),
-      b: deserializeNode(saved.b, paneCwdAcc, depth + 1)
+      a: deserializeNode(saved.a, paneCwdAcc, usedPaneIds, depth + 1),
+      b: deserializeNode(saved.b, paneCwdAcc, usedPaneIds, depth + 1)
     }
   }
 
@@ -608,7 +618,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     if (saved) {
       try {
         const restoredPaneCwd: Record<string, string> = {}
-        const restored = deserializeNode(saved, restoredPaneCwd)
+        const restored = deserializeNode(saved, restoredPaneCwd, new Set())
         layout.value = restored
         paneCwd.value = restoredPaneCwd
         activeId.value = firstLeafId(restored)

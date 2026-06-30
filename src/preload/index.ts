@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   TaskMeta,
@@ -37,6 +37,7 @@ const api = {
   getCwd: () => ipcRenderer.invoke('sys-cwd') as Promise<string>,
   getPlatform: () => ipcRenderer.invoke('sys-platform') as Promise<NodeJS.Platform>,
   getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
 
   /** 从剪贴板读取图片(PNG)。无图片时返回 null。 */
   clipboardReadImage: () => ipcRenderer.invoke('clipboard-read-image') as Promise<string | null>,
@@ -108,6 +109,8 @@ const api = {
   // ---- Settings + Theme --------------------------------------------------
   settingsGet: () => ipcRenderer.invoke('settings-get') as Promise<Settings>,
   settingsSet: (patch: Partial<Settings>) => ipcRenderer.send('settings-set', patch),
+  settingsSetNow: (patch: Partial<Settings>) =>
+    ipcRenderer.invoke('settings-set-now', patch) as Promise<void>,
   themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
   themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
   onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {

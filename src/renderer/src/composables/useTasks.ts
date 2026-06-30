@@ -82,7 +82,7 @@ function selectPaneTask(paneId: string, id: string | null): void {
   if (id) next[paneId] = id
   else delete next[paneId]
   paneSelectedIds.value = next
-  window.api.settingsSet({ paneSelectedTaskIds: next })
+  void window.api.settingsSetNow({ paneSelectedTaskIds: next })
   // 工具栏选中的任务同时成为任务抽屉当前项，但不会影响其他 pane 的工具栏。
   selectedId.value = id
 }

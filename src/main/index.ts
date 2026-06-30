@@ -422,6 +422,10 @@ app.whenReady().then(() => {
 
   // Settings IPC
   ipcMain.handle('settings-get', () => readSettings())
+  ipcMain.handle('settings-set-now', (_event, patch: Partial<Settings>) => {
+    updateSettings(patch)
+    flushSettings()
+  })
   ipcMain.on('settings-set', (_event, patch: Partial<Settings>) => {
     updateSettings(patch)
   })

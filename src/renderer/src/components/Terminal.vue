@@ -288,6 +288,64 @@ const pasteFromClipboard = async (): Promise<void> => {
   }
 }
 
+const platform =
+  (window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? ''
+
+const pathFromFileUrl = (url: string): string | null => {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'file:') return null
+    let path = decodeURIComponent(u.pathname)
+    if (platform === 'win32' && /^\/[A-Za-z]:/.test(path)) path = path.slice(1)
+    return platform === 'win32' ? path.replace(/\//g, '\\') : path
+  } catch {
+    return null
+  }
+}
+
+const getDroppedPaths = (dataTransfer: DataTransfer | null): string[] => {
+  if (!dataTransfer) return []
+  const paths: string[] = []
+  for (const file of Array.from(dataTransfer.files)) {
+    const path = window.api.pathForFile(file) || (file as File & { path?: string }).path
+    if (path) paths.push(path)
+  }
+  if (!paths.length) {
+    const uriList = dataTransfer.getData('text/uri-list')
+    for (const line of uriList.split(/\r?\n/)) {
+      if (!line || line.startsWith('#')) continue
+      const path = pathFromFileUrl(line.trim())
+      if (path) paths.push(path)
+    }
+  }
+  return Array.from(new Set(paths))
+}
+
+const isFileDrag = (dataTransfer: DataTransfer | null): boolean => {
+  if (!dataTransfer) return false
+  const types = Array.from(dataTransfer.types)
+  return types.includes('Files') || types.includes('text/uri-list')
+}
+
+const onTerminalDragOver = (e: DragEvent): void => {
+  const dataTransfer = e.dataTransfer
+  if (!dataTransfer || !isFileDrag(dataTransfer)) return
+  e.preventDefault()
+  e.stopPropagation()
+  dataTransfer.dropEffect = 'copy'
+}
+
+const onTerminalDrop = (e: DragEvent): void => {
+  const dataTransfer = e.dataTransfer
+  if (!dataTransfer || !isFileDrag(dataTransfer)) return
+  e.preventDefault()
+  e.stopPropagation()
+  const paths = getDroppedPaths(dataTransfer)
+  if (!paths.length) return
+  terminal.focus()
+  terminal.paste(paths.join(' '))
+}
+
 // Apply a new font size and reflow. Returns true if it actually changed.
 const applyFontSize = (size: number): boolean => {
   const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
@@ -788,7 +846,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="terminal-wrapper" @click="() => terminal.textarea?.focus()">
+  <div
+    class="terminal-wrapper"
+    @click="() => terminal.textarea?.focus()"
+    @dragenter.capture="onTerminalDragOver"
+    @dragover.capture="onTerminalDragOver"
+    @drop.capture="onTerminalDrop"
+  >
     <PaneToolbar
       ref="toolbarRef"
       :pane-id="props.paneId"

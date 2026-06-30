@@ -14,10 +14,10 @@
 
 /**
  * 持久化到 settings.json 的 layout tree。Pane ID 是运行时生成,每次启动重新分配,
- * 所以序列化形式记录 cwd 而非 ID;deserialize 时分配新 ID 并把 cwd 注入 paneCwd。
+ * 所以序列化形式记录稳定 pane ID + cwd；旧配置没有 id 时 deserialize 会分配新 ID 并把 cwd 注入 paneCwd。
  */
 export type SavedLayout =
-  | { type: 'pane'; cwd: string }
+  | { type: 'pane'; id?: string; cwd: string }
   | {
       type: 'split'
       direction: 'row' | 'column'
