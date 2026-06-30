@@ -917,11 +917,10 @@ onUnmounted(() => {
               </p>
             </div>
             <p class="settings-item-desc">
-              注册完成后，请重新启动或刷新 Agent，使其重新加载 MCP 工具列表。 两个 Agent
-              需要分别调用 agent_register 注册自己的 GITTIM_PANE_ID，之后使用 agent_list、agent_send
-              和 agent_reply 建立协作会话。 agent_send
-              支持同时指定多个目标，但会为每个目标建立独立会话；收到消息的 Agent
-              能识别发送者，并通过 agent_reply 只回复对应 Agent。
+              注册完成后，请重新启动或刷新 Agent，使其重新加载 MCP 工具列表。Agent 先从环境变量
+              GITTIM_PANE_ID 读取当前面板 ID，并调用 agent_register({ name, paneId })
+              注册名称；之后用 agent_list、agent_send 和 agent_reply 协作，消息会直接唤醒目标
+              Agent。
             </p>
           </section>
         </template>

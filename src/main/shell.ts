@@ -145,6 +145,8 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   env.GITTIM_MCP_PORT = String(getBrowserMcpPort())
   env.GITTIM_AGENT_MCP_PORT = String(getAgentMcpPort())
   env.GITTIM_BROWSER_MCP_PORT = String(getBrowserMcpPort())
+  env.GITTIM_AGENT_MCP_URL = `http://127.0.0.1:${getAgentMcpPort()}/sse?paneId=${encodeURIComponent(opts.paneId)}`
+  env.GITTIM_BROWSER_MCP_URL = `http://127.0.0.1:${getBrowserMcpPort()}/sse`
 
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
