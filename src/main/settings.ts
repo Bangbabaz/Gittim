@@ -12,6 +12,7 @@ const DEFAULTS: Settings = {
   scrollback: 10000,
   taskOutputCapKB: 4096,
   autoOpenTasksOnRun: true,
+  unifiedAgentSessions: false,
   tasksDrawerWidth: 860,
   browserDrawerWidth: 480,
   theme: 'system',

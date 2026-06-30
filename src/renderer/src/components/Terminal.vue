@@ -23,10 +23,12 @@ import PaneToolbar from './PaneToolbar.vue'
 import BrowserDrawer from './BrowserDrawer.vue'
 import SearchOverlay from './SearchOverlay.vue'
 import RecordingIndicator from './RecordingIndicator.vue'
+import AgentSessionsDrawer from './AgentSessionsDrawer.vue'
 import { useTheme } from '../composables/useTheme'
 import { useVoiceInput } from '../composables/useVoiceInput'
 import { DEFAULT_SHORTCUTS, shortcutMatches } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
+import type { AgentSessionInfo } from '@shared/types'
 import '@xterm/xterm/css/xterm.css'
 
 const { xtermTheme } = useTheme()
@@ -96,6 +98,7 @@ const MAX_BROWSER_WIDTH = 2000
 const browserMounted = ref(false)
 const browserOpen = ref(false)
 const browserWidth = ref(DEFAULT_BROWSER_WIDTH)
+const agentSessionsOpen = ref(false)
 
 const toggleBrowser = (): void => {
   browserMounted.value = true
@@ -105,6 +108,10 @@ const toggleBrowser = (): void => {
 const closeBrowser = (): void => {
   browserOpen.value = false
   browserMounted.value = false
+}
+
+const toggleAgentSessions = (): void => {
+  agentSessionsOpen.value = !agentSessionsOpen.value
 }
 
 const contextMenuVisible = ref(false)
@@ -663,6 +670,10 @@ const runQuickCommand = (command: string, execute: boolean): void => {
   if (execute) window.api.ptyWrite(props.paneId, '\r')
 }
 
+const openAgentSession = (session: AgentSessionInfo): void => {
+  runQuickCommand(session.command, true)
+}
+
 defineExpose({ terminal, fitAddon, runQuickCommand })
 
 // 点击终端区域自动收起浏览器抽屉（不销毁）
@@ -859,10 +870,16 @@ onUnmounted(() => {
       :cwd="currentCwd"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
+      @toggle-agent-sessions="toggleAgentSessions"
       @toggle-browser="toggleBrowser"
       @pane-drag-start="emit('paneDragStart', props.paneId)"
     />
     <div class="pane-body">
+      <AgentSessionsDrawer
+        v-model="agentSessionsOpen"
+        :filter-cwd="currentCwd"
+        @open-session="openAgentSession"
+      />
       <div class="terminal-area">
         <div ref="terminalRef" class="terminal-container" @click="onTerminalClick"></div>
         <RecordingIndicator

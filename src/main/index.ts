@@ -78,6 +78,7 @@ import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
 import { startMcpServers, stopMcpServers, getBrowserMcpPort, getAgentMcpPort } from './mcp-server'
+import { listAgentSessions } from './agent-sessions'
 import icon from '../../resources/icon.png?asset'
 import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
 
@@ -224,6 +225,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sys-cwd', () => getCurrentDir())
   ipcMain.handle('sys-platform', () => process.platform)
   ipcMain.handle('sys-app-version', () => app.getVersion())
+  ipcMain.handle('agent-sessions-list', () => listAgentSessions())
   ipcMain.handle('git-info', (_event, cwd: string) => getGitInfo(cwd))
   ipcMain.handle('git-branches', (_event, cwd: string) => getGitBranches(cwd))
   ipcMain.handle('git-repo-name', (_event, cwd: string) => getRepoName(cwd))

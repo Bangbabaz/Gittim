@@ -25,7 +25,8 @@ import type {
   TaskIdPayload,
   TaskOutputSnapshot,
   IdeInfo,
-  UpdateStatus
+  UpdateStatus,
+  AgentSessionInfo
 } from '@shared/types'
 
 // API 暴露给 renderer 的桥接对象。每个方法对应 main 里的 ipcMain.handle / send。
@@ -38,6 +39,7 @@ const api = {
   getPlatform: () => ipcRenderer.invoke('sys-platform') as Promise<NodeJS.Platform>,
   getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
   pathForFile: (file: File) => webUtils.getPathForFile(file),
+  agentSessionsList: () => ipcRenderer.invoke('agent-sessions-list') as Promise<AgentSessionInfo[]>,
 
   /** 从剪贴板读取图片(PNG)。无图片时返回 null。 */
   clipboardReadImage: () => ipcRenderer.invoke('clipboard-read-image') as Promise<string | null>,

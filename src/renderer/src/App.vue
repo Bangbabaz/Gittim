@@ -13,17 +13,19 @@ import {
   Check,
   FolderOpen,
   ListChecks,
-  Zap
+  Zap,
+  PanelLeft
 } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
+import AgentSessionsDrawer from './components/AgentSessionsDrawer.vue'
 import TaskManagerDialog from './components/TaskManagerDialog.vue'
 import QuickCommandMenu from './components/QuickCommandMenu.vue'
 import QuickCommandsSettings from './components/QuickCommandsSettings.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
-import type { QuickCommand } from '@shared/types'
+import type { AgentSessionInfo, QuickCommand } from '@shared/types'
 
 // App.vue 作为"屋顶":标题栏 + 设置抽屉 + 任务抽屉 / 管理对话框 + Layout 渲染。
 // 布局算法、pane tree、divider 拖拽、pane 拖拽都搬到 useLayout —— App 这里只
@@ -58,6 +60,7 @@ const quickCommands = ref<QuickCommand[]>([])
 
 // Tasks drawer + manager dialog
 const showTasks = ref(false)
+const showAgentSessions = ref(false)
 const showTaskMgr = ref(false)
 const taskMgrFocusId = ref<string | null>(null)
 // 任务管理对话框不再"作用域到单一文件夹",现在按 cwd 分组渲染全部任务。
@@ -65,6 +68,7 @@ const taskMgrFocusId = ref<string | null>(null)
 const taskMgrScopeCwd = ref<string | null>(null)
 const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
+const unifiedAgentSessions = ref(false)
 const autoUpdate = ref(true)
 
 // 用户覆盖的快捷键(仅非默认值落盘)。下发给每个 Terminal,在 key handler 内
@@ -323,9 +327,75 @@ const runQuickCommand = (command: QuickCommand, execute: boolean): void => {
   terminalRefs.get(id)?.runQuickCommand(command.command, execute)
 }
 
-const updateQuickCommands = (commands: QuickCommand[]): void => {
-  quickCommands.value = commands
-  void window.api.settingsSetNow({ quickCommands: commands })
+const normPath = (p: string | null | undefined): string => {
+  if (!p) return ''
+  let s = p.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (/^[a-zA-Z]:/.test(s)) s = s.toLowerCase()
+  return s
+}
+
+const paneCwdFor = (paneId: string): string => paneCwd.value[paneId] || cwd.value || ''
+
+const waitForTerminalRef = async (paneId: string): Promise<TerminalViewInstance | null> => {
+  for (let i = 0; i < 20; i++) {
+    const ref = terminalRefs.get(paneId)
+    if (ref) return ref
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return null
+}
+
+const runCommandInPane = async (paneId: string, command: string): Promise<void> => {
+  setActive(paneId)
+  const terminal = await waitForTerminalRef(paneId)
+  terminal?.runQuickCommand(command, true)
+}
+
+const openUnifiedAgentSessions = (): void => {
+  showAgentSessions.value = !showAgentSessions.value
+}
+
+const openAgentSession = async (session: AgentSessionInfo): Promise<void> => {
+  const targetCwd = normPath(session.cwd)
+  const panes = layoutResult.value.panes
+  const candidates = targetCwd
+    ? panes.filter((pane) => normPath(paneCwdFor(pane.id)) === targetCwd)
+    : []
+
+  for (const pane of candidates) {
+    const busy = await window.api.ptyHasRunningProcess(pane.id)
+    if (!busy) {
+      await runCommandInPane(pane.id, session.command)
+      return
+    }
+  }
+
+  const splitFrom = candidates[0]?.id || activeId.value || panes[0]?.id || null
+  if (!splitFrom) return
+  const splitCwd = session.cwd || paneCwdFor(splitFrom)
+  const newPaneId = onSplit(splitFrom, 'row', splitCwd) || onSplit(splitFrom, 'column', splitCwd)
+  if (newPaneId) {
+    await runCommandInPane(newPaneId, session.command)
+  } else {
+    await runCommandInPane(splitFrom, session.command)
+  }
+}
+
+const normalizeQuickCommands = (commands: QuickCommand[]): QuickCommand[] =>
+  commands.map((item) => ({
+    id: String(item.id),
+    name: String(item.name ?? ''),
+    command: String(item.command ?? '')
+  }))
+
+const updateQuickCommands = async (commands: QuickCommand[]): Promise<void> => {
+  const next = normalizeQuickCommands(commands)
+  quickCommands.value = next
+  try {
+    await window.api.settingsSetNow({ quickCommands: next })
+  } catch (err) {
+    console.error('[quick-commands] save failed:', err)
+  }
 }
 
 const openQuickCommandSettings = (): void => {
@@ -372,6 +442,11 @@ function installUpdate(): void {
 const onToggleAutoOpenTasks = (val: boolean): void => {
   autoOpenTasksOnRun.value = val
   window.api.settingsSet({ autoOpenTasksOnRun: val })
+}
+
+const onToggleUnifiedAgentSessions = (val: boolean): void => {
+  unifiedAgentSessions.value = val
+  window.api.settingsSet({ unifiedAgentSessions: val })
 }
 
 const onToggleAutoUpdate = (val: boolean): void => {
@@ -463,6 +538,8 @@ onMounted(async () => {
   if (typeof settings.scrollback === 'number') appScrollback.value = settings.scrollback
   if (typeof settings.autoOpenTasksOnRun === 'boolean')
     autoOpenTasksOnRun.value = settings.autoOpenTasksOnRun
+  if (typeof settings.unifiedAgentSessions === 'boolean')
+    unifiedAgentSessions.value = settings.unifiedAgentSessions
   if (typeof settings.autoUpdate === 'boolean') autoUpdate.value = settings.autoUpdate
   if (typeof settings.tasksDrawerWidth === 'number')
     tasksDrawerWidth.value = clampDrawerWidth(settings.tasksDrawerWidth)
@@ -584,6 +661,14 @@ onUnmounted(() => {
       </button>
       <button class="tb-btn tb-folder" title="打开目录为新面板" @click="onOpenDirectory">
         <FolderOpen :size="14" />
+      </button>
+      <button
+        v-if="unifiedAgentSessions"
+        class="tb-btn"
+        title="Agent 会话"
+        @click="openUnifiedAgentSessions"
+      >
+        <PanelLeft :size="14" />
       </button>
       <button class="tb-btn tb-settings" title="设置" @click="showSettings = true">
         <SettingsIcon :size="14" />
@@ -773,7 +858,22 @@ onUnmounted(() => {
             </div>
             <div class="settings-item">
               <div class="settings-item-row">
-                <label class="settings-item-label">自动更新</label>
+                <label class="settings-item-label">统一会话</label>
+                <el-switch
+                  :model-value="unifiedAgentSessions"
+                  size="small"
+                  @update:model-value="
+                    (v: string | number | boolean) => onToggleUnifiedAgentSessions(!!v)
+                  "
+                />
+              </div>
+              <p class="settings-item-desc">
+                开启后,顶部显示统一 Agent 会话列表；关闭时从每个终端工具栏打开当前目录会话。
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">自动检查更新</label>
                 <el-switch
                   :model-value="autoUpdate"
                   size="small"
@@ -1068,59 +1168,66 @@ onUnmounted(() => {
     :scope-cwd="taskMgrScopeCwd"
     :new-draft="taskMgrNewDraft"
   />
-  <div
-    ref="containerRef"
-    class="layout-root"
-    :class="{ dragging: !!dragState, 'pane-dragging': !!paneDrag }"
-  >
-    <template v-if="cwd !== null && layout">
-      <div
-        v-for="pane in layoutResult.panes"
-        :key="pane.id"
-        class="pane-slot"
-        :class="{ active: pane.id === activeId }"
-        :style="rectStyle(pane.rect)"
-      >
-        <TerminalView
-          :ref="(instance: unknown) => setTerminalRef(pane.id, instance)"
-          :pane-id="pane.id"
-          :cwd="paneCwd[pane.id] ?? cwd"
-          :font-size="appFontSize"
-          :scrollback="appScrollback"
-          :shortcuts="shortcutOverrides"
-          :stt-language="sttLanguage"
-          :stt-device-id="sttDeviceId"
-          :voice-shortcut="voiceShortcut"
-          :is-active="pane.id === activeId"
-          @focus="setActive"
-          @split="onSplit"
-          @close="onClose"
-          @pane-drag-start="onPaneDragStart"
-          @focus-neighbor="focusNeighbor"
-          @create-worktree="onCreateWorktree"
-          @cwd-change="onCwdChange"
-          @font-size-change="onFontSizeChange"
-          @open-settings="showSettings = true"
-          @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
-        />
-      </div>
-      <div
-        v-for="(d, i) in layoutResult.dividers"
-        :key="`divider-${i}`"
-        class="divider"
-        :class="d.direction"
-        :style="rectStyle(d.rect)"
-        @mousedown="(e) => onDividerDown(e, i)"
-      ></div>
-      <template v-if="paneDrag">
-        <div v-if="draggedRect" class="pane-drag-source" :style="rectStyle(draggedRect)"></div>
+  <div class="workbench-root">
+    <AgentSessionsDrawer
+      v-if="unifiedAgentSessions"
+      v-model="showAgentSessions"
+      @open-session="openAgentSession"
+    />
+    <div
+      ref="containerRef"
+      class="layout-root"
+      :class="{ dragging: !!dragState, 'pane-dragging': !!paneDrag }"
+    >
+      <template v-if="cwd !== null && layout">
         <div
-          v-if="dropIndicatorRect"
-          class="pane-drop-indicator"
-          :style="rectStyle(dropIndicatorRect)"
+          v-for="pane in layoutResult.panes"
+          :key="pane.id"
+          class="pane-slot"
+          :class="{ active: pane.id === activeId }"
+          :style="rectStyle(pane.rect)"
+        >
+          <TerminalView
+            :ref="(instance: unknown) => setTerminalRef(pane.id, instance)"
+            :pane-id="pane.id"
+            :cwd="paneCwd[pane.id] ?? cwd"
+            :font-size="appFontSize"
+            :scrollback="appScrollback"
+            :shortcuts="shortcutOverrides"
+            :stt-language="sttLanguage"
+            :stt-device-id="sttDeviceId"
+            :voice-shortcut="voiceShortcut"
+            :is-active="pane.id === activeId"
+            @focus="setActive"
+            @split="onSplit"
+            @close="onClose"
+            @pane-drag-start="onPaneDragStart"
+            @focus-neighbor="focusNeighbor"
+            @create-worktree="onCreateWorktree"
+            @cwd-change="onCwdChange"
+            @font-size-change="onFontSizeChange"
+            @open-settings="showSettings = true"
+            @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
+          />
+        </div>
+        <div
+          v-for="(d, i) in layoutResult.dividers"
+          :key="`divider-${i}`"
+          class="divider"
+          :class="d.direction"
+          :style="rectStyle(d.rect)"
+          @mousedown="(e) => onDividerDown(e, i)"
         ></div>
+        <template v-if="paneDrag">
+          <div v-if="draggedRect" class="pane-drag-source" :style="rectStyle(draggedRect)"></div>
+          <div
+            v-if="dropIndicatorRect"
+            class="pane-drop-indicator"
+            :style="rectStyle(dropIndicatorRect)"
+          ></div>
+        </template>
       </template>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -1224,10 +1331,19 @@ onUnmounted(() => {
   color: #fff;
 }
 
-.layout-root {
-  position: relative;
+.workbench-root {
+  display: flex;
   width: 100%;
   height: calc(100vh - #{$titlebar-h});
+  background: var(--el-bg-color-page);
+  overflow: hidden;
+}
+
+.layout-root {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   background: var(--el-bg-color-page);
 
   &.dragging {

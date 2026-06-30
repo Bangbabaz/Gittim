@@ -257,7 +257,7 @@ export interface UseLayoutReturn {
   draggedRect: ComputedRef<Rect | null>
   dropIndicatorRect: ComputedRef<Rect | null>
 
-  onSplit: (paneId: string, direction: 'row' | 'column', overrideCwd?: string) => void
+  onSplit: (paneId: string, direction: 'row' | 'column', overrideCwd?: string) => string | null
   onClose: (paneId: string) => void
   onCreateWorktree: (
     paneId: string,
@@ -316,12 +316,16 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   }
 
   // ---- 操作 --------------------------------------------------------------
-  const onSplit = (paneId: string, direction: 'row' | 'column', overrideCwd?: string): void => {
-    if (!layout.value) return
+  const onSplit = (
+    paneId: string,
+    direction: 'row' | 'column',
+    overrideCwd?: string
+  ): string | null => {
+    if (!layout.value) return null
     const rect = findPaneRect(paneId)
     if (rect) {
       const dim = direction === 'row' ? rect.width : rect.height
-      if (dim < MIN_PANE * 2 + DIVIDER) return
+      if (dim < MIN_PANE * 2 + DIVIDER) return null
     }
     const newId = newPaneId()
     layout.value = insertSplit(layout.value, paneId, newId, direction)
@@ -331,6 +335,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       paneCwd.value = { ...paneCwd.value, [newId]: paneCwd.value[paneId] }
     }
     activeId.value = newId
+    return newId
   }
 
   const onClose = (paneId: string): void => {

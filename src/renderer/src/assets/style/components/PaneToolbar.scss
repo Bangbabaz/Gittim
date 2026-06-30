@@ -11,7 +11,8 @@
 }
 
 .pane-drag-handle,
-.browser-btn {
+.browser-btn,
+.session-btn {
   @include toolbar-icon-button;
 }
 
@@ -21,5 +22,17 @@
 
   &:active {
     cursor: grabbing;
+  }
+}
+
+.toolbar-right-group {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+
+  .ide-group {
+    margin-left: 0;
   }
 }

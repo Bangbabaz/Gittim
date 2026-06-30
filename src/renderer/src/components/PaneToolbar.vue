@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Globe, GripHorizontal } from 'lucide-vue-next'
+import { Globe, GripVertical, PanelLeft } from 'lucide-vue-next'
 import BranchSelector from './toolbar/BranchSelector.vue'
 import WorktreePanel from './toolbar/WorktreePanel.vue'
 import GitOpsButtons from './toolbar/GitOpsButtons.vue'
@@ -29,6 +29,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   manageTasks: [cwd?: string, newDraft?: boolean]
+  toggleAgentSessions: []
   toggleBrowser: []
   paneDragStart: []
 }>()
@@ -172,7 +173,7 @@ async function onConflictDetected(): Promise<void> {
       title="拖拽以重排面板"
       @mousedown.left.prevent.stop="emit('paneDragStart')"
     >
-      <GripHorizontal :size="14" />
+      <GripVertical :size="14" />
     </button>
     <template v-if="isRepo">
       <BranchSelector
@@ -214,7 +215,14 @@ async function onConflictDetected(): Promise<void> {
         <Globe :size="14" />
       </button>
     </el-tooltip>
-    <IdeLauncher :cwd="props.cwd" />
+    <div class="toolbar-right-group">
+      <el-tooltip content="当前目录会话" placement="bottom" :show-after="300">
+        <button class="session-btn" @click="emit('toggleAgentSessions')">
+          <PanelLeft :size="14" />
+        </button>
+      </el-tooltip>
+      <IdeLauncher :cwd="props.cwd" />
+    </div>
     <DiffStatsButton v-if="isRepo" :cwd="props.cwd" :diff-stats="diffStats" />
   </div>
 </template>

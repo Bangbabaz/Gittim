@@ -184,6 +184,22 @@ export interface IdeInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Agent sessions
+// ---------------------------------------------------------------------------
+
+export type AgentSessionProvider = 'claude' | 'codex'
+
+export interface AgentSessionInfo {
+  id: string
+  provider: AgentSessionProvider
+  title: string
+  cwd: string | null
+  filePath: string
+  updatedAt: number
+  command: string
+}
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -214,6 +230,8 @@ export interface Settings {
   paneLayout?: SavedLayout | null
   tasks?: TaskDef[]
   autoOpenTasksOnRun?: boolean
+  /** 统一 Agent 会话列表。关闭时只从单个 pane 工具栏打开当前目录会话。 */
+  unifiedAgentSessions?: boolean
   tasksDrawerWidth?: number
   /** 浏览器抽屉宽度(px),默认 480。 */
   browserDrawerWidth?: number
