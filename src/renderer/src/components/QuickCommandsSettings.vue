@@ -72,6 +72,8 @@ function move(index: number, offset: -1 | 1): void {
           />
           <el-input
             :model-value="item.command"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 6 }"
             size="small"
             placeholder="例如 yarn dev"
             @update:model-value="(value: string) => updateAt(index, { command: value })"
@@ -174,6 +176,18 @@ function move(index: number, offset: -1 | 1): void {
 
   :deep(.el-input) {
     min-width: 0;
+  }
+
+  :deep(.el-textarea) {
+    min-width: 0;
+  }
+
+  :deep(.el-textarea__inner) {
+    resize: vertical;
+    font-family:
+      'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
   }
 }
 

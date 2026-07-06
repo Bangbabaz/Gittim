@@ -7,8 +7,7 @@ import {
   SplitSquareHorizontal,
   RefreshCw,
   GitBranch,
-  LockKeyhole,
-  HardDrive
+  LockKeyhole
 } from 'lucide-vue-next'
 import type { BranchInfo, WorktreeInfo } from '@shared/types'
 
@@ -482,10 +481,6 @@ defineExpose({ openWorktreeDialog })
     <div v-else-if="!wtList.length" class="wt-manage-empty">没有工作树</div>
     <div v-else class="wt-manage-list">
       <div v-for="w in wtList" :key="w.path" class="wt-manage-row">
-        <div class="wt-manage-icon" :class="{ main: w.isMain }">
-          <HardDrive v-if="w.isMain" :size="16" />
-          <FolderGit2 v-else :size="16" />
-        </div>
         <div class="wt-manage-info">
           <div class="wt-manage-meta">
             <GitBranch :size="12" />
@@ -658,7 +653,7 @@ defineExpose({ openWorktreeDialog })
 .wt-manage-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   max-height: 52vh;
   overflow-y: auto;
 }
@@ -666,32 +661,15 @@ defineExpose({ openWorktreeDialog })
 .wt-manage-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 11px 12px;
-  background: var(--el-fill-color-lighter);
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-light);
-  border-radius: $radius-md;
+  border-radius: $radius;
 
   &:hover {
-    background: var(--el-fill-color-light);
+    background: var(--el-fill-color-lighter);
     border-color: var(--el-border-color);
-  }
-}
-
-.wt-manage-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  border-radius: var(--el-border-radius-base);
-  background: var(--el-fill-color);
-  color: var(--el-text-color-secondary);
-
-  &.main {
-    background: var(--el-color-primary-light-9);
-    color: var(--el-color-primary);
   }
 }
 

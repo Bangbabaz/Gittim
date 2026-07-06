@@ -1208,6 +1208,7 @@ onUnmounted(() => {
             @font-size-change="onFontSizeChange"
             @open-settings="showSettings = true"
             @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
+            @open-agent-session="openAgentSession"
           />
         </div>
         <div

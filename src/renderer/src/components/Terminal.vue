@@ -84,6 +84,7 @@ const emit = defineEmits<{
   (e: 'focusNeighbor', dir: 'up' | 'down' | 'left' | 'right'): void
   (e: 'openSettings'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
+  (e: 'openAgentSession', session: AgentSessionInfo): void
 }>()
 
 const terminalRef = ref<HTMLDivElement>()
@@ -671,7 +672,8 @@ const runQuickCommand = (command: string, execute: boolean): void => {
 }
 
 const openAgentSession = (session: AgentSessionInfo): void => {
-  runQuickCommand(session.command, true)
+  agentSessionsOpen.value = false
+  emit('openAgentSession', session)
 }
 
 defineExpose({ terminal, fitAddon, runQuickCommand })

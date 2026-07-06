@@ -12,6 +12,11 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
+    build: {
+      rollupOptions: {
+        external: ['smart-whisper']
+      }
+    },
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
