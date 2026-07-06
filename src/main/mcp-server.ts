@@ -14,7 +14,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { randomUUID } from 'crypto'
 import { URL } from 'url'
+import { clipboard } from 'electron'
 import {
+  addRouteRule,
+  clearDownloads,
   executeCdp,
   hasBrowser,
   waitForActivation,
@@ -24,7 +27,11 @@ import {
   getPendingDialog,
   clearPendingDialog,
   getConsoleLogs,
-  clearConsoleLogs
+  clearConsoleLogs,
+  clearRouteRules,
+  getDownloads,
+  getRouteRules,
+  type BrowserRouteRule
 } from './browser'
 import type { NetworkEntry } from './browser'
 import * as driver from './browser-driver'
@@ -501,6 +508,173 @@ const BROWSER_TOOLS: McpToolDef[] = [
       },
       required: ['selector', 'filePaths']
     }
+  },
+  {
+    name: 'browser_viewport',
+    description:
+      'Set, clear, or read the emulated viewport. Example: {action:"set", width:390, height:844, mobile:true}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['get', 'set', 'clear'] },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        deviceScaleFactor: { type: 'number' },
+        mobile: { type: 'boolean' },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'browser_storage',
+    description:
+      'Read/write/clear localStorage, sessionStorage, or cookies. Use storage=local/session/cookies.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['get', 'set', 'remove', 'clear'] },
+        storage: { type: 'string', enum: ['local', 'session', 'cookies'] },
+        key: { type: 'string' },
+        value: { type: 'string' },
+        name: { type: 'string' },
+        url: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['action', 'storage']
+    }
+  },
+  {
+    name: 'browser_state',
+    description: 'Return current title, URL, readyState, viewport, focused element, dialog, route and download counts.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...PANE_ID_SCHEMA
+      }
+    }
+  },
+  {
+    name: 'browser_by_ref',
+    description:
+      'Act on a current browser_snapshot ref. Actions: click, fill, type, hover, info, select_option, check.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'number' },
+        action: {
+          type: 'string',
+          enum: ['click', 'fill', 'type', 'hover', 'info', 'select_option', 'check']
+        },
+        text: { type: 'string' },
+        value: { type: 'string' },
+        label: { type: 'string' },
+        checked: { type: 'boolean' },
+        properties: { type: 'array', items: { type: 'string' } },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['ref', 'action']
+    }
+  },
+  {
+    name: 'browser_console_wait',
+    description:
+      'Wait for a console log matching type and text/regex. Example: {type:"error", text:"failed", timeout:5000}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string' },
+        text: { type: 'string' },
+        regex: { type: 'string' },
+        timeout: { type: 'number' },
+        clear: { type: 'boolean' },
+        ...PANE_ID_SCHEMA
+      }
+    }
+  },
+  {
+    name: 'browser_network_wait',
+    description:
+      'Wait for a network request matching url/method/status. Optionally include response body.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        regex: { type: 'string' },
+        method: { type: 'string' },
+        status: { type: 'number' },
+        timeout: { type: 'number' },
+        includeBody: { type: 'boolean' },
+        ...PANE_ID_SCHEMA
+      }
+    }
+  },
+  {
+    name: 'browser_route',
+    description:
+      'List, add, or clear request interception rules. Add supports action=mock/abort/continue and urlPattern substring or /regex/.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'add', 'clear'] },
+        id: { type: 'string' },
+        urlPattern: { type: 'string' },
+        method: { type: 'string' },
+        routeAction: { type: 'string', enum: ['continue', 'abort', 'mock'] },
+        status: { type: 'number' },
+        headers: { type: 'object' },
+        body: { type: 'string' },
+        contentType: { type: 'string' },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'browser_downloads',
+    description: 'List, clear, or wait for browser downloads captured by CDP download events.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'clear', 'wait'] },
+        timeout: { type: 'number' },
+        state: { type: 'string', enum: ['inProgress', 'completed', 'canceled'] },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'browser_clipboard',
+    description: 'Read, write, or clear system clipboard text.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['read', 'write', 'clear'] },
+        text: { type: 'string' },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'browser_steps',
+    description:
+      'Run multiple browser actions in one MCP call. Each step has action plus normal action args; stops on first error unless continueOnError=true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          items: { type: 'object' }
+        },
+        continueOnError: { type: 'boolean' },
+        ...PANE_ID_SCHEMA
+      },
+      required: ['steps']
+    }
   }
 ]
 
@@ -551,6 +725,158 @@ async function resolvePaneId(args: Record<string, unknown> | undefined): Promise
 // ---------------------------------------------------------------------------
 // Tool call 分发
 // ---------------------------------------------------------------------------
+
+function textJson(value: unknown): McpToolResult {
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function matchesText(value: string, text?: string, regex?: string): boolean {
+  if (regex) {
+    try {
+      return new RegExp(regex).test(value)
+    } catch {
+      return false
+    }
+  }
+  return text ? value.includes(text) : true
+}
+
+async function selectorFromRef(paneId: string, ref: number): Promise<string> {
+  const snapshot = await getAccessibilitySnapshot(paneId, 100)
+  const node = snapshot.nodes.find((n) => n.ref === ref)
+  if (!node) throw new Error(`Snapshot ref not found: ${ref}`)
+  return node.selector
+}
+
+const SCROLL_INTO_VIEW_INLINE = `(selector) => {
+  const el = document.querySelector(selector);
+  if (!el) return { success: false, error: 'element_not_found' };
+  el.scrollIntoView({ block: 'center', behavior: 'instant' });
+  return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+}`
+
+async function performBrowserAction(
+  paneId: string,
+  action: string,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  if (typeof args.ref === 'number' && !args.selector) {
+    args = { ...args, selector: await selectorFromRef(paneId, args.ref) }
+  }
+
+  switch (action) {
+    case 'navigate': {
+      const url = args.url as string
+      if (!url) throw new Error('missing url')
+      return driver.navigate(paneId, url)
+    }
+    case 'click': {
+      if (args.selector) {
+        const result = await driver.resolveElement(paneId, args.selector as string)
+        if (!result.actionable) return { success: false, ...result }
+        await driver.click(paneId, result.x, result.y)
+        return { success: true, selector: args.selector, x: result.x, y: result.y }
+      }
+      if (typeof args.x === 'number' && typeof args.y === 'number') {
+        await driver.click(paneId, args.x, args.y)
+        return { success: true, x: args.x, y: args.y }
+      }
+      throw new Error('missing selector or x/y')
+    }
+    case 'fill': {
+      const selector = args.selector as string
+      const text = args.text as string
+      if (!selector) throw new Error('missing selector')
+      if (text == null) throw new Error('missing text')
+      return actions.fill(paneId, selector, text)
+    }
+    case 'type': {
+      const selector = args.selector as string
+      const text = args.text as string
+      if (!selector) throw new Error('missing selector')
+      if (text == null) throw new Error('missing text')
+      return actions.type(paneId, selector, text)
+    }
+    case 'hover': {
+      if (args.selector) {
+        const box = await driver.querySelectorBox(paneId, args.selector as string)
+        if (!box) throw new Error(`element not found: ${args.selector}`)
+        await driver.hover(paneId, box.x, box.y)
+        return { success: true, selector: args.selector, x: box.x, y: box.y }
+      }
+      if (typeof args.x === 'number' && typeof args.y === 'number') {
+        await driver.hover(paneId, args.x, args.y)
+        return { success: true, x: args.x, y: args.y }
+      }
+      throw new Error('missing selector or x/y')
+    }
+    case 'wait': {
+      const selector = args.selector as string
+      if (!selector) throw new Error('missing selector')
+      return driver.waitFor(
+        paneId,
+        waitScript(selector, (args.state as string) || 'visible'),
+        (args.timeout as number) || 5000
+      )
+    }
+    case 'keyboard': {
+      const key = args.key as string
+      if (!key) throw new Error('missing key')
+      await driver.keyPress(paneId, key)
+      return { success: true, key }
+    }
+    case 'scroll': {
+      if (args.selector) {
+        return driver.evaluate(
+          paneId,
+          `${SCROLL_INTO_VIEW_INLINE}(${JSON.stringify(args.selector)})`
+        )
+      }
+      const direction = (args.direction as string) || 'down'
+      const amount = (args.amount as number) || 300
+      const deltas: Record<string, [number, number]> = {
+        down: [0, amount],
+        up: [0, -amount],
+        right: [amount, 0],
+        left: [-amount, 0]
+      }
+      const [dx, dy] = deltas[direction] || [0, amount]
+      return driver.evaluate(
+        paneId,
+        `(function(){ window.scrollBy(${dx}, ${dy}); return { success: true, scrollX: window.scrollX, scrollY: window.scrollY }; })()`
+      )
+    }
+    case 'info': {
+      const selector = args.selector as string
+      if (!selector) throw new Error('missing selector')
+      return driver.evaluate<Record<string, unknown>>(
+        paneId,
+        `${ELEMENT_INFO_SCRIPT}(${JSON.stringify(selector)}, ${JSON.stringify(args.properties || [])})`
+      )
+    }
+    case 'select_option': {
+      const selector = args.selector as string
+      if (!selector) throw new Error('missing selector')
+      return actions.selectOption(paneId, selector, args.value as string, args.label as string)
+    }
+    case 'check': {
+      const selector = args.selector as string
+      if (!selector) throw new Error('missing selector')
+      return actions.check(paneId, selector, args.checked !== false)
+    }
+    case 'evaluate': {
+      const script = args.script as string
+      if (!script) throw new Error('missing script')
+      return { value: await driver.evaluate(paneId, script) }
+    }
+    default:
+      throw new Error(`Unsupported browser action: ${action}`)
+  }
+}
 
 async function handleToolCall(
   session: SseSession,
@@ -1049,6 +1375,232 @@ async function handleToolCall(
           }
         ]
       }
+    }
+
+    case 'browser_viewport': {
+      const action = args?.action as string
+      if (action === 'get') return textJson(await driver.getPageState(paneId))
+      if (action === 'clear') {
+        await driver.clearViewport(paneId)
+        return textJson({ success: true, action })
+      }
+      if (action === 'set') {
+        const width = args?.width as number
+        const height = args?.height as number
+        if (!width || !height) throw new Error('browser_viewport set requires width and height')
+        return textJson(
+          await driver.setViewport(
+            paneId,
+            width,
+            height,
+            (args?.deviceScaleFactor as number) || 1,
+            (args?.mobile as boolean) || false
+          )
+        )
+      }
+      throw new Error(`Unknown viewport action: ${action}`)
+    }
+
+    case 'browser_storage': {
+      const action = args?.action as string
+      const storage = args?.storage as 'local' | 'session' | 'cookies'
+      if (!action || !storage) throw new Error('browser_storage requires action and storage')
+
+      if (storage === 'cookies') {
+        if (action === 'get') {
+          const params = args?.url ? { urls: [String(args.url)] } : undefined
+          return textJson(await executeCdp(paneId, 'Network.getCookies', params))
+        }
+        if (action === 'set') {
+          const cookieName = (args?.name || args?.key) as string
+          const value = args?.value as string
+          if (!cookieName || value == null) throw new Error('cookie set requires name/key and value')
+          return textJson(
+            await executeCdp(paneId, 'Network.setCookie', {
+              name: cookieName,
+              value,
+              url: args?.url,
+              domain: args?.domain,
+              path: args?.path
+            })
+          )
+        }
+        if (action === 'remove') {
+          const cookieName = (args?.name || args?.key) as string
+          if (!cookieName) throw new Error('cookie remove requires name/key')
+          await executeCdp(paneId, 'Network.deleteCookies', {
+            name: cookieName,
+            url: args?.url,
+            domain: args?.domain,
+            path: args?.path
+          })
+          return textJson({ success: true, removed: cookieName })
+        }
+        if (action === 'clear') {
+          await executeCdp(paneId, 'Network.clearBrowserCookies')
+          return textJson({ success: true, cleared: 'cookies' })
+        }
+      } else {
+        if (action === 'get') {
+          return textJson(await driver.getWebStorage(paneId, storage, args?.key as string | undefined))
+        }
+        if (action === 'set') {
+          const key = args?.key as string
+          const value = args?.value as string
+          if (!key || value == null) throw new Error('storage set requires key and value')
+          await driver.setWebStorage(paneId, storage, key, value)
+          return textJson({ success: true, storage, key })
+        }
+        if (action === 'remove' || action === 'clear') {
+          await driver.removeWebStorage(paneId, storage, args?.key as string | undefined)
+          return textJson({ success: true, storage, key: args?.key, cleared: action === 'clear' })
+        }
+      }
+      throw new Error(`Unknown storage action: ${action}`)
+    }
+
+    case 'browser_state': {
+      return textJson({
+        ...(await driver.getPageState(paneId)),
+        dialog: getPendingDialog(paneId),
+        consoleCount: getConsoleLogs(paneId).length,
+        networkCount: getNetworkRequests(paneId).length,
+        downloads: getDownloads(paneId),
+        routes: getRouteRules(paneId)
+      })
+    }
+
+    case 'browser_by_ref': {
+      const ref = args?.ref as number
+      const action = args?.action as string
+      if (typeof ref !== 'number' || !action) throw new Error('browser_by_ref requires ref and action')
+      const selector = await selectorFromRef(paneId, ref)
+      const result = await performBrowserAction(paneId, action, { ...(args ?? {}), selector })
+      return textJson({ ref, selector, action, result })
+    }
+
+    case 'browser_console_wait': {
+      const timeout = (args?.timeout as number) || 5000
+      const start = Date.now()
+      while (Date.now() - start < timeout) {
+        const match = getConsoleLogs(paneId).find((log) => {
+          if (args?.type && log.type !== args.type) return false
+          return matchesText(log.text, args?.text as string | undefined, args?.regex as string | undefined)
+        })
+        if (match) {
+          if (args?.clear) clearConsoleLogs(paneId)
+          return textJson({ success: true, log: match, elapsed: Date.now() - start })
+        }
+        await sleep(100)
+      }
+      return textJson({ success: false, reason: 'timeout', elapsed: timeout })
+    }
+
+    case 'browser_network_wait': {
+      const timeout = (args?.timeout as number) || 5000
+      const start = Date.now()
+      while (Date.now() - start < timeout) {
+        const match = getNetworkRequests(paneId).find((req) => {
+          if (args?.method && req.method.toUpperCase() !== String(args.method).toUpperCase()) return false
+          if (typeof args?.status === 'number' && req.status !== args.status) return false
+          return matchesText(req.url, args?.url as string | undefined, args?.regex as string | undefined)
+        })
+        if (match) {
+          let body: unknown
+          if (args?.includeBody) {
+            try {
+              body = await getNetworkResponseBody(paneId, match.requestId)
+            } catch (e) {
+              body = { error: String(e) }
+            }
+          }
+          return textJson({ success: true, request: match, body, elapsed: Date.now() - start })
+        }
+        await sleep(100)
+      }
+      return textJson({ success: false, reason: 'timeout', elapsed: timeout })
+    }
+
+    case 'browser_route': {
+      const action = args?.action as string
+      if (action === 'list') return textJson({ routes: getRouteRules(paneId) })
+      if (action === 'clear') {
+        await clearRouteRules(paneId)
+        return textJson({ success: true, routes: [] })
+      }
+      if (action === 'add') {
+        const urlPattern = args?.urlPattern as string
+        if (!urlPattern) throw new Error('browser_route add requires urlPattern')
+        const rule: BrowserRouteRule = {
+          id: (args?.id as string) || randomUUID(),
+          urlPattern,
+          method: args?.method as string | undefined,
+          action: ((args?.routeAction as string) || 'mock') as BrowserRouteRule['action'],
+          status: args?.status as number | undefined,
+          headers: args?.headers as Record<string, string> | undefined,
+          body: args?.body as string | undefined,
+          contentType: args?.contentType as string | undefined
+        }
+        await addRouteRule(paneId, rule)
+        return textJson({ success: true, rule })
+      }
+      throw new Error(`Unknown route action: ${action}`)
+    }
+
+    case 'browser_downloads': {
+      const action = args?.action as string
+      if (action === 'list') return textJson({ downloads: getDownloads(paneId) })
+      if (action === 'clear') {
+        clearDownloads(paneId)
+        return textJson({ success: true, downloads: [] })
+      }
+      if (action === 'wait') {
+        const timeout = (args?.timeout as number) || 10000
+        const state = (args?.state as string) || 'completed'
+        const start = Date.now()
+        while (Date.now() - start < timeout) {
+          const match = getDownloads(paneId).find((d) => d.state === state)
+          if (match) return textJson({ success: true, download: match, elapsed: Date.now() - start })
+          await sleep(200)
+        }
+        return textJson({ success: false, reason: 'timeout', elapsed: timeout, downloads: getDownloads(paneId) })
+      }
+      throw new Error(`Unknown downloads action: ${action}`)
+    }
+
+    case 'browser_clipboard': {
+      const action = args?.action as string
+      if (action === 'read') return textJson({ text: clipboard.readText() })
+      if (action === 'write') {
+        clipboard.writeText((args?.text as string) ?? '')
+        return textJson({ success: true })
+      }
+      if (action === 'clear') {
+        clipboard.clear()
+        return textJson({ success: true })
+      }
+      throw new Error(`Unknown clipboard action: ${action}`)
+    }
+
+    case 'browser_steps': {
+      const steps = args?.steps as Array<Record<string, unknown>>
+      if (!Array.isArray(steps)) throw new Error('browser_steps requires steps array')
+      const continueOnError = args?.continueOnError === true
+      const results: unknown[] = []
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]
+        const action = step.action as string
+        try {
+          if (!action) throw new Error('step missing action')
+          const result = await performBrowserAction(paneId, action, step)
+          results.push({ index: i, action, success: true, result })
+        } catch (e) {
+          const error = e instanceof Error ? e.message : String(e)
+          results.push({ index: i, action, success: false, error })
+          if (!continueOnError) return textJson({ success: false, stoppedAt: i, results })
+        }
+      }
+      return textJson({ success: true, results })
     }
 
     default:

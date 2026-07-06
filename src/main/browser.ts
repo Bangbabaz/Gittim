@@ -3,7 +3,7 @@
 // 每个 pane 最多对应一个 BrowserSession；通过 webContents.debugger 控制 CDP，
 // 同时维持一个环形网络请求缓冲区供 MCP server 的 browser_network 工具查询。
 
-import { webContents } from 'electron'
+import { app, webContents } from 'electron'
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -25,6 +25,29 @@ export interface NetworkEntry {
   resourceType?: string
 }
 
+export interface BrowserRouteRule {
+  id: string
+  urlPattern: string
+  method?: string
+  action: 'continue' | 'abort' | 'mock'
+  status?: number
+  headers?: Record<string, string>
+  body?: string
+  contentType?: string
+}
+
+export interface DownloadEntry {
+  guid: string
+  url: string
+  fileName?: string
+  suggestedFilename?: string
+  state: 'inProgress' | 'completed' | 'canceled'
+  totalBytes?: number
+  receivedBytes?: number
+  path?: string
+  timestamp: number
+}
+
 interface RequestTrace {
   url: string
   method: string
@@ -42,6 +65,8 @@ interface BrowserSession {
   pendingDialog?: { type: string; message: string; defaultPrompt?: string }
   /** Console 日志环形缓冲（最多 50 条） */
   consoleLogs: Array<{ type: string; text: string; timestamp: number }>
+  routeRules: BrowserRouteRule[]
+  downloads: DownloadEntry[]
 }
 
 const sessions = new Map<string, BrowserSession>()
@@ -92,8 +117,21 @@ export function registerBrowser(paneId: string, wcId: number): void {
     debuggerAttached: true,
     networkRequests: [],
     pendingRequests: new Map(),
-    consoleLogs: []
+    consoleLogs: [],
+    routeRules: [],
+    downloads: []
   }
+
+  void wc.debugger.sendCommand('Network.enable').catch(() => {})
+  void wc.debugger.sendCommand('Page.enable').catch(() => {})
+  void wc.debugger.sendCommand('Runtime.enable').catch(() => {})
+  void wc.debugger
+    .sendCommand('Browser.setDownloadBehavior', {
+      behavior: 'allow',
+      downloadPath: app.getPath('downloads'),
+      eventsEnabled: true
+    })
+    .catch(() => {})
 
   // 监听网络请求
   wc.debugger.on('message', (_event, method, params) => {
@@ -170,6 +208,33 @@ export function registerBrowser(paneId: string, wcId: number): void {
         .join(' ')
       session.consoleLogs.push({ type: p.type, text, timestamp: p.timestamp })
       if (session.consoleLogs.length > 50) session.consoleLogs.shift()
+    } else if (method === 'Fetch.requestPaused') {
+      void handleRouteRequest(session, params as FetchRequestPausedParams)
+    } else if (method === 'Browser.downloadWillBegin') {
+      const p = params as { guid: string; url: string; suggestedFilename?: string }
+      session.downloads.push({
+        guid: p.guid,
+        url: p.url,
+        suggestedFilename: p.suggestedFilename,
+        fileName: p.suggestedFilename,
+        state: 'inProgress',
+        path: p.suggestedFilename ? `${app.getPath('downloads')}\\${p.suggestedFilename}` : undefined,
+        timestamp: Date.now()
+      })
+      if (session.downloads.length > 50) session.downloads.shift()
+    } else if (method === 'Browser.downloadProgress') {
+      const p = params as {
+        guid: string
+        state: 'inProgress' | 'completed' | 'canceled'
+        totalBytes?: number
+        receivedBytes?: number
+      }
+      const item = session.downloads.find((d) => d.guid === p.guid)
+      if (item) {
+        item.state = p.state
+        item.totalBytes = p.totalBytes
+        item.receivedBytes = p.receivedBytes
+      }
     }
   })
 
@@ -316,6 +381,102 @@ export function getConsoleLogs(
 export function clearConsoleLogs(paneId: string): void {
   const session = sessions.get(paneId)
   if (session) session.consoleLogs = []
+}
+
+export function getDownloads(paneId: string): DownloadEntry[] {
+  const session = sessions.get(paneId)
+  if (!session) return []
+  return [...session.downloads]
+}
+
+export function clearDownloads(paneId: string): void {
+  const session = sessions.get(paneId)
+  if (session) session.downloads = []
+}
+
+export async function addRouteRule(paneId: string, rule: BrowserRouteRule): Promise<void> {
+  const session = sessions.get(paneId)
+  if (!session) throw new Error(`Browser session not found: ${paneId}`)
+  session.routeRules = session.routeRules.filter((r) => r.id !== rule.id)
+  session.routeRules.push(rule)
+  await executeCdp(paneId, 'Fetch.enable', {
+    patterns: [{ urlPattern: '*', requestStage: 'Request' }]
+  })
+}
+
+export async function clearRouteRules(paneId: string): Promise<void> {
+  const session = sessions.get(paneId)
+  if (!session) return
+  session.routeRules = []
+  await executeCdp(paneId, 'Fetch.disable')
+}
+
+export function getRouteRules(paneId: string): BrowserRouteRule[] {
+  const session = sessions.get(paneId)
+  if (!session) return []
+  return [...session.routeRules]
+}
+
+interface FetchRequestPausedParams {
+  requestId: string
+  request: {
+    url: string
+    method: string
+    headers?: Record<string, string>
+  }
+}
+
+async function handleRouteRequest(
+  session: BrowserSession,
+  params: FetchRequestPausedParams
+): Promise<void> {
+  const rule = session.routeRules.find((r) =>
+    routeMatches(r, params.request.url, params.request.method)
+  )
+  try {
+    if (!rule || rule.action === 'continue') {
+      await executeCdp(session.paneId, 'Fetch.continueRequest', { requestId: params.requestId })
+      return
+    }
+
+    if (rule.action === 'abort') {
+      await executeCdp(session.paneId, 'Fetch.failRequest', {
+        requestId: params.requestId,
+        errorReason: 'Aborted'
+      })
+      return
+    }
+
+    const headers = Object.entries({
+      'content-type': rule.contentType ?? 'application/json',
+      ...(rule.headers ?? {})
+    }).map(([name, value]) => ({ name, value }))
+
+    await executeCdp(session.paneId, 'Fetch.fulfillRequest', {
+      requestId: params.requestId,
+      responseCode: rule.status ?? 200,
+      responseHeaders: headers,
+      body: Buffer.from(rule.body ?? '').toString('base64')
+    })
+  } catch {
+    try {
+      await executeCdp(session.paneId, 'Fetch.continueRequest', { requestId: params.requestId })
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function routeMatches(rule: BrowserRouteRule, url: string, method: string): boolean {
+  if (rule.method && rule.method.toUpperCase() !== method.toUpperCase()) return false
+  if (rule.urlPattern.startsWith('/') && rule.urlPattern.endsWith('/')) {
+    try {
+      return new RegExp(rule.urlPattern.slice(1, -1)).test(url)
+    } catch {
+      return false
+    }
+  }
+  return url.includes(rule.urlPattern)
 }
 
 /** 退出时清理所有 browser session。 */

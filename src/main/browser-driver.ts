@@ -60,6 +60,94 @@ export async function screenshot(
   return result.data
 }
 
+export async function setViewport(
+  paneId: string,
+  width: number,
+  height: number,
+  deviceScaleFactor: number = 1,
+  mobile: boolean = false
+): Promise<{ width: number; height: number; deviceScaleFactor: number; mobile: boolean }> {
+  await executeCdp(paneId, 'Emulation.setDeviceMetricsOverride', {
+    width,
+    height,
+    deviceScaleFactor,
+    mobile
+  })
+  return { width, height, deviceScaleFactor, mobile }
+}
+
+export async function clearViewport(paneId: string): Promise<void> {
+  await executeCdp(paneId, 'Emulation.clearDeviceMetricsOverride')
+}
+
+export async function getPageState(paneId: string): Promise<Record<string, unknown>> {
+  return evaluate<Record<string, unknown>>(
+    paneId,
+    `(() => ({
+      title: document.title,
+      url: location.href,
+      readyState: document.readyState,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY
+      },
+      focused: document.activeElement ? {
+        tag: document.activeElement.tagName.toLowerCase(),
+        id: document.activeElement.id || undefined,
+        className: typeof document.activeElement.className === 'string' ? document.activeElement.className : undefined,
+        text: (document.activeElement.textContent || '').trim().slice(0, 120)
+      } : null
+    }))()`
+  )
+}
+
+export async function getWebStorage(
+  paneId: string,
+  storage: 'local' | 'session',
+  key?: string
+): Promise<Record<string, string | null>> {
+  const store = storage === 'local' ? 'localStorage' : 'sessionStorage'
+  return evaluate<Record<string, string | null>>(
+    paneId,
+    `(() => {
+      const s = window.${store};
+      const key = ${JSON.stringify(key ?? null)};
+      if (key !== null) return { [key]: s.getItem(key) };
+      const out = {};
+      for (let i = 0; i < s.length; i++) {
+        const k = s.key(i);
+        out[k] = s.getItem(k);
+      }
+      return out;
+    })()`
+  )
+}
+
+export async function setWebStorage(
+  paneId: string,
+  storage: 'local' | 'session',
+  key: string,
+  value: string
+): Promise<void> {
+  const store = storage === 'local' ? 'localStorage' : 'sessionStorage'
+  await evaluate(paneId, `window.${store}.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)})`)
+}
+
+export async function removeWebStorage(
+  paneId: string,
+  storage: 'local' | 'session',
+  key?: string
+): Promise<void> {
+  const store = storage === 'local' ? 'localStorage' : 'sessionStorage'
+  const script = key
+    ? `window.${store}.removeItem(${JSON.stringify(key)})`
+    : `window.${store}.clear()`
+  await evaluate(paneId, script)
+}
+
 // ---------------------------------------------------------------------------
 // 鼠标点击（接收坐标，含 actionability check）
 // ---------------------------------------------------------------------------
