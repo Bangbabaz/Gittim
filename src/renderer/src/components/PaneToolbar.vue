@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Globe, GripVertical, PanelLeft } from 'lucide-vue-next'
+import { Globe, GripVertical, PanelLeft, Server } from 'lucide-vue-next'
 import BranchSelector from './toolbar/BranchSelector.vue'
 import WorktreePanel from './toolbar/WorktreePanel.vue'
 import GitOpsButtons from './toolbar/GitOpsButtons.vue'
@@ -24,11 +24,14 @@ type WorktreePlacement = 'top' | 'bottom' | 'left' | 'right'
 const props = defineProps<{
   paneId: string
   cwd: string | undefined
+  isRemote?: boolean
+  remoteLabel?: string
 }>()
 
 const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   manageTasks: [cwd?: string, newDraft?: boolean]
+  openSsh: []
   toggleAgentSessions: []
   toggleBrowser: []
   paneDragStart: []
@@ -61,6 +64,14 @@ const THROTTLE_MS = 200
 
 const refresh = async (mode: 'fast' | 'full' = 'full'): Promise<void> => {
   if (!props.cwd) return
+  if (props.isRemote) {
+    isRepo.value = false
+    currentBranch.value = null
+    branches.value = []
+    mergeStatus.value = null
+    diffStats.value = { added: 0, deleted: 0 }
+    return
+  }
   const cwd = props.cwd
   const myInfoGen = ++infoGen
   try {
@@ -138,7 +149,7 @@ const requestFastRefresh = (): void => requestRefresh('fast')
 // cwd 改变(用户 cd 或者新建 worktree pane)→ 立即触发一次新状态拉取。
 // 通过 requestRefresh 走节流,但 cwd 变化频率不高,实际上等价于立即 refresh。
 watch(
-  () => props.cwd,
+  () => [props.cwd, props.isRemote],
   () => requestRefresh(),
   { immediate: true }
 )
@@ -201,15 +212,26 @@ async function onConflictDetected(): Promise<void> {
       />
     </template>
 
+    <div v-if="props.isRemote" class="remote-badge" :title="props.remoteLabel || 'SSH'">
+      <Server :size="13" />
+      <span>{{ props.remoteLabel || 'SSH' }}</span>
+    </div>
+
     <!-- 任务运行 / IDE 启动:无论是否 git 都显示。语音输入只走快捷键(默认 F2),
          不再渲染按钮 —— 录音中浮在 pane 底部的 RecordingIndicator 就是反馈。
          IdeLauncher 自带 margin-left: auto,把右侧锚定到工具栏末端。
          DiffStatsButton 跟在最后,保证 +N -N 在最右。 -->
     <TaskRunner
+      v-if="!props.isRemote"
       :pane-id="props.paneId"
       :cwd="props.cwd"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />
+    <el-tooltip content="SSH 远程终端" placement="bottom" :show-after="300">
+      <button class="ssh-btn" @click="emit('openSsh')">
+        <Server :size="14" />
+      </button>
+    </el-tooltip>
     <el-tooltip content="浏览器" placement="bottom" :show-after="300">
       <button class="browser-btn" @click="emit('toggleBrowser')">
         <Globe :size="14" />
@@ -221,7 +243,7 @@ async function onConflictDetected(): Promise<void> {
           <PanelLeft :size="14" />
         </button>
       </el-tooltip>
-      <IdeLauncher :cwd="props.cwd" />
+      <IdeLauncher v-if="!props.isRemote" :cwd="props.cwd" />
     </div>
     <DiffStatsButton v-if="isRepo" :cwd="props.cwd" :diff-stats="diffStats" />
   </div>

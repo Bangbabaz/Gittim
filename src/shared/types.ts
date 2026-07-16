@@ -17,13 +17,20 @@
  * 所以序列化形式记录稳定 pane ID + cwd；旧配置没有 id 时 deserialize 会分配新 ID 并把 cwd 注入 paneCwd。
  */
 export type SavedLayout =
-  | { type: 'pane'; id?: string; cwd: string }
+  | { type: 'pane'; id?: string; cwd: string; terminal?: SavedTerminalState }
   | {
       type: 'split'
       direction: 'row' | 'column'
       ratio: number
       a: SavedLayout
       b: SavedLayout
+    }
+
+export type SavedTerminalState =
+  | { kind: 'local' }
+  | {
+      kind: 'ssh'
+      profileId: string
     }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +265,8 @@ export interface Settings {
   autoUpdate?: boolean
   /** 点击后向当前激活终端执行或填入的快捷指令。 */
   quickCommands?: QuickCommand[]
+  /** SSH 远程终端连接配置。密码/私钥内容不落盘,只保存可复用的连接元信息。 */
+  sshProfiles?: SshProfile[]
 }
 
 // ---------------------------------------------------------------------------
@@ -285,9 +294,11 @@ export interface SttResult {
 
 export interface PtyStartOpts {
   paneId: string
+  kind?: 'local' | 'ssh'
   cols?: number
   rows?: number
   cwd?: string
+  sshProfileId?: string
 }
 
 export interface PtyDataPayload {
@@ -300,6 +311,21 @@ export interface PtyDataPayload {
 export interface PtyExitPayload {
   paneId: string
   exitCode: number
+}
+
+export interface SshProfile {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  /** renderer → main 的临时明文密码。main 保存前会转成 passwordSecret。 */
+  password?: string
+  /** main 持久化的加密密码，不应在普通 profile list UI 中展示。 */
+  passwordSecret?: string
+  /** sanitized profile 给 renderer 显示是否已有密码。 */
+  hasPassword?: boolean
+  remoteCwd?: string
 }
 
 // ---------------------------------------------------------------------------

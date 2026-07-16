@@ -20,7 +20,8 @@ const DEFAULTS: Settings = {
   sttDeviceId: '',
   voiceShortcut: 'F2',
   autoUpdate: true,
-  quickCommands: []
+  quickCommands: [],
+  sshProfiles: []
 }
 
 let cache: Settings | null = null

@@ -26,7 +26,8 @@ import type {
   TaskOutputSnapshot,
   IdeInfo,
   UpdateStatus,
-  AgentSessionInfo
+  AgentSessionInfo,
+  SshProfile
 } from '@shared/types'
 
 // API 暴露给 renderer 的桥接对象。每个方法对应 main 里的 ipcMain.handle / send。
@@ -113,6 +114,11 @@ const api = {
   settingsSet: (patch: Partial<Settings>) => ipcRenderer.send('settings-set', patch),
   settingsSetNow: (patch: Partial<Settings>) =>
     ipcRenderer.invoke('settings-set-now', patch) as Promise<void>,
+  sshProfilesList: () => ipcRenderer.invoke('ssh-profiles-list') as Promise<SshProfile[]>,
+  sshProfileSave: (profile: SshProfile) =>
+    ipcRenderer.invoke('ssh-profile-save', profile) as Promise<SshProfile>,
+  sshProfileDelete: (profileId: string) =>
+    ipcRenderer.invoke('ssh-profile-delete', profileId) as Promise<void>,
   themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
   themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
   onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {

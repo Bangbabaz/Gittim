@@ -1,5 +1,5 @@
 import { spawn, IPty } from 'node-pty'
-import { WebContents, app } from 'electron'
+import { WebContents, app, safeStorage } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
@@ -8,6 +8,7 @@ import { basename, dirname, join, relative, resolve } from 'path'
 import { shellIntegration } from './shell-integration'
 import { getAgentMcpPort, getBrowserMcpPort } from './mcp-server'
 import { killProcessTree } from './proc'
+import { readSettings } from './settings'
 import type {
   BranchInfo,
   WorktreeInfo,
@@ -24,7 +25,8 @@ import type {
   DiffPayload,
   DiffStats,
   WorktreeAddOpts,
-  PtyStartOpts
+  PtyStartOpts,
+  SshProfile
 } from '@shared/types'
 
 // Re-export 给同包内继续 import 的现状代码,迁移到共享类型不破坏现状。
@@ -57,6 +59,9 @@ interface Session {
   unacked: Map<number, number>
   unackedLength: number
   paused: boolean
+  sshPassword?: string
+  sshPromptTail: string
+  sshPasswordSent: boolean
 }
 
 // One session per pane. Multiple panes can live on a single webContents.
@@ -121,6 +126,63 @@ function isValidDir(p: string): boolean {
   }
 }
 
+function shellQuotePosix(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function findSshProfile(profileId: string | undefined): SshProfile | null {
+  if (!profileId) return null
+  const profiles = readSettings().sshProfiles || []
+  return profiles.find((profile) => profile.id === profileId) || null
+}
+
+function decryptSshPassword(secret: string | undefined): string | undefined {
+  if (!secret) return undefined
+  try {
+    if (secret.startsWith('safe:')) {
+      return safeStorage.decryptString(Buffer.from(secret.slice(5), 'base64'))
+    }
+    if (secret.startsWith('plain:')) {
+      return Buffer.from(secret.slice(6), 'base64').toString('utf8')
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+function buildSshSpawn(opts: PtyStartOpts): {
+  shell: string
+  args: string[]
+  cwd: string
+  env: NodeJS.ProcessEnv
+  password?: string
+} {
+  const profile = findSshProfile(opts.sshProfileId)
+  if (!profile) throw new Error('SSH 连接配置不存在')
+  const host = String(profile.host || '').trim()
+  const username = String(profile.username || '').trim()
+  const port = Math.max(1, Math.min(65535, Math.round(profile.port || 22)))
+  if (!host) throw new Error('SSH host 不能为空')
+  if (!username) throw new Error('SSH username 不能为空')
+
+  const args = ['-tt', '-p', String(port), `${username}@${host}`]
+  const remoteCwd = profile.remoteCwd?.trim()
+  if (remoteCwd) {
+    const quoted = shellQuotePosix(remoteCwd)
+    args.push(
+      `if ! cd -- ${quoted}; then printf '\\033[33m[Gittim] remote directory not found: %s\\033[0m\\n' ${quoted}; fi; exec "\${SHELL:-/bin/sh}" -l`
+    )
+  }
+  return {
+    shell: isWindows ? 'ssh.exe' : 'ssh',
+    args,
+    cwd: getCurrentDir(),
+    env: { ...process.env },
+    password: decryptSshPassword(profile.passwordSecret) || profile.password
+  }
+}
+
 export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   const { paneId } = opts
   if (!paneId) throw new Error('startPty requires a paneId')
@@ -130,23 +192,41 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
 
   const cols = opts.cols ?? 80
   const rows = opts.rows ?? 24
-  // Validate the requested cwd. A persisted layout can reference a folder
-  // that's since been deleted — silently fall back to the user's home dir
-  // rather than failing the spawn.
-  const cwd = opts.cwd && isValidDir(opts.cwd) ? opts.cwd : getCurrentDir()
+  let shell: string
+  let args: string[]
+  let env: NodeJS.ProcessEnv
+  let cwd: string
+  let sshPassword: string | undefined
 
-  // Shell integration injects an OSC 7 cwd-notification hook so PaneToolbar
-  // can follow `cd` commands. Falls back to passthrough for unknown shells.
-  const { shell, args, env } = shellIntegration(defaultShell())
+  if (opts.kind === 'ssh') {
+    const ssh = buildSshSpawn(opts)
+    shell = ssh.shell
+    args = ssh.args
+    env = ssh.env
+    cwd = ssh.cwd
+    sshPassword = ssh.password
+  } else {
+    // Validate the requested cwd. A persisted layout can reference a folder
+    // that's since been deleted — silently fall back to the user's home dir
+    // rather than failing the spawn.
+    cwd = opts.cwd && isValidDir(opts.cwd) ? opts.cwd : getCurrentDir()
 
-  // 注入 paneId 和两个 MCP 端口，让 Agent 子进程能区分协作与浏览器端点。
-  env.GITTIM_PANE_ID = opts.paneId
-  // 兼容旧版本：通用变量仍指向原有的浏览器 MCP 端口。
-  env.GITTIM_MCP_PORT = String(getBrowserMcpPort())
-  env.GITTIM_AGENT_MCP_PORT = String(getAgentMcpPort())
-  env.GITTIM_BROWSER_MCP_PORT = String(getBrowserMcpPort())
-  env.GITTIM_AGENT_MCP_URL = `http://127.0.0.1:${getAgentMcpPort()}/sse?paneId=${encodeURIComponent(opts.paneId)}`
-  env.GITTIM_BROWSER_MCP_URL = `http://127.0.0.1:${getBrowserMcpPort()}/sse`
+    // Shell integration injects an OSC 7 cwd-notification hook so PaneToolbar
+    // can follow `cd` commands. Falls back to passthrough for unknown shells.
+    const local = shellIntegration(defaultShell())
+    shell = local.shell
+    args = local.args
+    env = local.env
+
+    // 注入 paneId 和两个 MCP 端口，让 Agent 子进程能区分协作与浏览器端点。
+    env.GITTIM_PANE_ID = opts.paneId
+    // 兼容旧版本：通用变量仍指向原有的浏览器 MCP 端口。
+    env.GITTIM_MCP_PORT = String(getBrowserMcpPort())
+    env.GITTIM_AGENT_MCP_PORT = String(getAgentMcpPort())
+    env.GITTIM_BROWSER_MCP_PORT = String(getBrowserMcpPort())
+    env.GITTIM_AGENT_MCP_URL = `http://127.0.0.1:${getAgentMcpPort()}/sse?paneId=${encodeURIComponent(opts.paneId)}`
+    env.GITTIM_BROWSER_MCP_URL = `http://127.0.0.1:${getBrowserMcpPort()}/sse`
+  }
 
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
@@ -171,7 +251,10 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     flushTimer: null,
     unacked: new Map(),
     unackedLength: 0,
-    paused: false
+    paused: false,
+    sshPassword,
+    sshPromptTail: '',
+    sshPasswordSent: false
   }
   sessions.set(paneId, session)
 
@@ -222,6 +305,13 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
 
   pty.onData((data) => {
     if (session.disposed || webContents.isDestroyed()) return
+    if (session.sshPassword && !session.sshPasswordSent) {
+      session.sshPromptTail = (session.sshPromptTail + data).slice(-512)
+      if (/password:\s*$/i.test(session.sshPromptTail)) {
+        session.sshPasswordSent = true
+        session.pty.write(`${session.sshPassword}\r`)
+      }
+    }
     session.pendingData.push(data)
     session.pendingLength += data.length
     if (session.pendingLength >= OUTPUT_BATCH_MAX_CHARS) {

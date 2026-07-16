@@ -7,6 +7,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
+import { terminalKeyboardInput } from '../utils/terminalKeyboard'
 import {
   Copy,
   ClipboardPaste,
@@ -41,6 +42,8 @@ const props = withDefaults(
     paneId: string
     options?: Record<string, unknown>
     cwd?: string
+    sshProfileId?: string
+    sshProfileName?: string
     fontSize?: number
     scrollback?: number
     shortcuts?: Record<string, string>
@@ -58,6 +61,8 @@ const props = withDefaults(
   {
     options: () => ({}),
     cwd: '',
+    sshProfileId: '',
+    sshProfileName: '',
     fontSize: DEFAULT_FONT_SIZE,
     scrollback: DEFAULT_SCROLLBACK,
     shortcuts: () => ({}),
@@ -83,6 +88,7 @@ const emit = defineEmits<{
   (e: 'paneDragStart', paneId: string): void
   (e: 'focusNeighbor', dir: 'up' | 'down' | 'left' | 'right'): void
   (e: 'openSettings'): void
+  (e: 'openSsh'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
   (e: 'openAgentSession', session: AgentSessionInfo): void
 }>()
@@ -437,18 +443,13 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
   }
   if (e.type !== 'keydown') return true
 
-  // Codex uses LF as an explicit newline in its composer. xterm normally
-  // collapses Shift+Enter to the same CR as plain Enter, while Option+Enter
-  // becomes ESC+CR, so Codex cannot reliably distinguish either combination.
-  // Normalize both to LF and leave plain Enter to xterm for submission.
-  if (
-    e.code === 'Enter' &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    ((e.shiftKey && !e.altKey) || (e.altKey && !e.shiftKey))
-  ) {
+  // Bypass xterm where Windows keyboard translation loses information:
+  // modified Enter needs a distinct escape sequence, and printable Quote
+  // key events can otherwise disappear with some Windows layouts/IMEs.
+  const keyboardInput = terminalKeyboardInput(e, platform)
+  if (keyboardInput !== null) {
     e.preventDefault()
-    window.api.ptyWrite(props.paneId, '\n')
+    window.api.ptyWrite(props.paneId, keyboardInput)
     return false
   }
 
@@ -784,15 +785,18 @@ onMounted(async () => {
   try {
     await window.api.ptyStart({
       paneId: props.paneId,
+      kind: props.sshProfileId ? 'ssh' : 'local',
       cols: terminal.cols,
       rows: terminal.rows,
-      cwd: props.cwd || undefined
+      cwd: props.cwd || undefined,
+      sshProfileId: props.sshProfileId || undefined
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     terminal.writeln(`\r\n\x1b[31m[无法启动终端会话: ${msg}]\x1b[0m`)
     terminal.writeln(`\x1b[90m  pane: ${props.paneId}\x1b[0m`)
     if (props.cwd) terminal.writeln(`\x1b[90m  cwd:  ${props.cwd}\x1b[0m`)
+    if (props.sshProfileId) terminal.writeln(`\x1b[90m  ssh:  ${props.sshProfileName}\x1b[0m`)
   }
 
   // Watch the container — splits/window resizes/drags all change its size.
@@ -870,8 +874,11 @@ onUnmounted(() => {
       ref="toolbarRef"
       :pane-id="props.paneId"
       :cwd="currentCwd"
+      :is-remote="!!props.sshProfileId"
+      :remote-label="props.sshProfileName"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
+      @open-ssh="emit('openSsh')"
       @toggle-agent-sessions="toggleAgentSessions"
       @toggle-browser="toggleBrowser"
       @pane-drag-start="emit('paneDragStart', props.paneId)"

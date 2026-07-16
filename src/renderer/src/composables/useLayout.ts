@@ -1,5 +1,5 @@
 import { computed, ref, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import type { SavedLayout } from '@shared/types'
+import type { SavedLayout, SavedTerminalState } from '@shared/types'
 
 // 分屏布局核心:二叉树 LayoutNode + 像素级 rect 计算 + 拖拽逻辑。
 //
@@ -247,6 +247,7 @@ export interface UseLayoutReturn {
   layout: Ref<LayoutNode | null>
   activeId: Ref<string | null>
   paneCwd: Ref<Record<string, string>>
+  paneTerminalState: Ref<Record<string, SavedTerminalState>>
   dragState: Ref<DragState | null>
   paneDrag: Ref<{ id: string } | null>
   dropTarget: Ref<{ id: string; zone: DropZone } | null>
@@ -283,6 +284,7 @@ export interface UseLayoutReturn {
 export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   const layout: Ref<LayoutNode | null> = ref(null)
   const paneCwd = ref<Record<string, string>>({})
+  const paneTerminalState = ref<Record<string, SavedTerminalState>>({})
   const activeId = ref<string | null>(null)
   const dragState = ref<DragState | null>(null)
   const paneDrag = ref<{ id: string } | null>(null)
@@ -334,6 +336,10 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     } else if (paneCwd.value[paneId]) {
       paneCwd.value = { ...paneCwd.value, [newId]: paneCwd.value[paneId] }
     }
+    const inheritedTerminal = paneTerminalState.value[paneId]
+    if (inheritedTerminal?.kind === 'ssh') {
+      paneTerminalState.value = { ...paneTerminalState.value, [newId]: inheritedTerminal }
+    }
     activeId.value = newId
     return newId
   }
@@ -350,6 +356,11 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       const rest = { ...paneCwd.value }
       delete rest[paneId]
       paneCwd.value = rest
+    }
+    if (paneTerminalState.value[paneId]) {
+      const rest = { ...paneTerminalState.value }
+      delete rest[paneId]
+      paneTerminalState.value = rest
     }
     if (activeId.value === paneId) {
       activeId.value = firstLeafId(next)
@@ -390,6 +401,11 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       // 但已创建的 worktree 不应该被"丢"。退而求其次:把当前 pane 的 cwd 改到
       // 新 worktree,用户至少能立刻进去工作,可以稍后用 split 自行打开邻居 pane。
       paneCwd.value = { ...paneCwd.value, [paneId]: worktreePath }
+      if (paneTerminalState.value[paneId]) {
+        const rest = { ...paneTerminalState.value }
+        delete rest[paneId]
+        paneTerminalState.value = rest
+      }
       return
     }
 
@@ -403,6 +419,11 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       newFirst
     )
     paneCwd.value = { ...paneCwd.value, [newId]: worktreePath }
+    if (paneTerminalState.value[newId]) {
+      const rest = { ...paneTerminalState.value }
+      delete rest[newId]
+      paneTerminalState.value = rest
+    }
     activeId.value = newId
   }
 
@@ -567,7 +588,8 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       return {
         type: 'pane',
         id: node.id,
-        cwd: paneCwd.value[node.id] || opts.defaultCwd.value || ''
+        cwd: paneCwd.value[node.id] || opts.defaultCwd.value || '',
+        terminal: paneTerminalState.value[node.id] || { kind: 'local' }
       }
     }
     return {
@@ -591,6 +613,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
   const deserializeNode = (
     saved: SavedLayout,
     paneCwdAcc: Record<string, string>,
+    paneTerminalAcc: Record<string, SavedTerminalState>,
     usedPaneIds: Set<string>,
     depth = 0
   ): LayoutNode => {
@@ -601,6 +624,13 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
       const id = isSavedPaneId(saved.id) && !usedPaneIds.has(saved.id) ? saved.id : newPaneId()
       usedPaneIds.add(id)
       if (saved.cwd && typeof saved.cwd === 'string') paneCwdAcc[id] = saved.cwd
+      if (
+        saved.terminal &&
+        saved.terminal.kind === 'ssh' &&
+        typeof saved.terminal.profileId === 'string'
+      ) {
+        paneTerminalAcc[id] = { kind: 'ssh', profileId: saved.terminal.profileId }
+      }
       return { type: 'pane', id }
     }
     // split 节点 — 校验子节点存在,否则当 pane 处理。
@@ -614,8 +644,8 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
         typeof saved.ratio === 'number' && saved.ratio > MIN_RATIO && saved.ratio < MAX_RATIO
           ? saved.ratio
           : 0.5,
-      a: deserializeNode(saved.a, paneCwdAcc, usedPaneIds, depth + 1),
-      b: deserializeNode(saved.b, paneCwdAcc, usedPaneIds, depth + 1)
+      a: deserializeNode(saved.a, paneCwdAcc, paneTerminalAcc, usedPaneIds, depth + 1),
+      b: deserializeNode(saved.b, paneCwdAcc, paneTerminalAcc, usedPaneIds, depth + 1)
     }
   }
 
@@ -623,9 +653,11 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     if (saved) {
       try {
         const restoredPaneCwd: Record<string, string> = {}
-        const restored = deserializeNode(saved, restoredPaneCwd, new Set())
+        const restoredPaneTerminal: Record<string, SavedTerminalState> = {}
+        const restored = deserializeNode(saved, restoredPaneCwd, restoredPaneTerminal, new Set())
         layout.value = restored
         paneCwd.value = restoredPaneCwd
+        paneTerminalState.value = restoredPaneTerminal
         activeId.value = firstLeafId(restored)
         return
       } catch {
@@ -634,6 +666,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     }
     const firstId = newPaneId()
     layout.value = { type: 'pane', id: firstId }
+    paneTerminalState.value = {}
     activeId.value = firstId
   }
 
@@ -658,6 +691,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     layout,
     activeId,
     paneCwd,
+    paneTerminalState,
     dragState,
     paneDrag,
     dropTarget,

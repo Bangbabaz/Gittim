@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
+import { terminalKeyboardInput } from '../utils/terminalKeyboard'
 import { ElMessageBox } from 'element-plus'
 import {
   Play,
@@ -25,6 +26,8 @@ import type { TaskDataPayload, TaskMeta } from '@shared/types'
 import '@xterm/xterm/css/xterm.css'
 
 const { xtermTheme } = useTheme()
+const platform =
+  (window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? ''
 
 const props = defineProps<{
   modelValue: boolean
@@ -187,17 +190,12 @@ function ensureTerm(): void {
   // running. The one terminal is reused across tasks, so resolve the target
   // at call time; idle/exited tasks are no-ops (backend guards too).
   term.attachCustomKeyEventHandler((e) => {
-    if (
-      e.type === 'keydown' &&
-      e.code === 'Enter' &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      ((e.shiftKey && !e.altKey) || (e.altKey && !e.shiftKey))
-    ) {
+    const keyboardInput = terminalKeyboardInput(e, platform)
+    if (keyboardInput !== null) {
       e.preventDefault()
       const id = selectedId.value
       const task = tasks.value.find((x) => x.id === id)
-      if (id && task?.status === 'running') window.api.taskInput(id, '\n')
+      if (id && task?.status === 'running') window.api.taskInput(id, keyboardInput)
       return false
     }
     return true

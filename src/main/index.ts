@@ -7,7 +7,8 @@ import {
   ipcMain,
   screen,
   nativeTheme,
-  session
+  session,
+  safeStorage
 } from 'electron'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -80,7 +81,13 @@ import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browse
 import { startMcpServers, stopMcpServers, getBrowserMcpPort, getAgentMcpPort } from './mcp-server'
 import { listAgentSessions } from './agent-sessions'
 import icon from '../../resources/icon.png?asset'
-import type { PtyStartOpts, Settings, WorktreeAddOpts, CommitLogOpts } from '@shared/types'
+import type {
+  PtyStartOpts,
+  Settings,
+  WorktreeAddOpts,
+  CommitLogOpts,
+  SshProfile
+} from '@shared/types'
 
 // macOS 26 (Tahoe) + Electron 39 上,Chromium 的输入法状态机会与 mac IME 频繁
 // 不同步,blink.mojom.WidgetHost 每秒抛 100+ 条 `TextInputStateChanged rejected`
@@ -430,6 +437,60 @@ app.whenReady().then(() => {
   })
   ipcMain.on('settings-set', (_event, patch: Partial<Settings>) => {
     updateSettings(patch)
+  })
+
+  const sanitizeSshProfile = (profile: SshProfile): SshProfile => ({
+    id: profile.id,
+    name: profile.name,
+    host: profile.host,
+    port: profile.port,
+    username: profile.username,
+    remoteCwd: profile.remoteCwd,
+    hasPassword: !!profile.passwordSecret
+  })
+
+  const encryptSshPassword = (password: string): string => {
+    if (safeStorage.isEncryptionAvailable()) {
+      return `safe:${safeStorage.encryptString(password).toString('base64')}`
+    }
+    return `plain:${Buffer.from(password, 'utf8').toString('base64')}`
+  }
+
+  const normalizeSshProfile = (profile: SshProfile, existing?: SshProfile): SshProfile => {
+    const password = typeof profile.password === 'string' ? profile.password : ''
+    return {
+      id: String(profile.id || `ssh-${Date.now().toString(36)}`),
+      name: String(profile.name || profile.host || 'SSH'),
+      host: String(profile.host || '').trim(),
+      port: Math.max(1, Math.min(65535, Math.round(Number(profile.port) || 22))),
+      username: String(profile.username || '').trim(),
+      remoteCwd: profile.remoteCwd ? String(profile.remoteCwd).trim() : undefined,
+      passwordSecret: password ? encryptSshPassword(password) : existing?.passwordSecret
+    }
+  }
+
+  ipcMain.handle('ssh-profiles-list', (): SshProfile[] =>
+    (readSettings().sshProfiles || []).map(sanitizeSshProfile)
+  )
+  ipcMain.handle('ssh-profile-save', (_event, profile: SshProfile): SshProfile => {
+    const profiles = readSettings().sshProfiles || []
+    const incomingId = String(profile.id || '')
+    const existing = profiles.findIndex((item) => item.id === incomingId)
+    const next = normalizeSshProfile(profile, existing >= 0 ? profiles[existing] : undefined)
+    if (!next.host) throw new Error('SSH host 不能为空')
+    if (!next.username) throw new Error('SSH username 不能为空')
+    const updated =
+      existing >= 0
+        ? profiles.map((item, index) => (index === existing ? next : item))
+        : [...profiles, next]
+    updateSettings({ sshProfiles: updated })
+    flushSettings()
+    return sanitizeSshProfile(next)
+  })
+  ipcMain.handle('ssh-profile-delete', (_event, profileId: string): void => {
+    const profiles = readSettings().sshProfiles || []
+    updateSettings({ sshProfiles: profiles.filter((item) => item.id !== profileId) })
+    flushSettings()
   })
 
   // Theme IPC. The renderer owns the CSS-token swap; nativeTheme is the source
