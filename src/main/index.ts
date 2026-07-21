@@ -78,7 +78,14 @@ import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
 import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
-import { startMcpServers, stopMcpServers, getBrowserMcpPort, getAgentMcpPort } from './mcp-server'
+import {
+  startMcpServers,
+  stopMcpServers,
+  getBrowserMcpPort,
+  getAgentMcpPort,
+  getTerminalMcpPort
+} from './mcp-server'
+import { setSshCommandApprovalHandler, setSshPermissionsChangedHandler } from './ssh-permissions'
 import { listAgentSessions } from './agent-sessions'
 import icon from '../../resources/icon.png?asset'
 import type {
@@ -86,7 +93,9 @@ import type {
   Settings,
   WorktreeAddOpts,
   CommitLogOpts,
-  SshProfile
+  SshProfile,
+  SshCommandApprovalRequest,
+  SshCommandApprovalDecision
 } from '@shared/types'
 
 // macOS 26 (Tahoe) + Electron 39 上,Chromium 的输入法状态机会与 mac IME 频繁
@@ -105,6 +114,18 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 let mainWindow: BrowserWindow | null = null
+
+function visibleApprovalText(value: string): string {
+  return Array.from(value, (char) => {
+    const code = char.codePointAt(0) || 0
+    const unsafe =
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2066 && code <= 0x2069)
+    return unsafe ? `\\u${code.toString(16).padStart(4, '0')}` : char
+  }).join('')
+}
 
 function clampBoundsToDisplay(b: { x?: number; y?: number; width: number; height: number }): {
   x?: number
@@ -215,7 +236,41 @@ app.whenReady().then(() => {
   // 必须在注册 `ide-list` ipcMain.handle 之前调用。
   hydrateIdeCache(readSettings().cachedIdes)
 
-  // 启动内置 MCP server —— Agent 可以通过 MCP 控制终端面板与内置浏览器。
+  setSshCommandApprovalHandler(
+    async (request: SshCommandApprovalRequest): Promise<SshCommandApprovalDecision> => {
+      const options = {
+        type: 'warning' as const,
+        title: 'SSH 命令审批',
+        message: 'Agent 请求执行 SSH 命令',
+        detail: [
+          `来源目录：${visibleApprovalText(request.sourceDirectory)}`,
+          `SSH 目标：${visibleApprovalText(request.sshLabel)}`,
+          request.reason ? `执行原因：${visibleApprovalText(request.reason)}` : '执行原因：未提供',
+          '',
+          '完整命令：',
+          visibleApprovalText(request.command)
+        ].join('\n'),
+        buttons: ['允许', '始终允许', '拒绝'],
+        defaultId: 2,
+        cancelId: 2,
+        noLink: true
+      }
+      const result =
+        mainWindow && !mainWindow.isDestroyed()
+          ? await dialog.showMessageBox(mainWindow, options)
+          : await dialog.showMessageBox(options)
+      if (result.response === 0) return 'allow_once'
+      if (result.response === 1) return 'always_allow'
+      return 'deny'
+    }
+  )
+  setSshPermissionsChangedHandler(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('ssh-permissions-updated')
+    }
+  })
+
+  // 启动内置 MCP server —— 浏览器、Agent 协作和终端控制使用独立端点。
   startMcpServers()
 
   // ----- IPC handlers ------------------------------------------------------
@@ -483,13 +538,34 @@ app.whenReady().then(() => {
       existing >= 0
         ? profiles.map((item, index) => (index === existing ? next : item))
         : [...profiles, next]
-    updateSettings({ sshProfiles: updated })
+    const previous = existing >= 0 ? profiles[existing] : undefined
+    const targetChanged =
+      !!previous &&
+      (previous.host !== next.host ||
+        previous.port !== next.port ||
+        previous.username !== next.username ||
+        previous.remoteCwd !== next.remoteCwd)
+    updateSettings({
+      sshProfiles: updated,
+      ...(targetChanged
+        ? {
+            sshCommandPermissions: (readSettings().sshCommandPermissions || []).filter(
+              (rule) => rule.sshProfileId !== next.id
+            )
+          }
+        : {})
+    })
     flushSettings()
     return sanitizeSshProfile(next)
   })
   ipcMain.handle('ssh-profile-delete', (_event, profileId: string): void => {
     const profiles = readSettings().sshProfiles || []
-    updateSettings({ sshProfiles: profiles.filter((item) => item.id !== profileId) })
+    updateSettings({
+      sshProfiles: profiles.filter((item) => item.id !== profileId),
+      sshCommandPermissions: (readSettings().sshCommandPermissions || []).filter(
+        (rule) => rule.sshProfileId !== profileId
+      )
+    })
     flushSettings()
   })
 
@@ -637,6 +713,9 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('agent-get-mcp-url', () => {
     return `http://127.0.0.1:${getAgentMcpPort()}/sse`
+  })
+  ipcMain.handle('terminal-get-mcp-url', () => {
+    return `http://127.0.0.1:${getTerminalMcpPort()}/sse`
   })
 
   createWindow()

@@ -45,18 +45,15 @@ import {
   handleAgentToolCall,
   isAgentTool,
   type AgentToolHost,
-  type AgentSessionState,
-  type McpToolDef,
-  type McpToolResult
+  type AgentSessionState
 } from './mcp-agent'
+import { TERMINAL_TOOLS, handleTerminalToolCall, isTerminalTool } from './mcp-terminal'
+import { AGENT_MCP_PORT, BROWSER_MCP_PORT, MCP_HOST, TERMINAL_MCP_PORT } from './mcp-config'
+import type { McpToolDef, McpToolResult } from './mcp-types'
 
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
-
-const BROWSER_MCP_PORT = 9876
-const AGENT_MCP_PORT = 9877
-const MCP_HOST = '127.0.0.1'
 
 /** JSON-RPC 错误码 */
 const ERR_METHOD = -32601
@@ -72,10 +69,11 @@ interface SseSession {
   res: ServerResponse
   kind: McpServerKind
   paneId?: string
+  accessToken?: string
   agent?: AgentSessionState
 }
 
-type McpServerKind = 'browser' | 'agent'
+type McpServerKind = 'browser' | 'agent' | 'terminal'
 
 interface JsonRpcRequest {
   jsonrpc: '2.0'
@@ -548,7 +546,8 @@ const BROWSER_TOOLS: McpToolDef[] = [
   },
   {
     name: 'browser_state',
-    description: 'Return current title, URL, readyState, viewport, focused element, dialog, route and download counts.',
+    description:
+      'Return current title, URL, readyState, viewport, focused element, dialog, route and download counts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -690,7 +689,9 @@ const agentToolHost: AgentToolHost = {
 }
 
 function getToolsForKind(kind: McpServerKind): McpToolDef[] {
-  return kind === 'browser' ? BROWSER_TOOLS : AGENT_TOOLS
+  if (kind === 'browser') return BROWSER_TOOLS
+  if (kind === 'agent') return AGENT_TOOLS
+  return TERMINAL_TOOLS
 }
 
 // ---------------------------------------------------------------------------
@@ -885,6 +886,9 @@ async function handleToolCall(
 ): Promise<McpToolResult> {
   if (isAgentTool(name)) {
     return handleAgentToolCall(agentToolHost, session, Array.from(sseSessions.values()), name, args)
+  }
+  if (isTerminalTool(name)) {
+    return handleTerminalToolCall(session, name, args)
   }
 
   const paneId = await resolvePaneId(args)
@@ -1414,7 +1418,8 @@ async function handleToolCall(
         if (action === 'set') {
           const cookieName = (args?.name || args?.key) as string
           const value = args?.value as string
-          if (!cookieName || value == null) throw new Error('cookie set requires name/key and value')
+          if (!cookieName || value == null)
+            throw new Error('cookie set requires name/key and value')
           return textJson(
             await executeCdp(paneId, 'Network.setCookie', {
               name: cookieName,
@@ -1442,7 +1447,9 @@ async function handleToolCall(
         }
       } else {
         if (action === 'get') {
-          return textJson(await driver.getWebStorage(paneId, storage, args?.key as string | undefined))
+          return textJson(
+            await driver.getWebStorage(paneId, storage, args?.key as string | undefined)
+          )
         }
         if (action === 'set') {
           const key = args?.key as string
@@ -1473,7 +1480,8 @@ async function handleToolCall(
     case 'browser_by_ref': {
       const ref = args?.ref as number
       const action = args?.action as string
-      if (typeof ref !== 'number' || !action) throw new Error('browser_by_ref requires ref and action')
+      if (typeof ref !== 'number' || !action)
+        throw new Error('browser_by_ref requires ref and action')
       const selector = await selectorFromRef(paneId, ref)
       const result = await performBrowserAction(paneId, action, { ...(args ?? {}), selector })
       return textJson({ ref, selector, action, result })
@@ -1485,7 +1493,11 @@ async function handleToolCall(
       while (Date.now() - start < timeout) {
         const match = getConsoleLogs(paneId).find((log) => {
           if (args?.type && log.type !== args.type) return false
-          return matchesText(log.text, args?.text as string | undefined, args?.regex as string | undefined)
+          return matchesText(
+            log.text,
+            args?.text as string | undefined,
+            args?.regex as string | undefined
+          )
         })
         if (match) {
           if (args?.clear) clearConsoleLogs(paneId)
@@ -1501,9 +1513,14 @@ async function handleToolCall(
       const start = Date.now()
       while (Date.now() - start < timeout) {
         const match = getNetworkRequests(paneId).find((req) => {
-          if (args?.method && req.method.toUpperCase() !== String(args.method).toUpperCase()) return false
+          if (args?.method && req.method.toUpperCase() !== String(args.method).toUpperCase())
+            return false
           if (typeof args?.status === 'number' && req.status !== args.status) return false
-          return matchesText(req.url, args?.url as string | undefined, args?.regex as string | undefined)
+          return matchesText(
+            req.url,
+            args?.url as string | undefined,
+            args?.regex as string | undefined
+          )
         })
         if (match) {
           let body: unknown
@@ -1560,10 +1577,16 @@ async function handleToolCall(
         const start = Date.now()
         while (Date.now() - start < timeout) {
           const match = getDownloads(paneId).find((d) => d.state === state)
-          if (match) return textJson({ success: true, download: match, elapsed: Date.now() - start })
+          if (match)
+            return textJson({ success: true, download: match, elapsed: Date.now() - start })
           await sleep(200)
         }
-        return textJson({ success: false, reason: 'timeout', elapsed: timeout, downloads: getDownloads(paneId) })
+        return textJson({
+          success: false,
+          reason: 'timeout',
+          elapsed: timeout,
+          downloads: getDownloads(paneId)
+        })
       }
       throw new Error(`Unknown downloads action: ${action}`)
     }
@@ -1668,7 +1691,7 @@ async function handleJsonRpc(session: SseSession, req: JsonRpcRequest): Promise<
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
           serverInfo: {
-            name: session.kind === 'browser' ? 'gittim-browser' : 'gittim-agent',
+            name: `gittim-${session.kind}`,
             version: '0.2.0'
           }
         })
@@ -1757,7 +1780,8 @@ function startMcpServer(kind: McpServerKind, port: number): number {
       setSseHeaders(res)
 
       const paneId = url.searchParams.get('paneId') ?? undefined
-      const session: SseSession = { id: sessionId, res, kind, paneId }
+      const accessToken = url.searchParams.get('token') ?? undefined
+      const session: SseSession = { id: sessionId, res, kind, paneId, accessToken }
       sseSessions.set(sessionId, session)
 
       const messageUrl = `http://${MCP_HOST}:${port}/message?sessionId=${sessionId}`
@@ -1816,6 +1840,7 @@ function startMcpServer(kind: McpServerKind, port: number): number {
 export function startMcpServers(): void {
   startMcpServer('browser', BROWSER_MCP_PORT)
   startMcpServer('agent', AGENT_MCP_PORT)
+  startMcpServer('terminal', TERMINAL_MCP_PORT)
 }
 
 export function stopMcpServers(): void {
@@ -1841,4 +1866,8 @@ export function getBrowserMcpPort(): number {
 
 export function getAgentMcpPort(): number {
   return AGENT_MCP_PORT
+}
+
+export function getTerminalMcpPort(): number {
+  return TERMINAL_MCP_PORT
 }

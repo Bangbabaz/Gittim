@@ -1,25 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { WebContents } from 'electron'
-
-export interface McpToolDef {
-  name: string
-  description: string
-  inputSchema: {
-    type: 'object'
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-}
-
-export interface McpToolResult {
-  content: Array<{
-    type: string
-    text?: string
-    data?: string
-    mimeType?: string
-  }>
-  isError?: boolean
-}
+import type { McpToolDef, McpToolResult } from './mcp-types'
 
 export interface AgentSessionState {
   id: string

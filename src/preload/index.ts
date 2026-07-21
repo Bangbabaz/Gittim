@@ -119,6 +119,11 @@ const api = {
     ipcRenderer.invoke('ssh-profile-save', profile) as Promise<SshProfile>,
   sshProfileDelete: (profileId: string) =>
     ipcRenderer.invoke('ssh-profile-delete', profileId) as Promise<void>,
+  onSshPermissionsUpdated: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('ssh-permissions-updated', listener)
+    return () => ipcRenderer.removeListener('ssh-permissions-updated', listener)
+  },
   themeSetSource: (src: 'system' | 'dark' | 'light') => ipcRenderer.send('theme-set-source', src),
   themeShouldUseDark: () => ipcRenderer.invoke('theme-should-use-dark') as Promise<boolean>,
   onNativeThemeUpdated: (cb: (shouldUseDark: boolean) => void) => {
@@ -228,6 +233,7 @@ const api = {
   browserGetMcpUrl: (paneId: string) =>
     ipcRenderer.invoke('browser-get-mcp-url', paneId) as Promise<string>,
   agentGetMcpUrl: () => ipcRenderer.invoke('agent-get-mcp-url') as Promise<string>,
+  terminalGetMcpUrl: () => ipcRenderer.invoke('terminal-get-mcp-url') as Promise<string>,
   onBrowserActivate: (cb: (paneId: string) => void) => {
     const listener = (_e: IpcRendererEvent, p: string): void => cb(p)
     ipcRenderer.on('browser-activate', listener)

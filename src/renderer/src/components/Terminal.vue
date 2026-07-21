@@ -7,7 +7,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
-import { terminalKeyboardInput } from '../utils/terminalKeyboard'
+import { TerminalInputHandler } from '../utils/terminalKeyboard'
 import {
   Copy,
   ClipboardPaste,
@@ -304,6 +304,40 @@ const pasteFromClipboard = async (): Promise<void> => {
 
 const platform =
   (window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? ''
+const terminalInput = new TerminalInputHandler(platform)
+
+const onTerminalBeforeInput = (event: Event): void => {
+  const e = event as InputEvent
+  const action = terminalInput.handleBeforeInput(e)
+  if (action === null) return
+
+  e.preventDefault()
+  if (termTextarea) termTextarea.value = ''
+  if (action.data !== null) window.api.ptyWrite(props.paneId, action.data)
+}
+
+const onTerminalInput = (event: Event): void => {
+  const e = event as InputEvent
+  const action = terminalInput.handleInput(e)
+  if (action === null) return
+
+  // xterm's capture listener runs first. Clear the native textarea after both
+  // handlers have observed the committed character so its caret cannot drift.
+  if (termTextarea) termTextarea.value = ''
+  if (action.data !== null) window.api.ptyWrite(props.paneId, action.data)
+}
+
+const onTerminalCompositionStart = (): void => terminalInput.compositionStart()
+const onTerminalInputBlur = (): void => terminalInput.reset()
+
+const scheduleTerminalNativeInputFallback = (fallbackId: number): void => {
+  setTimeout(() => {
+    const data = terminalInput.takeNativeInputFallback(fallbackId)
+    if (data) window.api.ptyWrite(props.paneId, data)
+  }, 30)
+}
+
+const onTerminalCompositionEnd = (): void => terminalInput.compositionEnd()
 
 const pathFromFileUrl = (url: string): string | null => {
   try {
@@ -441,17 +475,21 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
     }
     return false
   }
-  if (e.type !== 'keydown') return true
-
-  // Bypass xterm where Windows keyboard translation loses information:
-  // modified Enter needs a distinct escape sequence, and printable Quote
-  // key events can otherwise disappear with some Windows layouts/IMEs.
-  const keyboardInput = terminalKeyboardInput(e, platform)
-  if (keyboardInput !== null) {
+  const inputAction = terminalInput.handleKeyEvent(e)
+  if (inputAction?.kind === 'write') {
     e.preventDefault()
-    window.api.ptyWrite(props.paneId, keyboardInput)
+    window.api.ptyWrite(props.paneId, inputAction.data)
     return false
   }
+  if (inputAction?.kind === 'native-input') {
+    if (inputAction.fallbackId !== undefined) {
+      scheduleTerminalNativeInputFallback(inputAction.fallbackId)
+    }
+    // Returning false exits xterm's keydown/keypress handler without
+    // canceling the browser event, allowing the IME to submit native text.
+    return false
+  }
+  if (e.type !== 'keydown') return true
 
   const effective = { ...DEFAULT_SHORTCUTS, ...props.shortcuts }
 
@@ -525,6 +563,7 @@ terminal.attachCustomKeyEventHandler((e): boolean => {
 
 // All other input → forward to PTY
 terminal.onData((data) => {
+  terminalInput.observeData(data)
   window.api.ptyWrite(props.paneId, data)
 })
 
@@ -761,6 +800,11 @@ onMounted(async () => {
   termTextarea = terminal.textarea ?? null
   termElement?.addEventListener('contextmenu', onContextMenu)
   termTextarea?.addEventListener('focus', onTerminalFocus)
+  termTextarea?.addEventListener('beforeinput', onTerminalBeforeInput)
+  termTextarea?.addEventListener('input', onTerminalInput)
+  termTextarea?.addEventListener('compositionstart', onTerminalCompositionStart)
+  termTextarea?.addEventListener('compositionend', onTerminalCompositionEnd)
+  termTextarea?.addEventListener('blur', onTerminalInputBlur)
 
   unsubscribeData = window.api.onPtyData(props.paneId, (chunk, acknowledge) =>
     terminal.write(chunk, acknowledge)
@@ -841,6 +885,12 @@ onUnmounted(() => {
   window.removeEventListener('blur', closeContextMenu)
   termElement?.removeEventListener('contextmenu', onContextMenu)
   termTextarea?.removeEventListener('focus', onTerminalFocus)
+  termTextarea?.removeEventListener('beforeinput', onTerminalBeforeInput)
+  termTextarea?.removeEventListener('input', onTerminalInput)
+  termTextarea?.removeEventListener('compositionstart', onTerminalCompositionStart)
+  termTextarea?.removeEventListener('compositionend', onTerminalCompositionEnd)
+  termTextarea?.removeEventListener('blur', onTerminalInputBlur)
+  terminalInput.reset()
   termElement = null
   termTextarea = null
   resizeObserver?.disconnect()

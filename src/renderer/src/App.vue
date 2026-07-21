@@ -15,7 +15,9 @@ import {
   ListChecks,
   Zap,
   PanelLeft,
-  Server
+  Server,
+  ShieldCheck,
+  Trash2
 } from 'lucide-vue-next'
 import TerminalView from './components/Terminal.vue'
 import TasksDrawer from './components/TasksDrawer.vue'
@@ -26,7 +28,13 @@ import QuickCommandsSettings from './components/QuickCommandsSettings.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
-import type { AgentSessionInfo, QuickCommand, SshProfile } from '@shared/types'
+import type {
+  AgentSessionInfo,
+  QuickCommand,
+  SshCommandPermission,
+  SshDirectoryPolicy,
+  SshProfile
+} from '@shared/types'
 
 // App.vue 作为"屋顶":标题栏 + 设置抽屉 + 任务抽屉 / 管理对话框 + Layout 渲染。
 // 布局算法、pane tree、divider 拖拽、pane 拖拽都搬到 useLayout —— App 这里只
@@ -54,11 +62,13 @@ const MAX_SCROLLBACK = 200000
 const appScrollback = ref(DEFAULT_SCROLLBACK)
 
 const showSettings = ref(false)
-const settingsTab = ref<'general' | 'commands' | 'mcp' | 'shortcuts' | 'about'>('general')
+const settingsTab = ref<'general' | 'commands' | 'mcp' | 'ssh' | 'shortcuts' | 'about'>('general')
 const electronVersion = ref('')
 const appVersion = ref('')
 const quickCommands = ref<QuickCommand[]>([])
 const sshProfiles = ref<SshProfile[]>([])
+const sshDirectoryPermissions = ref<Record<string, SshDirectoryPolicy>>({})
+const sshCommandPermissions = ref<SshCommandPermission[]>([])
 const showSshDialog = ref(false)
 const sshDraft = ref<SshProfile>({
   id: '',
@@ -185,6 +195,14 @@ const watchVoiceRecording = (): void => {
 
 watch(recordingVoice, watchVoiceRecording)
 
+const refreshSshPermissions = async (): Promise<void> => {
+  const settings = await window.api.settingsGet()
+  sshDirectoryPermissions.value = { ...(settings.sshDirectoryPermissions || {}) }
+  sshCommandPermissions.value = Array.isArray(settings.sshCommandPermissions)
+    ? settings.sshCommandPermissions
+    : []
+}
+
 const onRecordingKeydown = (e: KeyboardEvent): void => {
   if (!recordingAction.value) return
   e.preventDefault()
@@ -236,6 +254,7 @@ const watchRecording = (): void => {
 watch(showSettings, (open) => {
   if (open) {
     void refreshAudioDevices()
+    void refreshSshPermissions()
   } else {
     recordingAction.value = null
     recordingVoice.value = false
@@ -243,15 +262,21 @@ watch(showSettings, (open) => {
 })
 
 watch(recordingAction, watchRecording)
+watch(settingsTab, (tab) => {
+  if (tab === 'ssh') void refreshSshPermissions()
+})
 
-// 浏览器自动化与 Agent 协作使用两个独立 MCP，避免无关工具进入同一个上下文。
+// 浏览器自动化、Agent 协作与终端控制使用独立 MCP，避免无关工具进入同一个上下文。
 const BROWSER_MCP_URL = 'http://127.0.0.1:9876/sse'
 const AGENT_MCP_URL = 'http://127.0.0.1:9877/sse'
+const TERMINAL_MCP_URL = 'http://127.0.0.1:9878/sse'
 const MCP_CONFIGS = {
   browserClaude: `claude mcp add -s user -t sse gittim-browser ${BROWSER_MCP_URL}`,
   browserCodex: `codex mcp add gittim-browser --url ${BROWSER_MCP_URL}`,
   agentClaude: `claude mcp add -s user -t sse gittim-agent ${AGENT_MCP_URL}`,
-  agentCodex: `codex mcp add gittim-agent --url ${AGENT_MCP_URL}`
+  agentCodex: `codex mcp add gittim-agent --url ${AGENT_MCP_URL}`,
+  terminalClaude: `claude mcp add -s user -t sse gittim-terminal ${TERMINAL_MCP_URL}`,
+  terminalCodex: `codex mcp add gittim-terminal --url ${TERMINAL_MCP_URL}`
 } as const
 type McpCopyTarget = keyof typeof MCP_CONFIGS
 const mcpCopied = ref<McpCopyTarget | null>(null)
@@ -427,6 +452,49 @@ const normPath = (p: string | null | undefined): string => {
 
 const paneCwdFor = (paneId: string): string => paneCwd.value[paneId] || cwd.value || ''
 
+const openedLocalDirectories = computed(() => {
+  const unique = new Map<string, string>()
+  for (const pane of layoutResult.value.panes) {
+    if (paneTerminalState.value[pane.id]?.kind === 'ssh') continue
+    const directory = paneCwdFor(pane.id)
+    const key = normPath(directory)
+    if (key && !unique.has(key)) unique.set(key, directory)
+  }
+  return Array.from(unique.values())
+})
+
+const sshDirectoryPolicy = (directory: string): SshDirectoryPolicy => {
+  const key = normPath(directory)
+  const entry = Object.entries(sshDirectoryPermissions.value).find(
+    ([configured]) => normPath(configured) === key
+  )
+  return entry?.[1] || 'ask'
+}
+
+const sshRulesForDirectory = (directory: string): SshCommandPermission[] => {
+  const key = normPath(directory)
+  return sshCommandPermissions.value.filter((rule) => normPath(rule.directory) === key)
+}
+
+const onSshDirectoryPolicyChange = async (
+  directory: string,
+  policy: SshDirectoryPolicy
+): Promise<void> => {
+  const next = { ...sshDirectoryPermissions.value }
+  for (const configured of Object.keys(next)) {
+    if (normPath(configured) === normPath(directory)) delete next[configured]
+  }
+  if (policy !== 'ask') next[directory] = policy
+  sshDirectoryPermissions.value = next
+  await window.api.settingsSetNow({ sshDirectoryPermissions: next })
+}
+
+const removeSshCommandPermission = async (id: string): Promise<void> => {
+  const next = sshCommandPermissions.value.filter((rule) => rule.id !== id)
+  sshCommandPermissions.value = next
+  await window.api.settingsSetNow({ sshCommandPermissions: next })
+}
+
 const waitForTerminalRef = async (paneId: string): Promise<TerminalViewInstance | null> => {
   for (let i = 0; i < 20; i++) {
     const ref = terminalRefs.get(paneId)
@@ -594,6 +662,7 @@ const rectStyle = (rect: {
 let resizeObserver: ResizeObserver | null = null
 let unsubscribeWinState: (() => void) | null = null
 let unsubscribeTaskStatus: (() => void) | null = null
+let unsubscribeSshPermissions: (() => void) | null = null
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 const flushSave = (): void => {
@@ -649,7 +718,14 @@ onMounted(async () => {
         typeof item.command === 'string'
     )
   }
+  sshDirectoryPermissions.value = { ...(settings.sshDirectoryPermissions || {}) }
+  sshCommandPermissions.value = Array.isArray(settings.sshCommandPermissions)
+    ? settings.sshCommandPermissions
+    : []
   sshProfiles.value = await window.api.sshProfilesList()
+  unsubscribeSshPermissions = window.api.onSshPermissionsUpdated(() => {
+    void refreshSshPermissions()
+  })
 
   restoreFromSaved(settings.paneLayout)
 
@@ -718,6 +794,7 @@ onUnmounted(() => {
   unsubscribeWinState?.()
   unsubscribeTaskStatus?.()
   unsubscribeUpdateStatus?.()
+  unsubscribeSshPermissions?.()
   resizeObserver?.disconnect()
   window.removeEventListener('keydown', onRecordingKeydown, true)
   window.removeEventListener('keydown', onVoiceRecordingKeydown, true)
@@ -829,6 +906,14 @@ onUnmounted(() => {
           >
             <Globe :size="14" class="settings-nav-icon" />
             <span>MCP</span>
+          </button>
+          <button
+            class="settings-nav-item"
+            :class="{ active: settingsTab === 'ssh' }"
+            @click="settingsTab = 'ssh'"
+          >
+            <ShieldCheck :size="14" class="settings-nav-icon" />
+            <span>SSH 权限</span>
           </button>
           <button
             class="settings-nav-item"
@@ -1040,7 +1125,7 @@ onUnmounted(() => {
               <h3 class="settings-section-title">MCP</h3>
             </header>
             <p class="settings-item-desc" style="margin-bottom: 10px">
-              浏览器自动化和 Agent 协作已拆成两个独立服务，可按需注册。
+              浏览器自动化、Agent 协作和终端控制使用独立服务，可按需注册。
             </p>
             <div class="settings-item-label" style="margin-bottom: 6px">浏览器 MCP · 9876</div>
             <div class="settings-item">
@@ -1114,6 +1199,94 @@ onUnmounted(() => {
               注册名称；之后用 agent_list、agent_send 和 agent_reply 协作，消息会直接唤醒目标
               Agent。
             </p>
+            <div class="settings-item-label" style="margin: 12px 0 6px">Terminal MCP · 9878</div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Claude Code</label>
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('terminalClaude')"
+                >
+                  <Check v-if="mcpCopied === 'terminalClaude'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CONFIGS.terminalClaude }}</code>
+              </p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-row">
+                <label class="settings-item-label">Codex</label>
+                <button
+                  class="settings-copy-btn"
+                  title="复制注册命令"
+                  @click="copyMcpConfig('terminalCodex')"
+                >
+                  <Check v-if="mcpCopied === 'terminalCodex'" :size="12" />
+                  <Copy v-else :size="12" />
+                </button>
+              </div>
+              <p class="settings-item-desc">
+                <code class="settings-cmd">{{ MCP_CONFIGS.terminalCodex }}</code>
+              </p>
+            </div>
+          </section>
+        </template>
+
+        <template v-else-if="settingsTab === 'ssh'">
+          <section class="settings-section">
+            <header class="settings-section-header">
+              <ShieldCheck :size="14" class="settings-section-icon" />
+              <h3 class="settings-section-title">SSH 权限</h3>
+            </header>
+            <div v-if="!openedLocalDirectories.length" class="ssh-permission-empty">
+              当前没有打开的本地目录
+            </div>
+            <div
+              v-for="directory in openedLocalDirectories"
+              :key="normPath(directory)"
+              class="ssh-permission-directory"
+            >
+              <div class="ssh-permission-heading">
+                <code class="ssh-permission-path" :title="directory">{{ directory }}</code>
+                <el-select
+                  :model-value="sshDirectoryPolicy(directory)"
+                  size="small"
+                  popper-class="settings-select-popper"
+                  style="width: 130px"
+                  @update:model-value="
+                    (value: SshDirectoryPolicy) => onSshDirectoryPolicyChange(directory, value)
+                  "
+                >
+                  <el-option label="每次确认" value="ask" />
+                  <el-option label="始终允许" value="always_allow" />
+                  <el-option label="拒绝" value="deny" />
+                </el-select>
+              </div>
+              <div v-if="sshRulesForDirectory(directory).length" class="ssh-command-rules">
+                <div
+                  v-for="rule in sshRulesForDirectory(directory)"
+                  :key="rule.id"
+                  class="ssh-command-rule"
+                >
+                  <div class="ssh-command-rule-body">
+                    <code class="ssh-command-text" :title="rule.command">{{ rule.command }}</code>
+                    <span class="ssh-command-target">{{
+                      rule.sshLabel || sshProfileLabel(rule.sshProfileId)
+                    }}</span>
+                  </div>
+                  <button
+                    class="ssh-command-delete"
+                    title="删除始终允许规则"
+                    @click="removeSshCommandPermission(rule.id)"
+                  >
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </section>
         </template>
 
@@ -1290,7 +1463,12 @@ onUnmounted(() => {
           <el-input v-model="sshDraft.host" placeholder="example.com" />
         </el-form-item>
         <el-form-item label="Port">
-          <el-input-number v-model="sshDraft.port" :min="1" :max="65535" controls-position="right" />
+          <el-input-number
+            v-model="sshDraft.port"
+            :min="1"
+            :max="65535"
+            controls-position="right"
+          />
         </el-form-item>
       </div>
       <el-form-item label="Username">
@@ -1786,6 +1964,108 @@ onUnmounted(() => {
   word-break: break-all;
   line-height: 1.5;
   user-select: all;
+}
+
+.ssh-permission-empty {
+  padding: 18px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.ssh-permission-directory {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+}
+
+.ssh-permission-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .el-select {
+    flex: 0 0 130px;
+  }
+}
+
+.ssh-permission-path {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-primary);
+  font-size: 11.5px;
+  @include mono-font;
+}
+
+.ssh-command-rules {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.ssh-command-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.ssh-command-rule-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ssh-command-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-regular);
+  font-size: 11px;
+  @include mono-font;
+}
+
+.ssh-command-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-secondary);
+  font-size: 10.5px;
+}
+
+.ssh-command-delete {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border-radius: $radius-sm;
+  color: var(--el-text-color-secondary);
+
+  &:hover {
+    color: var(--el-color-danger);
+    background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
+  }
 }
 
 /* 下拉选项 popper(el-select 默认 append-to-body,必须全局命中) */

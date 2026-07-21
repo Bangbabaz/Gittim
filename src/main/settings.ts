@@ -21,7 +21,9 @@ const DEFAULTS: Settings = {
   voiceShortcut: 'F2',
   autoUpdate: true,
   quickCommands: [],
-  sshProfiles: []
+  sshProfiles: [],
+  sshDirectoryPermissions: {},
+  sshCommandPermissions: []
 }
 
 let cache: Settings | null = null

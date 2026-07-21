@@ -267,6 +267,10 @@ export interface Settings {
   quickCommands?: QuickCommand[]
   /** SSH 远程终端连接配置。密码/私钥内容不落盘,只保存可复用的连接元信息。 */
   sshProfiles?: SshProfile[]
+  /** 已打开本地目录通过 Terminal MCP 操作 SSH 时的默认权限。未配置目录默认每次询问。 */
+  sshDirectoryPermissions?: Record<string, SshDirectoryPolicy>
+  /** 用户在审批弹窗中选择“始终允许”后保存的精确命令规则。 */
+  sshCommandPermissions?: SshCommandPermission[]
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +331,30 @@ export interface SshProfile {
   hasPassword?: boolean
   remoteCwd?: string
 }
+
+export type SshDirectoryPolicy = 'ask' | 'always_allow' | 'deny'
+
+export interface SshCommandPermission {
+  id: string
+  directory: string
+  sshProfileId: string
+  sshTarget: string
+  sshLabel: string
+  command: string
+  createdAt: number
+}
+
+export interface SshCommandApprovalRequest {
+  sourceDirectory: string
+  targetPaneId: string
+  sshProfileId: string
+  sshTarget: string
+  sshLabel: string
+  command: string
+  reason?: string
+}
+
+export type SshCommandApprovalDecision = 'allow_once' | 'always_allow' | 'deny'
 
 // ---------------------------------------------------------------------------
 // 流式 task 事件 payload

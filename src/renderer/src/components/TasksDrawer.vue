@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { enableWebglRenderer, waitForTerminalFonts } from '../utils/xtermRenderer'
-import { terminalKeyboardInput } from '../utils/terminalKeyboard'
+import { TerminalInputHandler } from '../utils/terminalKeyboard'
 import { ElMessageBox } from 'element-plus'
 import {
   Play,
@@ -28,6 +28,7 @@ import '@xterm/xterm/css/xterm.css'
 const { xtermTheme } = useTheme()
 const platform =
   (window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? ''
+const terminalInput = new TerminalInputHandler(platform)
 
 const props = defineProps<{
   modelValue: boolean
@@ -128,6 +129,7 @@ const statusText: Record<TaskMeta['status'], string> = {
 // --- Log viewer (one shared xterm, re-bound on selection) -----------------
 const logRef = ref<HTMLDivElement>()
 let term: Terminal | null = null
+let termTextarea: HTMLTextAreaElement | null = null
 let fit: FitAddon | null = null
 let logResizeObserver: ResizeObserver | null = null
 let bindGeneration = 0
@@ -156,6 +158,43 @@ function focusTerm(): void {
   term?.focus()
 }
 
+function writeSelectedTaskInput(data: string): void {
+  const id = selectedId.value
+  const task = tasks.value.find((x) => x.id === id)
+  if (id && task?.status === 'running') window.api.taskInput(id, data)
+}
+
+function onTaskBeforeInput(event: Event): void {
+  const e = event as InputEvent
+  const action = terminalInput.handleBeforeInput(e)
+  if (action === null) return
+  e.preventDefault()
+  if (termTextarea) termTextarea.value = ''
+  if (action.data !== null) writeSelectedTaskInput(action.data)
+}
+
+function onTaskInput(event: Event): void {
+  const e = event as InputEvent
+  const action = terminalInput.handleInput(e)
+  if (action === null) return
+  if (termTextarea) termTextarea.value = ''
+  if (action.data !== null) writeSelectedTaskInput(action.data)
+}
+
+const onTaskCompositionStart = (): void => terminalInput.compositionStart()
+const onTaskInputBlur = (): void => terminalInput.reset()
+
+function scheduleTaskNativeInputFallback(fallbackId: number): void {
+  setTimeout(() => {
+    const data = terminalInput.takeNativeInputFallback(fallbackId)
+    if (data) writeSelectedTaskInput(data)
+  }, 30)
+}
+
+function onTaskCompositionEnd(): void {
+  terminalInput.compositionEnd()
+}
+
 function ensureTerm(): void {
   if (term || !logRef.value) return
   term = new Terminal({
@@ -175,6 +214,12 @@ function ensureTerm(): void {
   term.loadAddon(fit)
   term.loadAddon(sa)
   term.open(logRef.value)
+  termTextarea = term.textarea ?? null
+  termTextarea?.addEventListener('beforeinput', onTaskBeforeInput)
+  termTextarea?.addEventListener('input', onTaskInput)
+  termTextarea?.addEventListener('compositionstart', onTaskCompositionStart)
+  termTextarea?.addEventListener('compositionend', onTaskCompositionEnd)
+  termTextarea?.addEventListener('blur', onTaskInputBlur)
   enableWebglRenderer(term)
   void waitForTerminalFonts().then(() => {
     if (!term || !logRef.value?.isConnected) return
@@ -190,21 +235,23 @@ function ensureTerm(): void {
   // running. The one terminal is reused across tasks, so resolve the target
   // at call time; idle/exited tasks are no-ops (backend guards too).
   term.attachCustomKeyEventHandler((e) => {
-    const keyboardInput = terminalKeyboardInput(e, platform)
-    if (keyboardInput !== null) {
+    const inputAction = terminalInput.handleKeyEvent(e)
+    if (inputAction?.kind === 'write') {
       e.preventDefault()
-      const id = selectedId.value
-      const task = tasks.value.find((x) => x.id === id)
-      if (id && task?.status === 'running') window.api.taskInput(id, keyboardInput)
+      writeSelectedTaskInput(inputAction.data)
+      return false
+    }
+    if (inputAction?.kind === 'native-input') {
+      if (inputAction.fallbackId !== undefined) {
+        scheduleTaskNativeInputFallback(inputAction.fallbackId)
+      }
       return false
     }
     return true
   })
   term.onData((d) => {
-    const id = selectedId.value
-    if (!id) return
-    const t = tasks.value.find((x) => x.id === id)
-    if (t && t.status === 'running') window.api.taskInput(id, d)
+    terminalInput.observeData(d)
+    writeSelectedTaskInput(d)
   })
   logResizeObserver = new ResizeObserver(() => {
     try {
@@ -314,6 +361,13 @@ onUnmounted(() => {
   unsubCleared?.()
   unsubRemoved?.()
   logResizeObserver?.disconnect()
+  termTextarea?.removeEventListener('beforeinput', onTaskBeforeInput)
+  termTextarea?.removeEventListener('input', onTaskInput)
+  termTextarea?.removeEventListener('compositionstart', onTaskCompositionStart)
+  termTextarea?.removeEventListener('compositionend', onTaskCompositionEnd)
+  termTextarea?.removeEventListener('blur', onTaskInputBlur)
+  terminalInput.reset()
+  termTextarea = null
   term?.dispose()
 })
 
@@ -321,7 +375,10 @@ onUnmounted(() => {
 watch(
   () => props.modelValue,
   async (open) => {
-    if (!open) return
+    if (!open) {
+      terminalInput.reset()
+      return
+    }
     await tasksReady
     await nextTick()
     ensureTerm()

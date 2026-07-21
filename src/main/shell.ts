@@ -1,12 +1,13 @@
 import { spawn, IPty } from 'node-pty'
 import { WebContents, app, safeStorage } from 'electron'
 import { execFile } from 'child_process'
+import { randomBytes, timingSafeEqual } from 'crypto'
 import { promisify } from 'util'
 import { readlinkSync, statSync, readFileSync, existsSync } from 'fs'
 import { readFile, rm, writeFile } from 'fs/promises'
 import { basename, dirname, join, relative, resolve } from 'path'
 import { shellIntegration } from './shell-integration'
-import { getAgentMcpPort, getBrowserMcpPort } from './mcp-server'
+import { AGENT_MCP_PORT, BROWSER_MCP_PORT, TERMINAL_MCP_PORT } from './mcp-config'
 import { killProcessTree } from './proc'
 import { readSettings } from './settings'
 import type {
@@ -50,6 +51,12 @@ interface Session {
   // Cached at creation: reading webContents.id after the wc is destroyed throws.
   wcId: number
   paneId: string
+  kind: 'local' | 'ssh'
+  cwd: string
+  sshProfileId?: string
+  sshTarget?: string
+  sshLabel?: string
+  terminalMcpToken?: string
   disposed: boolean
   sessionId: number
   sequence: number
@@ -62,6 +69,9 @@ interface Session {
   sshPassword?: string
   sshPromptTail: string
   sshPasswordSent: boolean
+  outputBuffer: string
+  outputStartCursor: number
+  outputEndCursor: number
 }
 
 // One session per pane. Multiple panes can live on a single webContents.
@@ -77,6 +87,7 @@ const OUTPUT_BATCH_DELAY_MS = 5
 const OUTPUT_BATCH_MAX_CHARS = 64 * 1024
 const OUTPUT_PAUSE_HIGH_WATER = 1024 * 1024
 const OUTPUT_RESUME_LOW_WATER = 256 * 1024
+const OUTPUT_HISTORY_MAX_CHARS = 512 * 1024
 
 // Common options for synchronous-style git invocations. encoding:'utf8' makes
 // stdout/stderr come back as strings instead of Buffers.
@@ -130,6 +141,16 @@ function shellQuotePosix(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+function singleLineLabel(value: string): string {
+  return Array.from(value, (char) => {
+    const code = char.codePointAt(0) || 0
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? ' ' : char
+  })
+    .join('')
+    .trim()
+    .slice(0, 160)
+}
+
 function findSshProfile(profileId: string | undefined): SshProfile | null {
   if (!profileId) return null
   const profiles = readSettings().sshProfiles || []
@@ -157,6 +178,8 @@ function buildSshSpawn(opts: PtyStartOpts): {
   cwd: string
   env: NodeJS.ProcessEnv
   password?: string
+  target: string
+  label: string
 } {
   const profile = findSshProfile(opts.sshProfileId)
   if (!profile) throw new Error('SSH 连接配置不存在')
@@ -179,7 +202,9 @@ function buildSshSpawn(opts: PtyStartOpts): {
     args,
     cwd: getCurrentDir(),
     env: { ...process.env },
-    password: decryptSshPassword(profile.passwordSecret) || profile.password
+    password: decryptSshPassword(profile.passwordSecret) || profile.password,
+    target: JSON.stringify([username, host.toLowerCase(), port, remoteCwd || '']),
+    label: singleLineLabel(profile.name || `${username}@${host}`) || 'SSH'
   }
 }
 
@@ -197,6 +222,9 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
   let env: NodeJS.ProcessEnv
   let cwd: string
   let sshPassword: string | undefined
+  let sshTarget: string | undefined
+  let sshLabel: string | undefined
+  let terminalMcpToken: string | undefined
 
   if (opts.kind === 'ssh') {
     const ssh = buildSshSpawn(opts)
@@ -205,6 +233,8 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     env = ssh.env
     cwd = ssh.cwd
     sshPassword = ssh.password
+    sshTarget = ssh.target
+    sshLabel = ssh.label
   } else {
     // Validate the requested cwd. A persisted layout can reference a folder
     // that's since been deleted — silently fall back to the user's home dir
@@ -217,15 +247,19 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     shell = local.shell
     args = local.args
     env = local.env
+    terminalMcpToken = randomBytes(32).toString('hex')
 
     // 注入 paneId 和两个 MCP 端口，让 Agent 子进程能区分协作与浏览器端点。
     env.GITTIM_PANE_ID = opts.paneId
     // 兼容旧版本：通用变量仍指向原有的浏览器 MCP 端口。
-    env.GITTIM_MCP_PORT = String(getBrowserMcpPort())
-    env.GITTIM_AGENT_MCP_PORT = String(getAgentMcpPort())
-    env.GITTIM_BROWSER_MCP_PORT = String(getBrowserMcpPort())
-    env.GITTIM_AGENT_MCP_URL = `http://127.0.0.1:${getAgentMcpPort()}/sse?paneId=${encodeURIComponent(opts.paneId)}`
-    env.GITTIM_BROWSER_MCP_URL = `http://127.0.0.1:${getBrowserMcpPort()}/sse`
+    env.GITTIM_MCP_PORT = String(BROWSER_MCP_PORT)
+    env.GITTIM_AGENT_MCP_PORT = String(AGENT_MCP_PORT)
+    env.GITTIM_BROWSER_MCP_PORT = String(BROWSER_MCP_PORT)
+    env.GITTIM_TERMINAL_MCP_PORT = String(TERMINAL_MCP_PORT)
+    env.GITTIM_TERMINAL_MCP_TOKEN = terminalMcpToken
+    env.GITTIM_AGENT_MCP_URL = `http://127.0.0.1:${AGENT_MCP_PORT}/sse?paneId=${encodeURIComponent(opts.paneId)}`
+    env.GITTIM_BROWSER_MCP_URL = `http://127.0.0.1:${BROWSER_MCP_PORT}/sse`
+    env.GITTIM_TERMINAL_MCP_URL = `http://127.0.0.1:${TERMINAL_MCP_PORT}/sse?paneId=${encodeURIComponent(opts.paneId)}&token=${terminalMcpToken}`
   }
 
   const pty = spawn(shell, args, {
@@ -243,6 +277,12 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     webContents,
     wcId,
     paneId,
+    kind: opts.kind === 'ssh' ? 'ssh' : 'local',
+    cwd,
+    sshProfileId: opts.kind === 'ssh' ? opts.sshProfileId : undefined,
+    sshTarget,
+    sshLabel,
+    terminalMcpToken,
     disposed: false,
     sessionId: nextSessionId++,
     sequence: 0,
@@ -254,7 +294,10 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     paused: false,
     sshPassword,
     sshPromptTail: '',
-    sshPasswordSent: false
+    sshPasswordSent: false,
+    outputBuffer: '',
+    outputStartCursor: 0,
+    outputEndCursor: 0
   }
   sessions.set(paneId, session)
 
@@ -305,6 +348,15 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
 
   pty.onData((data) => {
     if (session.disposed || webContents.isDestroyed()) return
+    if (session.kind === 'ssh') {
+      session.outputBuffer += data
+      session.outputEndCursor += data.length
+      if (session.outputBuffer.length > OUTPUT_HISTORY_MAX_CHARS) {
+        const overflow = session.outputBuffer.length - OUTPUT_HISTORY_MAX_CHARS
+        session.outputBuffer = session.outputBuffer.slice(overflow)
+        session.outputStartCursor += overflow
+      }
+    }
     if (session.sshPassword && !session.sshPasswordSent) {
       session.sshPromptTail = (session.sshPromptTail + data).slice(-512)
       if (/password:\s*$/i.test(session.sshPromptTail)) {
@@ -418,6 +470,82 @@ export function getActivePtyPaneIds(): string[] {
   return Array.from(sessions.values())
     .filter((session) => !session.disposed && !session.webContents.isDestroyed())
     .map((session) => session.paneId)
+}
+
+export interface PtySessionInfo {
+  paneId: string
+  kind: 'local' | 'ssh'
+  cwd: string
+  sshProfileId?: string
+  sshTarget?: string
+  sshLabel?: string
+  outputCursor: number
+}
+
+function serializePtySession(session: Session): PtySessionInfo {
+  return {
+    paneId: session.paneId,
+    kind: session.kind,
+    cwd: session.cwd,
+    sshProfileId: session.sshProfileId,
+    sshTarget: session.sshTarget,
+    sshLabel: session.sshLabel,
+    outputCursor: session.outputEndCursor
+  }
+}
+
+export function getPtySessionInfo(paneId: string): PtySessionInfo | null {
+  const session = sessions.get(paneId)
+  return session && !session.disposed ? serializePtySession(session) : null
+}
+
+export function verifyPtyTerminalToken(paneId: string, token: string): boolean {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed || session.kind !== 'local' || !session.terminalMcpToken) {
+    return false
+  }
+  const expected = Buffer.from(session.terminalMcpToken)
+  const actual = Buffer.from(token)
+  return expected.length === actual.length && timingSafeEqual(expected, actual)
+}
+
+export function getActiveSshSessions(): PtySessionInfo[] {
+  return Array.from(sessions.values())
+    .filter(
+      (session) => session.kind === 'ssh' && !session.disposed && !session.webContents.isDestroyed()
+    )
+    .map(serializePtySession)
+}
+
+export function readPtyOutput(
+  paneId: string,
+  cursor?: number,
+  maxChars = 64 * 1024
+): { data: string; cursor: number; truncated: boolean } {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed) throw new Error(`终端面板不存在或已关闭：${paneId}`)
+  const limit = Math.max(1, Math.min(256 * 1024, Math.round(maxChars)))
+  const requested = Number.isFinite(cursor) ? Math.max(0, Math.round(cursor!)) : undefined
+  const start =
+    requested === undefined
+      ? Math.max(session.outputStartCursor, session.outputEndCursor - limit)
+      : Math.max(session.outputStartCursor, Math.min(requested, session.outputEndCursor))
+  const available = session.outputEndCursor - start
+  const length = Math.min(limit, available)
+  const offset = start - session.outputStartCursor
+  return {
+    data: session.outputBuffer.slice(offset, offset + length),
+    cursor: start + length,
+    truncated: requested !== undefined && requested < session.outputStartCursor
+  }
+}
+
+export function writeSshCommand(paneId: string, command: string): void {
+  const session = sessions.get(paneId)
+  if (!session || session.disposed || session.kind !== 'ssh') {
+    throw new Error(`SSH 终端面板不存在或已关闭：${paneId}`)
+  }
+  session.pty.write(`${command}\r`)
 }
 
 /**
