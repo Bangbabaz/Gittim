@@ -870,7 +870,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   padding-right: 4px;
   min-width: 0;
 }
@@ -881,7 +881,13 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   align-items: stretch;
   gap: 6px;
   width: 100%;
+  min-height: 36px;
   padding: 0 8px 0 0;
+  border: 0;
+
+  &.active {
+    border: 0;
+  }
 }
 
 // graph cell 走 align-self: stretch 跟 row 等高;SVG 绝对定位 + height 100%
@@ -908,7 +914,7 @@ const fileStatusLabel = (s: FilePatch['status']): string =>
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 0;
+  padding: 2px 0;
 }
 
 .gl-row-top {

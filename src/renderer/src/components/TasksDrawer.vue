@@ -209,7 +209,7 @@ function ensureTerm(): void {
     theme: xtermTheme.value
   })
   fit = new FitAddon()
-  const sa = new SearchAddon()
+  const sa = new SearchAddon({ highlightLimit: 200 })
   searchAddon.value = sa
   term.loadAddon(fit)
   term.loadAddon(sa)
@@ -575,7 +575,11 @@ function closeLogSearch(): void {
           </div>
           <div class="log-wrap">
             <div v-if="showLogSearch && searchAddon" class="log-search-pos">
-              <SearchOverlay :search-addon="searchAddon" @close="closeLogSearch" />
+              <SearchOverlay
+                :search-addon="searchAddon"
+                :result-limit="200"
+                @close="closeLogSearch"
+              />
             </div>
             <div ref="logRef" class="log-body" @click="focusTerm"></div>
           </div>

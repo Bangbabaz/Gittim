@@ -26,12 +26,106 @@
         title="输入 URL 后回车导航"
         @keydown.enter="navigateToUrl"
       />
+      <button
+        class="browser-nav-btn"
+        :class="{ 'is-active': proxyPanelOpen, 'has-proxy': proxyApplied }"
+        title="资源代理"
+        @click="toggleProxyPanel"
+      >
+        <Network :size="13" />
+      </button>
       <button class="browser-nav-btn" title="收起抽屉" @click="emit('collapse')">
         <Minus :size="14" />
       </button>
       <button class="browser-nav-close" title="关闭浏览器" @click="emit('close')">
         <X :size="14" />
       </button>
+    </div>
+
+    <div v-if="proxyPanelOpen" class="browser-proxy-panel">
+      <div class="browser-proxy-heading">
+        <span>资源代理</span>
+        <div class="browser-proxy-heading-actions">
+          <div class="browser-proxy-inline-switch">
+            <span>启用</span>
+            <el-switch v-model="proxyDraft.enabled" size="small" />
+          </div>
+        </div>
+      </div>
+      <div class="browser-proxy-mapping">
+        <label class="browser-proxy-field">
+          <span>本地端口</span>
+          <input
+            v-model.number="proxyDraft.localPort"
+            type="number"
+            min="1"
+            max="65535"
+            step="1"
+            placeholder="5173"
+            @keydown.enter="applyProxyConfig"
+          />
+        </label>
+      </div>
+      <div class="browser-proxy-rules-heading">
+        <span>子路径规则</span>
+        <div class="browser-proxy-default-action">
+          <span>未匹配</span>
+          <el-segmented
+            v-model="proxyDraft.defaultAction"
+            :options="proxyActionOptions"
+            size="small"
+          />
+        </div>
+      </div>
+      <div class="browser-proxy-rules">
+        <div v-for="(rule, index) in proxyDraft.rules" :key="rule.id" class="browser-proxy-rule">
+          <label class="browser-proxy-field">
+            <span>路径前缀</span>
+            <input
+              v-model.trim="rule.pathPrefix"
+              type="text"
+              placeholder="/api/"
+              spellcheck="false"
+              @keydown.enter="applyProxyConfig"
+            />
+          </label>
+          <el-switch
+            v-model="rule.action"
+            active-value="proxy"
+            inactive-value="bypass"
+            active-text="代理"
+            inactive-text="不代理"
+            size="small"
+            class="browser-proxy-rule-action"
+          />
+          <button class="browser-proxy-delete" title="删除规则" @click="removeProxyRule(index)">
+            <Trash2 :size="13" />
+          </button>
+        </div>
+      </div>
+      <div class="browser-proxy-actions">
+        <button class="browser-proxy-tool" title="添加规则" @click="addProxyRule">
+          <Plus :size="13" />
+          <span>添加规则</span>
+        </button>
+        <div class="browser-proxy-actions-right">
+          <div class="browser-proxy-inline-switch">
+            <span>失败回退远端</span>
+            <el-switch v-model="proxyDraft.fallbackToRemote" size="small" />
+          </div>
+          <button
+            class="browser-proxy-apply"
+            :disabled="proxySaving"
+            title="应用并刷新"
+            @click="applyProxyConfig"
+          >
+            <LoaderCircle v-if="proxySaving" class="is-spinning" :size="13" />
+            <Check v-else :size="13" />
+            <span>应用</span>
+          </button>
+        </div>
+      </div>
+      <div v-if="proxyError" class="browser-proxy-error" role="alert">{{ proxyError }}</div>
     </div>
 
     <!-- webview -->
@@ -49,8 +143,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { ChevronLeft, ChevronRight, RotateCw, X, Minus } from 'lucide-vue-next'
+import { reactive, ref, onMounted, onUnmounted } from 'vue'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  Minus,
+  Network,
+  Plus,
+  RotateCw,
+  Trash2,
+  X
+} from 'lucide-vue-next'
+import type { BrowserResourceProxyConfig, BrowserResourceProxyPathRule } from '@shared/types'
 
 const props = withDefaults(
   defineProps<{
@@ -73,6 +179,93 @@ const urlInputRef = ref<HTMLInputElement | null>(null)
 const currentUrl = ref('about:blank')
 const canGoBack = ref(false)
 const canGoForward = ref(false)
+const proxyPanelOpen = ref(false)
+const proxySaving = ref(false)
+const proxyError = ref('')
+const proxyStorageKey = `gittim:browser-resource-proxy:${props.paneId}`
+const DEFAULT_LOCAL_PORT = 5173
+const proxyActionOptions = [
+  { label: '代理', value: 'proxy' },
+  { label: '不代理', value: 'bypass' }
+]
+let proxyRuleSequence = 0
+
+function createProxyRule(
+  pathPrefix = '',
+  action: BrowserResourceProxyPathRule['action'] = 'bypass'
+): BrowserResourceProxyPathRule {
+  proxyRuleSequence += 1
+  return {
+    id: `rule-${Date.now().toString(36)}-${proxyRuleSequence}`,
+    pathPrefix,
+    action
+  }
+}
+
+function portFromStoredUrl(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    const port = url.port ? Number(url.port) : url.protocol === 'http:' ? 80 : 443
+    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
+  } catch {
+    return null
+  }
+}
+
+function loadProxyConfig(): BrowserResourceProxyConfig {
+  const defaults: BrowserResourceProxyConfig = {
+    enabled: false,
+    localPort: DEFAULT_LOCAL_PORT,
+    defaultAction: 'proxy',
+    fallbackToRemote: true,
+    rules: []
+  }
+  try {
+    const stored = localStorage.getItem(proxyStorageKey)
+    if (!stored) return defaults
+    const parsed = JSON.parse(stored) as Record<string, unknown>
+    const rawRules = Array.isArray(parsed.rules)
+      ? parsed.rules.filter(
+          (item): item is Record<string, unknown> => !!item && typeof item === 'object'
+        )
+      : []
+    const storedRules = rawRules
+      .filter((item) => typeof item.pathPrefix === 'string' && item.enabled !== false)
+      .map((item) => ({
+        id: typeof item.id === 'string' && item.id ? item.id : createProxyRule().id,
+        pathPrefix: String(item.pathPrefix),
+        action: item.action === 'bypass' ? ('bypass' as const) : ('proxy' as const)
+      }))
+    const previousMapping = rawRules.find((item) => typeof item.localUrlPrefix === 'string')
+    const storedPort = Number(parsed.localPort)
+    const localPort =
+      Number.isInteger(storedPort) && storedPort >= 1 && storedPort <= 65535
+        ? storedPort
+        : (portFromStoredUrl(parsed.localUrlPrefix) ??
+          portFromStoredUrl(previousMapping?.localUrlPrefix) ??
+          DEFAULT_LOCAL_PORT)
+    return {
+      enabled: parsed.enabled === true,
+      localPort,
+      defaultAction: parsed.defaultAction === 'bypass' ? 'bypass' : 'proxy',
+      fallbackToRemote: parsed.fallbackToRemote !== false,
+      rules: storedRules
+    }
+  } catch {
+    return defaults
+  }
+}
+
+const proxyDraft = reactive<BrowserResourceProxyConfig>(loadProxyConfig())
+const proxyApplied = ref(proxyDraft.enabled)
+
+function proxyConfigSnapshot(): BrowserResourceProxyConfig {
+  return {
+    ...proxyDraft,
+    rules: proxyDraft.rules.map((rule) => ({ ...rule }))
+  }
+}
 
 function getWebview(): HTMLElement & {
   getWebContentsId(): number
@@ -103,6 +296,36 @@ function reload(): void {
   if (wv) wv.reload()
 }
 
+function toggleProxyPanel(): void {
+  proxyPanelOpen.value = !proxyPanelOpen.value
+}
+
+function addProxyRule(): void {
+  const action = proxyDraft.defaultAction === 'proxy' ? 'bypass' : 'proxy'
+  proxyDraft.rules.push(createProxyRule('', action))
+}
+
+function removeProxyRule(index: number): void {
+  proxyDraft.rules.splice(index, 1)
+}
+
+async function applyProxyConfig(): Promise<void> {
+  if (proxySaving.value) return
+  proxySaving.value = true
+  proxyError.value = ''
+  try {
+    const applied = await window.api.browserSetResourceProxy(props.paneId, proxyConfigSnapshot())
+    Object.assign(proxyDraft, applied)
+    proxyApplied.value = applied.enabled
+    localStorage.setItem(proxyStorageKey, JSON.stringify(applied))
+    getWebview().reload()
+  } catch (error) {
+    proxyError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    proxySaving.value = false
+  }
+}
+
 function navigateToUrl(): void {
   const input = urlInputRef.value?.value
   if (input) {
@@ -126,6 +349,17 @@ function updateNavState(): void {
 onMounted(() => {
   const wv = getWebview()
   if (!wv) return
+
+  void window.api
+    .browserSetResourceProxy(props.paneId, proxyConfigSnapshot())
+    .then((applied) => {
+      Object.assign(proxyDraft, applied)
+      proxyApplied.value = applied.enabled
+    })
+    .catch((error) => {
+      proxyApplied.value = false
+      proxyError.value = error instanceof Error ? error.message : String(error)
+    })
 
   // 等待 webview 加载完成后注册到 main process
   const onDomReady = (): void => {

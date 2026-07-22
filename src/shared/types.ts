@@ -392,6 +392,20 @@ export interface BrowserNetworkEntry {
   resourceType?: string
 }
 
+export interface BrowserResourceProxyPathRule {
+  id: string
+  pathPrefix: string
+  action: 'proxy' | 'bypass'
+}
+
+export interface BrowserResourceProxyConfig {
+  enabled: boolean
+  localPort: number
+  defaultAction: 'proxy' | 'bypass'
+  fallbackToRemote: boolean
+  rules: BrowserResourceProxyPathRule[]
+}
+
 // ---------------------------------------------------------------------------
 // Auto-update (electron-updater)
 // ---------------------------------------------------------------------------

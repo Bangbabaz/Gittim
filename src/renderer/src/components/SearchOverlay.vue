@@ -12,6 +12,7 @@ const { mode } = useTheme()
 // SearchAddon of the terminal to search.
 const props = defineProps<{
   searchAddon: SearchAddon
+  resultLimit?: number
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -23,7 +24,10 @@ const results = ref<{ index: number; count: number }>({ index: -1, count: 0 })
 // No query → blank; matches → "current/total"; query but no hit → "0".
 const countText = computed(() => {
   if (!term.value) return ''
-  return results.value.count === 0 ? '0' : `${results.value.index + 1}/${results.value.count}`
+  if (results.value.count === 0) return '0'
+  const capped = !!props.resultLimit && results.value.count >= props.resultLimit
+  const total = `${results.value.count}${capped ? '+' : ''}`
+  return results.value.index < 0 ? total : `${results.value.index + 1}/${total}`
 })
 
 // xterm decorations 直接画到 canvas(JS object 不是 CSS),没法用 var()。但仍然
@@ -55,12 +59,26 @@ const searchOpts = computed<ISearchOptions>(() => {
 })
 
 let disposeResults: (() => void) | null = null
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelPendingSearch(): void {
+  if (searchTimer === null) return
+  clearTimeout(searchTimer)
+  searchTimer = null
+}
+
+function runSearch(incremental: boolean): void {
+  cancelPendingSearch()
+  if (!term.value) return
+  props.searchAddon.findNext(term.value, { ...searchOpts.value, incremental })
+}
 
 function next(): void {
-  if (term.value) props.searchAddon.findNext(term.value, searchOpts.value)
+  runSearch(false)
 }
 
 function prev(): void {
+  cancelPendingSearch()
   if (term.value) props.searchAddon.findPrevious(term.value, searchOpts.value)
 }
 
@@ -80,12 +98,16 @@ function onKey(e: KeyboardEvent): void {
 
 // Live search so the count + highlights update while typing.
 watch(term, (v) => {
+  cancelPendingSearch()
   if (!v) {
     props.searchAddon.clearDecorations()
     results.value = { index: -1, count: 0 }
     return
   }
-  props.searchAddon.findNext(v, { ...searchOpts.value, incremental: true })
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    props.searchAddon.findNext(v, { ...searchOpts.value, incremental: true })
+  }, 120)
 })
 
 onMounted(() => {
@@ -97,6 +119,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  cancelPendingSearch()
   disposeResults?.()
   props.searchAddon.clearDecorations()
 })

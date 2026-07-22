@@ -12,8 +12,7 @@
 
 .pane-drag-handle,
 .browser-btn,
-.session-btn,
-.ssh-btn {
+.session-btn {
   @include toolbar-icon-button;
 }
 

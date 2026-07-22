@@ -27,7 +27,8 @@ import type {
   IdeInfo,
   UpdateStatus,
   AgentSessionInfo,
-  SshProfile
+  SshProfile,
+  BrowserResourceProxyConfig
 } from '@shared/types'
 
 // API 暴露给 renderer 的桥接对象。每个方法对应 main 里的 ipcMain.handle / send。
@@ -39,6 +40,7 @@ const api = {
   getCwd: () => ipcRenderer.invoke('sys-cwd') as Promise<string>,
   getPlatform: () => ipcRenderer.invoke('sys-platform') as Promise<NodeJS.Platform>,
   getAppVersion: () => ipcRenderer.invoke('sys-app-version') as Promise<string>,
+  openExternal: (url: string) => ipcRenderer.invoke('sys-open-external', url) as Promise<boolean>,
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   agentSessionsList: () => ipcRenderer.invoke('agent-sessions-list') as Promise<AgentSessionInfo[]>,
 
@@ -230,6 +232,14 @@ const api = {
     ipcRenderer.invoke('browser-register', paneId, webContentsId) as Promise<void>,
   browserUnregister: (paneId: string) =>
     ipcRenderer.invoke('browser-unregister', paneId) as Promise<void>,
+  browserGetResourceProxy: (paneId: string) =>
+    ipcRenderer.invoke('browser-resource-proxy-get', paneId) as Promise<BrowserResourceProxyConfig>,
+  browserSetResourceProxy: (paneId: string, config: BrowserResourceProxyConfig) =>
+    ipcRenderer.invoke(
+      'browser-resource-proxy-set',
+      paneId,
+      config
+    ) as Promise<BrowserResourceProxyConfig>,
   browserGetMcpUrl: (paneId: string) =>
     ipcRenderer.invoke('browser-get-mcp-url', paneId) as Promise<string>,
   agentGetMcpUrl: () => ipcRenderer.invoke('agent-get-mcp-url') as Promise<string>,

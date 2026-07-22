@@ -88,7 +88,6 @@ const emit = defineEmits<{
   (e: 'paneDragStart', paneId: string): void
   (e: 'focusNeighbor', dir: 'up' | 'down' | 'left' | 'right'): void
   (e: 'openSettings'): void
-  (e: 'openSsh'): void
   (e: 'manageTasks', cwd?: string, newDraft?: boolean): void
   (e: 'openAgentSession', session: AgentSessionInfo): void
 }>()
@@ -160,8 +159,13 @@ const terminal = new Terminal({
 })
 
 const fitAddon = new FitAddon()
-const searchAddon = new SearchAddon()
-const webLinksAddon = new WebLinksAddon()
+// Highlighting is synchronous in @xterm/addon-search. Keeping this well below
+// the addon's 1000-match default prevents a common one-character query from
+// creating enough canvas decorations to stall the renderer.
+const searchAddon = new SearchAddon({ highlightLimit: 200 })
+const webLinksAddon = new WebLinksAddon((_event, uri) => {
+  void window.api.openExternal(uri)
+})
 const unicode11Addon = new Unicode11Addon()
 terminal.loadAddon(fitAddon)
 terminal.loadAddon(searchAddon)
@@ -928,7 +932,6 @@ onUnmounted(() => {
       :remote-label="props.sshProfileName"
       @worktree-created="(path, placement) => emit('createWorktree', props.paneId, path, placement)"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
-      @open-ssh="emit('openSsh')"
       @toggle-agent-sessions="toggleAgentSessions"
       @toggle-browser="toggleBrowser"
       @pane-drag-start="emit('paneDragStart', props.paneId)"
@@ -948,7 +951,7 @@ onUnmounted(() => {
           :message="voiceMessage"
         />
         <div v-if="showSearch" class="search-pos">
-          <SearchOverlay :search-addon="searchAddon" @close="closeSearch" />
+          <SearchOverlay :search-addon="searchAddon" :result-limit="200" @close="closeSearch" />
         </div>
       </div>
     </div>

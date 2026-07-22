@@ -274,6 +274,7 @@ export interface UseLayoutReturn {
   focusNeighbor: (dir: 'up' | 'down' | 'left' | 'right') => boolean
 
   onDividerDown: (e: MouseEvent, idx: number) => void
+  onDividerDoubleClick: (e: MouseEvent, idx: number) => void
 
   onPaneDragStart: (paneId: string) => void
 
@@ -502,6 +503,14 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     layout.value = updateRatio(layout.value, ds.path, ratio)
   }
 
+  const onDividerDoubleClick = (e: MouseEvent, idx: number): void => {
+    const d = layoutResult.value.dividers[idx]
+    if (!d || !layout.value) return
+    dragState.value = null
+    layout.value = updateRatio(layout.value, d.path, 0.5)
+    e.preventDefault()
+  }
+
   const onDividerUp = (): void => {
     dragState.value = null
   }
@@ -705,6 +714,7 @@ export function useLayout(opts: UseLayoutOptions): UseLayoutReturn {
     onCwdChange,
     focusNeighbor,
     onDividerDown,
+    onDividerDoubleClick,
     onPaneDragStart,
     serializeLayout,
     restoreFromSaved

@@ -794,9 +794,8 @@ let scanning: Promise<IdeInfo[]> | null = null
  * 立即返回 —— 不阻塞 UI 等 system_profiler / 注册表扫描。
  *
  * 设计上**没有**自动预扫(prewarm):mac 上 `system_profiler -json` 首次可能跑
- * 10+ 秒,会占满 libuv 线程池让其它 execFile(git 操作等)排队;同时启动期完全
- * 没必要 —— 用户感知"启动卡顿"主要就来自这种背景 IO。改成纯 lazy 后,只在
- * 用户真的点"重新检测"或 cache 为空时第一次访问 ide-list 才触发完整扫描。
+ * 10+ 秒,Windows 也要启动 PowerShell 并串行执行大量 PATH 查询。启动期没有
+ * 缓存时只返回系统入口;完整扫描仅由用户点击"重新检测"触发。
  */
 export function hydrateIdeCache(persisted: IdeInfo[] | undefined | null): void {
   if (cache) return
@@ -805,16 +804,14 @@ export function hydrateIdeCache(persisted: IdeInfo[] | undefined | null): void {
 }
 
 export async function detectIdes(force = false): Promise<IdeInfo[]> {
-  if (cache && !force) {
-    cache = await ensureSystemEntries(cache)
+  if (!force) {
+    cache = withSystemEntries(cache ?? [])
     return cache
   }
-  // 并发去重:多个 IdeLauncher 同时 onMounted 时只跑一次实际扫描。
-  if (!force && scanning) return scanning
-  if (force) {
-    registryCache = null
-    macAppsCache = null
-  }
+  // 用户连续触发刷新时复用同一次扫描，避免重复启动系统查询进程。
+  if (scanning) return scanning
+  registryCache = null
+  macAppsCache = null
   scanning = runDetect().finally(() => {
     scanning = null
   })
@@ -943,24 +940,6 @@ function withSystemEntries(items: IdeInfo[]): IdeInfo[] {
   const folder = items.find((item) => item.id === 'os-folder') ?? osFolderEntry()
   const ordinary = items.filter((item) => item.id !== 'os-terminal' && item.id !== 'os-folder')
   return [...ordinary, terminal, folder]
-}
-
-async function ensureSystemEntries(items: IdeInfo[]): Promise<IdeInfo[]> {
-  const next = withSystemEntries(items)
-  let changed = false
-  await Promise.all(
-    next
-      .filter((item) => item.id === 'os-terminal' || (item.id === 'os-folder' && !item.iconDataUrl))
-      .map(async (item) => {
-        const icon = await extractIcon(item.command, item.id)
-        if (!icon) return
-        if (item.iconDataUrl === icon) return
-        item.iconDataUrl = icon
-        changed = true
-      })
-  )
-  if (changed) updateSettings({ cachedIdes: next })
-  return next
 }
 
 function openSystemTerminal(cwd: string): Promise<{ success: boolean; error?: string }> {

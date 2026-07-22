@@ -3,7 +3,8 @@
 // 每个 pane 最多对应一个 BrowserSession；通过 webContents.debugger 控制 CDP，
 // 同时维持一个环形网络请求缓冲区供 MCP server 的 browser_network 工具查询。
 
-import { app, webContents } from 'electron'
+import { app, net, webContents } from 'electron'
+import type { BrowserResourceProxyConfig, BrowserResourceProxyPathRule } from '@shared/types'
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -66,11 +67,23 @@ interface BrowserSession {
   /** Console 日志环形缓冲（最多 50 条） */
   consoleLogs: Array<{ type: string; text: string; timestamp: number }>
   routeRules: BrowserRouteRule[]
+  resourceProxy: BrowserResourceProxyConfig
+  resourceProxyOrigin: string | null
+  mainFrameId?: string
   downloads: DownloadEntry[]
 }
 
 const sessions = new Map<string, BrowserSession>()
+const resourceProxyConfigs = new Map<string, BrowserResourceProxyConfig>()
 const NETWORK_BUFFER_MAX = 200
+const PROXY_REQUEST_TIMEOUT_MS = 5000
+const DEFAULT_RESOURCE_PROXY_CONFIG: BrowserResourceProxyConfig = {
+  enabled: false,
+  localPort: 5173,
+  defaultAction: 'proxy',
+  fallbackToRemote: true,
+  rules: []
+}
 
 // 等待激活: MCP server 请求激活浏览器后,在此等待 registerBrowser 回调
 const pendingActivations = new Map<string, { resolve: () => void; reject: (e: Error) => void }>()
@@ -92,6 +105,73 @@ function wcForSession(session: BrowserSession): Electron.WebContents | null {
   return wc
 }
 
+function cloneResourceProxyConfig(config: BrowserResourceProxyConfig): BrowserResourceProxyConfig {
+  return { ...config, rules: config.rules.map((rule) => ({ ...rule })) }
+}
+
+function getHttpOrigin(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeResourceProxyConfig(
+  input: BrowserResourceProxyConfig
+): BrowserResourceProxyConfig {
+  const enabled = input.enabled === true
+  const localPort = Number(input.localPort)
+  const rules = (Array.isArray(input.rules) ? input.rules : []).map((rule, index) =>
+    normalizeResourceProxyPathRule(rule, index)
+  )
+  if (enabled) {
+    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+      throw new Error('本地端口必须是 1 到 65535 之间的整数')
+    }
+  }
+
+  return {
+    enabled,
+    localPort:
+      Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
+        ? localPort
+        : DEFAULT_RESOURCE_PROXY_CONFIG.localPort,
+    defaultAction: input.defaultAction === 'bypass' ? 'bypass' : 'proxy',
+    fallbackToRemote: input.fallbackToRemote !== false,
+    rules
+  }
+}
+
+function normalizeResourceProxyPathRule(
+  input: BrowserResourceProxyPathRule,
+  index: number
+): BrowserResourceProxyPathRule {
+  let pathPrefix = String(input.pathPrefix || '').trim()
+  if (!pathPrefix.startsWith('/')) pathPrefix = `/${pathPrefix}`
+  if (pathPrefix.length > 1 && pathPrefix.endsWith('/')) pathPrefix = pathPrefix.slice(0, -1)
+  return {
+    id: String(input.id || `rule-${index + 1}`),
+    pathPrefix,
+    action: input.action === 'bypass' ? 'bypass' : 'proxy'
+  }
+}
+
+async function refreshFetchInterception(session: BrowserSession): Promise<void> {
+  if (session.routeRules.length > 0 || session.resourceProxy.enabled) {
+    await executeCdp(session.paneId, 'Fetch.enable', {
+      patterns: [{ urlPattern: '*', requestStage: 'Request' }]
+    })
+  } else {
+    await executeCdp(session.paneId, 'Fetch.disable')
+  }
+
+  await executeCdp(session.paneId, 'Network.setCacheDisabled', {
+    cacheDisabled: session.resourceProxy.enabled
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -101,6 +181,9 @@ function wcForSession(session: BrowserSession): Electron.WebContents | null {
  * 附加 CDP debugger 并开始监听网络事件。
  */
 export function registerBrowser(paneId: string, wcId: number): void {
+  const existing = sessions.get(paneId)
+  if (existing?.webContentsId === wcId && wcForSession(existing)) return
+
   // 防御：先注销旧的
   unregisterBrowser(paneId)
 
@@ -119,6 +202,10 @@ export function registerBrowser(paneId: string, wcId: number): void {
     pendingRequests: new Map(),
     consoleLogs: [],
     routeRules: [],
+    resourceProxy: cloneResourceProxyConfig(
+      resourceProxyConfigs.get(paneId) ?? DEFAULT_RESOURCE_PROXY_CONFIG
+    ),
+    resourceProxyOrigin: getHttpOrigin(wc.getURL()),
     downloads: []
   }
 
@@ -188,6 +275,12 @@ export function registerBrowser(paneId: string, wcId: number): void {
           break
         }
       }
+    } else if (method === 'Page.frameNavigated') {
+      const p = params as { frame: { id: string; parentId?: string; url: string } }
+      if (!p.frame.parentId) {
+        session.mainFrameId = p.frame.id
+        session.resourceProxyOrigin = getHttpOrigin(p.frame.url) ?? session.resourceProxyOrigin
+      }
     } else if (method === 'Page.javascriptDialogOpening') {
       // Dialog 监听
       const p = params as { type: string; message: string; defaultPrompt?: string }
@@ -218,7 +311,9 @@ export function registerBrowser(paneId: string, wcId: number): void {
         suggestedFilename: p.suggestedFilename,
         fileName: p.suggestedFilename,
         state: 'inProgress',
-        path: p.suggestedFilename ? `${app.getPath('downloads')}\\${p.suggestedFilename}` : undefined,
+        path: p.suggestedFilename
+          ? `${app.getPath('downloads')}\\${p.suggestedFilename}`
+          : undefined,
         timestamp: Date.now()
       })
       if (session.downloads.length > 50) session.downloads.shift()
@@ -239,6 +334,7 @@ export function registerBrowser(paneId: string, wcId: number): void {
   })
 
   sessions.set(paneId, session)
+  void refreshFetchInterception(session).catch(() => {})
 
   // 如果有等待中的激活请求,通知它
   const pending = pendingActivations.get(paneId)
@@ -399,22 +495,45 @@ export async function addRouteRule(paneId: string, rule: BrowserRouteRule): Prom
   if (!session) throw new Error(`Browser session not found: ${paneId}`)
   session.routeRules = session.routeRules.filter((r) => r.id !== rule.id)
   session.routeRules.push(rule)
-  await executeCdp(paneId, 'Fetch.enable', {
-    patterns: [{ urlPattern: '*', requestStage: 'Request' }]
-  })
+  await refreshFetchInterception(session)
 }
 
 export async function clearRouteRules(paneId: string): Promise<void> {
   const session = sessions.get(paneId)
   if (!session) return
   session.routeRules = []
-  await executeCdp(paneId, 'Fetch.disable')
+  await refreshFetchInterception(session)
 }
 
 export function getRouteRules(paneId: string): BrowserRouteRule[] {
   const session = sessions.get(paneId)
   if (!session) return []
   return [...session.routeRules]
+}
+
+export function getBrowserResourceProxyConfig(paneId: string): BrowserResourceProxyConfig {
+  return cloneResourceProxyConfig(
+    sessions.get(paneId)?.resourceProxy ??
+      resourceProxyConfigs.get(paneId) ??
+      DEFAULT_RESOURCE_PROXY_CONFIG
+  )
+}
+
+export async function setBrowserResourceProxyConfig(
+  paneId: string,
+  input: BrowserResourceProxyConfig
+): Promise<BrowserResourceProxyConfig> {
+  const config = normalizeResourceProxyConfig(input)
+  resourceProxyConfigs.set(paneId, config)
+
+  const session = sessions.get(paneId)
+  if (session) {
+    session.resourceProxy = cloneResourceProxyConfig(config)
+    const wc = wcForSession(session)
+    session.resourceProxyOrigin = (wc && getHttpOrigin(wc.getURL())) ?? session.resourceProxyOrigin
+    await refreshFetchInterception(session)
+  }
+  return cloneResourceProxyConfig(config)
 }
 
 interface FetchRequestPausedParams {
@@ -424,22 +543,32 @@ interface FetchRequestPausedParams {
     method: string
     headers?: Record<string, string>
   }
+  resourceType: string
+  frameId?: string
 }
 
 async function handleRouteRequest(
   session: BrowserSession,
   params: FetchRequestPausedParams
 ): Promise<void> {
+  if (
+    session.resourceProxy.enabled &&
+    params.resourceType === 'Document' &&
+    (!session.mainFrameId || params.frameId === session.mainFrameId)
+  ) {
+    session.resourceProxyOrigin = getHttpOrigin(params.request.url) ?? session.resourceProxyOrigin
+  }
+
   const rule = session.routeRules.find((r) =>
     routeMatches(r, params.request.url, params.request.method)
   )
   try {
-    if (!rule || rule.action === 'continue') {
+    if (rule?.action === 'continue') {
       await executeCdp(session.paneId, 'Fetch.continueRequest', { requestId: params.requestId })
       return
     }
 
-    if (rule.action === 'abort') {
+    if (rule?.action === 'abort') {
       await executeCdp(session.paneId, 'Fetch.failRequest', {
         requestId: params.requestId,
         errorReason: 'Aborted'
@@ -447,17 +576,24 @@ async function handleRouteRequest(
       return
     }
 
-    const headers = Object.entries({
-      'content-type': rule.contentType ?? 'application/json',
-      ...(rule.headers ?? {})
-    }).map(([name, value]) => ({ name, value }))
+    if (rule?.action === 'mock') {
+      const headers = Object.entries({
+        'content-type': rule.contentType ?? 'application/json',
+        ...(rule.headers ?? {})
+      }).map(([name, value]) => ({ name, value }))
 
-    await executeCdp(session.paneId, 'Fetch.fulfillRequest', {
-      requestId: params.requestId,
-      responseCode: rule.status ?? 200,
-      responseHeaders: headers,
-      body: Buffer.from(rule.body ?? '').toString('base64')
-    })
+      await executeCdp(session.paneId, 'Fetch.fulfillRequest', {
+        requestId: params.requestId,
+        responseCode: rule.status ?? 200,
+        responseHeaders: headers,
+        body: Buffer.from(rule.body ?? '').toString('base64')
+      })
+      return
+    }
+
+    if (await proxyResourceRequest(session, params)) return
+
+    await executeCdp(session.paneId, 'Fetch.continueRequest', { requestId: params.requestId })
   } catch {
     try {
       await executeCdp(session.paneId, 'Fetch.continueRequest', { requestId: params.requestId })
@@ -465,6 +601,110 @@ async function handleRouteRequest(
       // ignore
     }
   }
+}
+
+function getLocalProxyUrl(
+  config: BrowserResourceProxyConfig,
+  remoteOrigin: string | null,
+  requestUrl: string
+): string | null {
+  if (!config.enabled || !remoteOrigin) return null
+
+  let request: URL
+  try {
+    request = new URL(requestUrl)
+  } catch {
+    return null
+  }
+  if (request.origin !== remoteOrigin) return null
+
+  const matchingRule = config.rules
+    .filter((rule) => pathPrefixMatches(request.pathname, rule.pathPrefix))
+    .sort((a, b) => b.pathPrefix.length - a.pathPrefix.length)[0]
+  const action = matchingRule?.action ?? config.defaultAction
+  if (action === 'bypass') return null
+
+  const local = new URL(request.pathname, `http://127.0.0.1:${config.localPort}/`)
+  local.search = request.search
+  return local.toString()
+}
+
+function pathPrefixMatches(pathname: string, prefix: string): boolean {
+  return prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`)
+}
+
+async function proxyResourceRequest(
+  session: BrowserSession,
+  params: FetchRequestPausedParams
+): Promise<boolean> {
+  if (params.request.method !== 'GET' && params.request.method !== 'HEAD') {
+    return false
+  }
+
+  const localUrl = getLocalProxyUrl(
+    session.resourceProxy,
+    session.resourceProxyOrigin,
+    params.request.url
+  )
+  if (!localUrl) return false
+
+  const forwardedHeaders: Record<string, string> = {}
+  for (const name of ['accept', 'accept-language', 'range']) {
+    const value = Object.entries(params.request.headers ?? {}).find(
+      ([headerName]) => headerName.toLowerCase() === name
+    )?.[1]
+    if (value) forwardedHeaders[name] = value
+  }
+
+  let response: Response
+  try {
+    response = await net.fetch(localUrl, {
+      method: params.request.method,
+      headers: forwardedHeaders,
+      signal: AbortSignal.timeout(PROXY_REQUEST_TIMEOUT_MS)
+    })
+  } catch (error) {
+    if (session.resourceProxy.fallbackToRemote) return false
+
+    await executeCdp(session.paneId, 'Fetch.fulfillRequest', {
+      requestId: params.requestId,
+      responseCode: 502,
+      responsePhrase: 'Local resource proxy unavailable',
+      responseHeaders: [{ name: 'content-type', value: 'text/plain; charset=utf-8' }],
+      body: Buffer.from(`本地资源代理请求失败：${String(error)}`).toString('base64')
+    })
+    return true
+  }
+  if (session.resourceProxy.fallbackToRemote && response.status >= 400) return false
+
+  const blockedResponseHeaders = new Set([
+    'connection',
+    'content-encoding',
+    'content-length',
+    'cache-control',
+    'keep-alive',
+    'set-cookie',
+    'set-cookie2',
+    'transfer-encoding'
+  ])
+  const responseHeaders: Array<{ name: string; value: string }> = []
+  response.headers.forEach((value, name) => {
+    if (!blockedResponseHeaders.has(name.toLowerCase())) responseHeaders.push({ name, value })
+  })
+  responseHeaders.push({ name: 'cache-control', value: 'no-store' })
+
+  const body =
+    params.request.method === 'HEAD'
+      ? ''
+      : Buffer.from(await response.arrayBuffer()).toString('base64')
+  await executeCdp(session.paneId, 'Fetch.fulfillRequest', {
+    requestId: params.requestId,
+    responseCode: response.status,
+    responsePhrase: response.statusText,
+    responseHeaders,
+    body
+  })
+  return true
 }
 
 function routeMatches(rule: BrowserRouteRule, url: string, method: string): boolean {

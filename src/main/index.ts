@@ -77,7 +77,13 @@ import {
 import { initAutoUpdater, checkForUpdates, installUpdate } from './updater'
 import { detectIdes, openIde, hydrateIdeCache } from './ide'
 import { transcribePcm, disposeStt, sttModelExists } from './stt'
-import { registerBrowser, unregisterBrowser, disposeAllBrowsers } from './browser'
+import {
+  registerBrowser,
+  unregisterBrowser,
+  disposeAllBrowsers,
+  getBrowserResourceProxyConfig,
+  setBrowserResourceProxyConfig
+} from './browser'
 import {
   startMcpServers,
   stopMcpServers,
@@ -95,7 +101,8 @@ import type {
   CommitLogOpts,
   SshProfile,
   SshCommandApprovalRequest,
-  SshCommandApprovalDecision
+  SshCommandApprovalDecision,
+  BrowserResourceProxyConfig
 } from '@shared/types'
 
 // macOS 26 (Tahoe) + Electron 39 上,Chromium 的输入法状态机会与 mac IME 频繁
@@ -125,6 +132,17 @@ function visibleApprovalText(value: string): string {
       (code >= 0x2066 && code <= 0x2069)
     return unsafe ? `\\u${code.toString(16).padStart(4, '0')}` : char
   }).join('')
+}
+
+async function openExternalUrl(value: string): Promise<boolean> {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    await shell.openExternal(url.toString())
+    return true
+  } catch {
+    return false
+  }
 }
 
 function clampBoundsToDisplay(b: { x?: number; y?: number; width: number; height: number }): {
@@ -170,7 +188,7 @@ function createWindow(): void {
   })
 
   win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    void openExternalUrl(details.url)
     return { action: 'deny' }
   })
 
@@ -287,6 +305,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sys-cwd', () => getCurrentDir())
   ipcMain.handle('sys-platform', () => process.platform)
   ipcMain.handle('sys-app-version', () => app.getVersion())
+  ipcMain.handle('sys-open-external', (_event, url: string) => openExternalUrl(url))
   ipcMain.handle('agent-sessions-list', () => listAgentSessions())
   ipcMain.handle('git-info', (_event, cwd: string) => getGitInfo(cwd))
   ipcMain.handle('git-branches', (_event, cwd: string) => getGitBranches(cwd))
@@ -708,6 +727,15 @@ app.whenReady().then(() => {
   ipcMain.handle('browser-unregister', (_event, paneId: string) => {
     unregisterBrowser(paneId)
   })
+  ipcMain.handle('browser-resource-proxy-get', (_event, paneId: string) => {
+    return getBrowserResourceProxyConfig(paneId)
+  })
+  ipcMain.handle(
+    'browser-resource-proxy-set',
+    (_event, paneId: string, config: BrowserResourceProxyConfig) => {
+      return setBrowserResourceProxyConfig(paneId, config)
+    }
+  )
   ipcMain.handle('browser-get-mcp-url', () => {
     return `http://127.0.0.1:${getBrowserMcpPort()}/sse`
   })
@@ -719,9 +747,8 @@ app.whenReady().then(() => {
   })
 
   createWindow()
-  // 不再启动期自动 detectIdes —— hydrateIdeCache 已经让 UI 立即可用,真正的扫描
-  // 推迟到 cache miss(首次启动无 settings.cachedIdes)或用户点"重新检测"时。
-  // mac 上 system_profiler 一次扫 10+ 秒,启动期不该跟 PTY/git 抢线程池。
+  // 不在启动期自动 detectIdes。首次无缓存只显示系统入口,完整 IDE 扫描由用户
+  // 点击"重新检测"触发,避免 PowerShell/system_profiler 与 PTY、git 抢资源。
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

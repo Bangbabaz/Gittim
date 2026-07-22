@@ -27,6 +27,7 @@ import QuickCommandMenu from './components/QuickCommandMenu.vue'
 import QuickCommandsSettings from './components/QuickCommandsSettings.vue'
 import { useTheme, type ThemePref } from './composables/useTheme'
 import { useLayout } from './composables/useLayout'
+import { useTasks } from './composables/useTasks'
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToShortcut } from './shortcuts'
 import type {
   AgentSessionInfo,
@@ -92,6 +93,7 @@ const taskMgrNewDraft = ref(false)
 const autoOpenTasksOnRun = ref(true)
 const unifiedAgentSessions = ref(false)
 const autoUpdate = ref(true)
+const { selectTask } = useTasks()
 
 // 用户覆盖的快捷键(仅非默认值落盘)。下发给每个 Terminal,在 key handler 内
 // 与 DEFAULT_SHORTCUTS 合并。
@@ -336,6 +338,7 @@ const {
   onCwdChange,
   focusNeighbor,
   onDividerDown,
+  onDividerDoubleClick,
   onPaneDragStart,
   serializeLayout,
   restoreFromSaved
@@ -732,9 +735,8 @@ onMounted(async () => {
   watch([layout, paneCwd, paneTerminalState], scheduleSave, { deep: true })
 
   unsubscribeTaskStatus = window.api.onTaskStatus((meta) => {
-    // 任务开始运行时自动打开抽屉。selectedId 在启动前已被
-    // TaskRunner/TasksDrawer 设置,这里只负责展示抽屉。
     if (meta.status === 'running' && autoOpenTasksOnRun.value) {
+      selectTask(meta.id)
       showTasks.value = true
     }
   })
@@ -827,6 +829,9 @@ onUnmounted(() => {
       />
       <button class="tb-btn" title="查看任务" @click="openTasksDrawer">
         <ListChecks :size="14" />
+      </button>
+      <button class="tb-btn" title="SSH 远程终端" @click="openSshDialog">
+        <Server :size="14" />
       </button>
       <button class="tb-btn tb-folder" title="打开目录为新面板" @click="onOpenDirectory">
         <FolderOpen :size="14" />
@@ -1487,14 +1492,16 @@ onUnmounted(() => {
       </el-form-item>
     </el-form>
     <template #footer>
-      <button class="dialog-secondary-btn" @click="showSshDialog = false">取消</button>
-      <button
-        class="dialog-primary-btn"
-        :disabled="!sshDraft.host.trim() || !sshDraft.username.trim()"
-        @click="connectSsh"
-      >
-        连接
-      </button>
+      <div class="ssh-dialog-actions">
+        <button class="dialog-secondary-btn" @click="showSshDialog = false">取消</button>
+        <button
+          class="dialog-primary-btn"
+          :disabled="!sshDraft.host.trim() || !sshDraft.username.trim()"
+          @click="connectSsh"
+        >
+          连接
+        </button>
+      </div>
     </template>
   </el-dialog>
   <div class="workbench-root">
@@ -1538,7 +1545,6 @@ onUnmounted(() => {
             @cwd-change="onCwdChange"
             @font-size-change="onFontSizeChange"
             @open-settings="showSettings = true"
-            @open-ssh="openSshDialog"
             @manage-tasks="(cwd?: string, nd?: boolean) => openTaskManager(null, cwd ?? null, !!nd)"
             @open-agent-session="openAgentSession"
           />
@@ -1550,6 +1556,7 @@ onUnmounted(() => {
           :class="d.direction"
           :style="rectStyle(d.rect)"
           @mousedown="(e) => onDividerDown(e, i)"
+          @dblclick="(e) => onDividerDoubleClick(e, i)"
         ></div>
         <template v-if="paneDrag">
           <div v-if="draggedRect" class="pane-drag-source" :style="rectStyle(draggedRect)"></div>
@@ -2283,6 +2290,12 @@ onUnmounted(() => {
   .el-dialog__body {
     padding-top: 8px;
   }
+}
+
+.ssh-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .ssh-profile-list {

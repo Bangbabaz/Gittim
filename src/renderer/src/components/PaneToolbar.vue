@@ -31,7 +31,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   worktreeCreated: [path: string, placement: WorktreePlacement]
   manageTasks: [cwd?: string, newDraft?: boolean]
-  openSsh: []
   toggleAgentSessions: []
   toggleBrowser: []
   paneDragStart: []
@@ -227,11 +226,6 @@ async function onConflictDetected(): Promise<void> {
       :cwd="props.cwd"
       @manage-tasks="(cwd?: string, nd?: boolean) => emit('manageTasks', cwd, nd)"
     />
-    <el-tooltip content="SSH 远程终端" placement="bottom" :show-after="300">
-      <button class="ssh-btn" @click="emit('openSsh')">
-        <Server :size="14" />
-      </button>
-    </el-tooltip>
     <el-tooltip content="浏览器" placement="bottom" :show-after="300">
       <button class="browser-btn" @click="emit('toggleBrowser')">
         <Globe :size="14" />
