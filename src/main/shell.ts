@@ -262,6 +262,14 @@ export function startPty(webContents: WebContents, opts: PtyStartOpts): void {
     env.GITTIM_TERMINAL_MCP_URL = `http://127.0.0.1:${TERMINAL_MCP_PORT}/sse?paneId=${encodeURIComponent(opts.paneId)}&token=${terminalMcpToken}`
   }
 
+  // node-pty's `name` option sets TERM on Unix, but on Windows it only labels
+  // the PTY object. Advertise the emulated terminal explicitly so full-screen
+  // clients enable capabilities such as bracketed paste under ConPTY.
+  if (isWindows) {
+    env.TERM ||= 'xterm-256color'
+    env.COLORTERM ||= 'truecolor'
+  }
+
   const pty = spawn(shell, args, {
     name: 'xterm-256color',
     cols,

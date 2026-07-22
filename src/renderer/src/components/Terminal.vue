@@ -286,6 +286,32 @@ const copySelection = async (): Promise<void> => {
   }
 }
 
+const needsMultilinePasteFallback = (text: string): boolean =>
+  /[\r\n]/.test(text) &&
+  terminal.buffer.active.type === 'alternate' &&
+  (!terminal.modes.bracketedPasteMode || terminal.options.ignoreBracketedPasteMode === true)
+
+const pasteTerminalText = (text: string, protectMultiline = false): void => {
+  if (protectMultiline && needsMultilinePasteFallback(text)) {
+    // A full-screen TUI can become interactive before xterm has observed its
+    // DECSET 2004 state. Keep embedded newlines inside one paste event instead
+    // of exposing them to the application as Enter key presses.
+    const normalized = text.replace(/\r?\n/g, '\r')
+    window.api.ptyWrite(props.paneId, `\x1b[200~${normalized}\x1b[201~`)
+    return
+  }
+  terminal.paste(text)
+}
+
+const onTerminalPaste = (event: ClipboardEvent): void => {
+  const text = event.clipboardData?.getData('text/plain') ?? ''
+  if (!needsMultilinePasteFallback(text)) return
+
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  pasteTerminalText(text, true)
+}
+
 const pasteFromClipboard = async (): Promise<void> => {
   try {
     // 优先检查剪贴板中是否有图片。Electron 原生 clipboard API 可以直接读取
@@ -300,7 +326,7 @@ const pasteFromClipboard = async (): Promise<void> => {
   }
   try {
     const text = await navigator.clipboard.readText()
-    if (text) terminal.paste(text)
+    if (text) pasteTerminalText(text, true)
   } catch {
     // clipboard read denied or empty
   }
@@ -309,6 +335,16 @@ const pasteFromClipboard = async (): Promise<void> => {
 const platform =
   (window.electron as unknown as { process?: { platform?: string } }).process?.platform ?? ''
 const terminalInput = new TerminalInputHandler(platform)
+
+if (platform === 'win32') {
+  // Codex 0.145 and older enable focus reporting on Windows even though their
+  // crossterm input path can split ESC[I / ESC[O into ordinary key events.
+  // Prevent xterm from enabling that mode so focus changes cannot corrupt the
+  // TUI input state and make control keys such as Escape stop responding.
+  terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+    return params.length === 1 && params[0] === 1004
+  })
+}
 
 const onTerminalBeforeInput = (event: Event): void => {
   const e = event as InputEvent
@@ -803,6 +839,7 @@ onMounted(async () => {
   termElement = terminal.element ?? null
   termTextarea = terminal.textarea ?? null
   termElement?.addEventListener('contextmenu', onContextMenu)
+  termElement?.addEventListener('paste', onTerminalPaste, true)
   termTextarea?.addEventListener('focus', onTerminalFocus)
   termTextarea?.addEventListener('beforeinput', onTerminalBeforeInput)
   termTextarea?.addEventListener('input', onTerminalInput)
@@ -888,6 +925,7 @@ window.addEventListener('blur', closeContextMenu)
 onUnmounted(() => {
   window.removeEventListener('blur', closeContextMenu)
   termElement?.removeEventListener('contextmenu', onContextMenu)
+  termElement?.removeEventListener('paste', onTerminalPaste, true)
   termTextarea?.removeEventListener('focus', onTerminalFocus)
   termTextarea?.removeEventListener('beforeinput', onTerminalBeforeInput)
   termTextarea?.removeEventListener('input', onTerminalInput)
